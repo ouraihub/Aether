@@ -36,9 +36,11 @@ jobs:
         run: call scripts\msvc-env.bat
       - run: pnpm run check
       - name: Crate dependency rules (docs/00 §3)
-      - run: pnpm run kit:check-deps
-      - run: pnpm run kit:dto-check
-      - run: pnpm run kit:i18n
+        run: pnpm run kit:check-deps
+      - name: DTO contract check
+        run: pnpm run kit:dto-check
+      - name: i18n contract check
+        run: pnpm run kit:i18n
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features
