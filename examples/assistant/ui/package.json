@@ -1,0 +1,19 @@
+{
+  "name": "example-assistant-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "@ouraihub/aether-ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@tailwindcss/vite": "4.3.3",
+    "svelte": "5.57.1",
+    "tailwindcss": "4.3.3",
+    "vite": "8.3.4"
+  }
+}

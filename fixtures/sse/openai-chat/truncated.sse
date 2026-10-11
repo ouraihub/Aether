@@ -1,0 +1,12 @@
+data: {"id":"chatcmpl-B9MHDbslfkBeAs8l4bebGdFOJ6PeG","object":"chat.completion.chunk","created":1741570283,"model":"gpt-4o-2024-08-06","system_fingerprint":"fp_eb9dce56a8","choices":[{"index":0,"delta":{"role":"assistant","content":"","refusal":null},"logprobs":null,"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-B9MHDbslfkBeAs8l4bebGdFOJ6PeG","object":"chat.completion.chunk","created":1741570283,"model":"gpt-4o-2024-08-06","system_fingerprint":"fp_eb9dce56a8","choices":[{"index":0,"delta":{"content":"Here is a long story. Once upon"},"logprobs":null,"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-B9MHDbslfkBeAs8l4bebGdFOJ6PeG","object":"chat.completion.chunk","created":1741570283,"model":"gpt-4o-2024-08-06","system_fingerprint":"fp_eb9dce56a8","choices":[{"index":0,"delta":{"content":" a time there"},"logprobs":null,"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-B9MHDbslfkBeAs8l4bebGdFOJ6PeG","object":"chat.completion.chunk","created":1741570283,"model":"gpt-4o-2024-08-06","system_fingerprint":"fp_eb9dce56a8","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"length"}],"usage":null}
+
+data: {"id":"chatcmpl-B9MHDbslfkBeAs8l4bebGdFOJ6PeG","object":"chat.completion.chunk","created":1741570283,"model":"gpt-4o-2024-08-06","system_fingerprint":"fp_eb9dce56a8","choices":[],"usage":{"prompt_tokens":30,"completion_tokens":16,"total_tokens":46}}
+
+data: [DONE]
+

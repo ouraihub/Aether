@@ -1,0 +1,5 @@
+[toolchain]
+# Same pin as AutoNote / agent_installer so clippy output does not drift between repos.
+channel = "1.92.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

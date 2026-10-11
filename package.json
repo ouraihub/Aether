@@ -1,0 +1,32 @@
+{
+  "name": "aether",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "scripts": {
+    "lint": "eslint packages/ui/src",
+    "format:check": "prettier --check \"packages/ui/src/**/*.{ts,svelte}\" eslint.config.js scripts/*.mjs",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test",
+    "kit:check-deps": "node scripts/check-deps.mjs",
+    "kit:dto": "node scripts/dto-check.mjs --write",
+    "kit:dto-check": "node scripts/dto-check.mjs",
+    "kit:i18n": "node scripts/i18n-check.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.11.0",
+    "eslint-plugin-import-x": "4.17.1",
+    "eslint-plugin-svelte": "3.23.0",
+    "globals": "17.4.0",
+    "prettier": "3.9.9",
+    "prettier-plugin-svelte": "4.1.1",
+    "svelte": "5.57.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0"
+  }
+}

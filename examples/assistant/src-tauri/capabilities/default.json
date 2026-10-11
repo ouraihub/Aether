@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Main window. `aether:logs` is always compiled; feature sets are added at runtime only for enabled features (see main.rs).",
+  "windows": ["main"],
+  "permissions": ["core:default", "aether:logs"]
+}

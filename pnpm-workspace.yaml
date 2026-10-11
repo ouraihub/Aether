@@ -1,0 +1,10 @@
+packages:
+  - packages/*
+  - examples/mcp-server-only/ui
+  - examples/providers-only/ui
+  - examples/assistant/ui
+
+allowBuilds:
+  unrs-resolver: false
+
+nodeLinker: hoisted

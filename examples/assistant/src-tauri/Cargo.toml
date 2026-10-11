@@ -1,0 +1,32 @@
+[package]
+name = "example-assistant"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# `--no-default-features` builds the same window without any aether feature, to prove that
+# disabled commands are not registered (docs/90 C1-1). `--no-default-features --features aether`
+# is chat without skills; `aether,skills` is the "skills without MCP" combination (docs/90 SK3-3).
+[features]
+default = ["aether", "skills", "mcp-client"]
+aether = ["dep:aether-providers", "dep:aether-chat", "dep:async-trait", "dep:serde_json", "tauri-plugin-aether/providers", "tauri-plugin-aether/chat"]
+skills = ["aether", "dep:aether-skills", "tauri-plugin-aether/skills"]
+mcp-client = ["aether", "dep:aether-mcp-client", "tauri-plugin-aether/mcp-client"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+async-trait = { workspace = true, optional = true }
+aether-observability.workspace = true
+aether-providers = { workspace = true, optional = true }
+aether-chat = { workspace = true, optional = true }
+aether-skills = { workspace = true, optional = true }
+aether-mcp-client = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tauri.workspace = true
+tauri-plugin-aether.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

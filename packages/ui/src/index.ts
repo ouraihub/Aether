@@ -1,0 +1,8 @@
+// Root entry: host wiring shared by every capability (docs/16 §3, §5). Capabilities live under subpaths.
+export { getKitContext, setKitContext } from './context'
+export type { ConfirmOptions, KitContext, KitLogger, KitNotify, LogFields } from './context'
+export { createI18n } from './i18n'
+export type { KitI18n, Messages } from './i18n'
+export { renderMarkdown } from './markdown'
+export { createDefaultNotify, DefaultNotify } from './notify.svelte'
+export { default as KitNotifier } from './KitNotifier.svelte'

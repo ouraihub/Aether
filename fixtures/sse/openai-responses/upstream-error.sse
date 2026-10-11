@@ -1,0 +1,9 @@
+event: response.created
+data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_67ccd2bed1ec8190b14f964abc0542670bb6a6b452d3795b","object":"response","created_at":1741476542,"status":"in_progress","model":"gpt-4.1-2025-04-14","output":[],"incomplete_details":null,"usage":null}}
+
+event: response.in_progress
+data: {"type":"response.in_progress","sequence_number":1,"response":{"id":"resp_67ccd2bed1ec8190b14f964abc0542670bb6a6b452d3795b","object":"response","created_at":1741476542,"status":"in_progress","model":"gpt-4.1-2025-04-14","output":[],"incomplete_details":null,"usage":null}}
+
+event: response.failed
+data: {"type":"response.failed","sequence_number":2,"response":{"id":"resp_67ccd2bed1ec8190b14f964abc0542670bb6a6b452d3795b","object":"response","created_at":1741476542,"status":"failed","model":"gpt-4.1-2025-04-14","output":[],"incomplete_details":null,"usage":null,"error":{"code":"server_error","message":"The model failed to generate a response."}}}
+

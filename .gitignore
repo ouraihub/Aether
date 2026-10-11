@@ -1,0 +1,23 @@
+# Build output
+target/
+node_modules/
+dist/
+.svelte-kit/
+examples/*/src-tauri/gen/
+plugin/tauri-plugin-aether/permissions/
+
+# Runtime data (portable data dir next to the exe lives under target/)
+*.db
+*.db-wal
+*.db-shm
+*.db.bak-v*
+*.log
+*.log.[0-9]*
+
+# Secrets
+.env
+key.txt
+
+# Local AI tooling, per developer
+.claude/
+.omp/

@@ -1,0 +1,18 @@
+[package]
+name = "example-mcp-server-only"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+aether-mcp-server.workspace = true
+aether-observability.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+tauri-plugin-aether = { workspace = true, features = ["mcp-server"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,36 @@
+event: response.created
+data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_67ccd2bed1ec8190b14f964abc0542670bb6a6b452d3795b","object":"response","created_at":1741476542,"status":"in_progress","model":"gpt-4.1-2025-04-14","output":[],"incomplete_details":null,"usage":null}}
+
+event: response.in_progress
+data: {"type":"response.in_progress","sequence_number":1,"response":{"id":"resp_67ccd2bed1ec8190b14f964abc0542670bb6a6b452d3795b","object":"response","created_at":1741476542,"status":"in_progress","model":"gpt-4.1-2025-04-14","output":[],"incomplete_details":null,"usage":null}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"fc_aaa111","type":"function_call","status":"in_progress","arguments":"","call_id":"call_aaa111","name":"read_file"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":3,"item_id":"fc_aaa111","output_index":0,"delta":"{\"path\":"}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":4,"item_id":"fc_aaa111","output_index":0,"delta":"\"notes/a.md\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","sequence_number":5,"item_id":"fc_aaa111","output_index":0,"arguments":"{\"path\":\"notes/a.md\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":6,"output_index":0,"item":{"id":"fc_aaa111","type":"function_call","status":"completed","arguments":"{\"path\":\"notes/a.md\"}","call_id":"call_aaa111","name":"read_file"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":7,"output_index":1,"item":{"id":"fc_bbb222","type":"function_call","status":"in_progress","arguments":"","call_id":"call_bbb222","name":"read_file"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":8,"item_id":"fc_bbb222","output_index":1,"delta":"{\"path\":\"notes/b.md\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","sequence_number":9,"item_id":"fc_bbb222","output_index":1,"arguments":"{\"path\":\"notes/b.md\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":10,"output_index":1,"item":{"id":"fc_bbb222","type":"function_call","status":"completed","arguments":"{\"path\":\"notes/b.md\"}","call_id":"call_bbb222","name":"read_file"}}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":11,"response":{"id":"resp_67ccd2bed1ec8190b14f964abc0542670bb6a6b452d3795b","object":"response","created_at":1741476542,"status":"completed","model":"gpt-4.1-2025-04-14","output":[],"incomplete_details":null,"usage":{"input_tokens":98,"input_tokens_details":{"cached_tokens":0},"output_tokens":40,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":138}}}
+

@@ -1,0 +1,27 @@
+event: response.created
+data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_67ccd2bed1ec8190b14f964abc0542670bb6a6b452d3795b","object":"response","created_at":1741476542,"status":"in_progress","model":"gpt-4.1-2025-04-14","output":[],"incomplete_details":null,"usage":null}}
+
+event: response.in_progress
+data: {"type":"response.in_progress","sequence_number":1,"response":{"id":"resp_67ccd2bed1ec8190b14f964abc0542670bb6a6b452d3795b","object":"response","created_at":1741476542,"status":"in_progress","model":"gpt-4.1-2025-04-14","output":[],"incomplete_details":null,"usage":null}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"fc_12345xyz","type":"function_call","status":"in_progress","arguments":"","call_id":"call_12345xyz","name":"get_weather"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":3,"item_id":"fc_12345xyz","output_index":0,"delta":"{\""}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":4,"item_id":"fc_12345xyz","output_index":0,"delta":"city\":\""}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","sequence_number":5,"item_id":"fc_12345xyz","output_index":0,"delta":"Paris\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","sequence_number":6,"item_id":"fc_12345xyz","output_index":0,"arguments":"{\"city\":\"Paris\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":7,"output_index":0,"item":{"id":"fc_12345xyz","type":"function_call","status":"completed","arguments":"{\"city\":\"Paris\"}","call_id":"call_12345xyz","name":"get_weather"}}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":8,"response":{"id":"resp_67ccd2bed1ec8190b14f964abc0542670bb6a6b452d3795b","object":"response","created_at":1741476542,"status":"completed","model":"gpt-4.1-2025-04-14","output":[],"incomplete_details":null,"usage":{"input_tokens":64,"input_tokens_details":{"cached_tokens":0},"output_tokens":15,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":79}}}
+

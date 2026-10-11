@@ -1,0 +1,131 @@
+// The only directory allowed to import @tauri-apps/* (ESLint enforces): createTauriPorts() (docs/16 §2).
+// Argument names are the camelCase of the Rust command parameters (docs/15 §5).
+import { Channel, invoke } from '@tauri-apps/api/core'
+import { KitClientError } from '../ports'
+import type { KitError, KitPorts, RunAccepted, RunEvent } from '../ports'
+
+/** Which feature ports the host enabled; the rest stay absent so their UI areas are hidden. */
+export interface TauriPortsOptions {
+  providers?: boolean
+  chat?: boolean
+  /** The host passed a conversation store (`aether:chat-history`); needs `chat`. */
+  chatHistory?: boolean
+  skills?: boolean
+  mcpClient?: boolean
+  mcpServer?: boolean
+}
+
+const CANCELLED: KitError = { code: 'cancelled', message: 'cancelled' }
+
+/** Invokes `plugin:kit|<command>` and turns any rejection into a KitClientError at the boundary. */
+async function call<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+  try {
+    return await invoke<T>(`plugin:kit|${command}`, args)
+  } catch (error) {
+    const isKitError =
+      typeof error === 'object' &&
+      error !== null &&
+      typeof (error as Partial<KitError>).code === 'string' &&
+      typeof (error as Partial<KitError>).message === 'string'
+    throw new KitClientError(isKitError ? (error as KitError) : { code: 'internal', message: String(error) })
+  }
+}
+
+export function createTauriPorts(options: TauriPortsOptions = {}): KitPorts {
+  const ports: KitPorts = {
+    logs: {
+      tail: (limit) => call('logs_tail', { limit }),
+      ingest: (batch) => call('logs_ingest', { batch }),
+      openDir: () => call('logs_open_dir'),
+      getLevel: () => call('logs_get_level'),
+      setLevel: (level) => call('logs_set_level', { level }),
+    },
+  }
+  if (options.providers) {
+    ports.providers = {
+      list: () => call('providers_list'),
+      save: (input) => call('providers_save', { input }),
+      remove: (id) => call('providers_delete', { id }),
+      modelOptions: (filter = {}) => call('providers_model_options', { filter }),
+      // Aborting calls providers_cancel; the pending probe then rejects with `cancelled`.
+      probe: async (target, callOptions) => {
+        const signal = callOptions?.signal
+        if (signal?.aborted) throw new KitClientError(CANCELLED)
+        const jobId = crypto.randomUUID()
+        const cancel = () => void call('providers_cancel', { jobId }).catch(() => undefined)
+        signal?.addEventListener('abort', cancel, { once: true })
+        try {
+          return await call('providers_probe', { jobId, target })
+        } finally {
+          signal?.removeEventListener('abort', cancel)
+        }
+      },
+    }
+  }
+  if (options.chat) {
+    ports.chat = {
+      // Resolves on acceptance; aborting afterwards calls chat_cancel and the run ends with `cancelled`.
+      run: async (request, onEvent, callOptions) => {
+        const signal = callOptions?.signal
+        if (signal?.aborted) throw new KitClientError(CANCELLED)
+        const accepted = await call<RunAccepted>('chat_run', { request, onEvent: new Channel<RunEvent>(onEvent) })
+        const cancel = () => void call('chat_cancel', { runId: accepted.runId }).catch(() => undefined)
+        if (signal?.aborted) cancel()
+        else signal?.addEventListener('abort', cancel, { once: true })
+        return accepted
+      },
+      approve: async (runId, callId, allow) => {
+        await call('chat_approve', { runId, callId, allow })
+      },
+    }
+    if (options.chatHistory) {
+      ports.chat.history = {
+        list: (scope) => call('chat_conversations', { scope: scope ?? null }),
+        get: (id) => call('chat_conversation', { id }),
+        remove: async (id) => {
+          await call('chat_delete', { id })
+        },
+        rename: (id, title) => call('chat_rename', { id, title }),
+      }
+    }
+  }
+  if (options.skills) {
+    ports.skills = {
+      list: () => call('skills_list'),
+      get: (id) => call('skills_get', { id }),
+      save: (input) => call('skills_save', { input }),
+      preview: (source) => call('skills_preview', { source }),
+      install: (source, confirmedDigest, replace) => call('skills_install', { source, confirmedDigest, replace }),
+      duplicate: (id, newName) => call('skills_duplicate', { id, newName }),
+      reorder: (ids) => call('skills_reorder', { ids }),
+      remove: (id) => call('skills_delete', { id }),
+    }
+  }
+  if (options.mcpClient) {
+    ports.mcpClient = {
+      list: () => call('mcp_client_list'),
+      save: (input) => call('mcp_client_save', { input }),
+      remove: (id) => call('mcp_client_delete', { id }),
+      refresh: (serverId) => call('mcp_client_refresh', { serverId }),
+      setToolApproval: async (serverId, tool, approval) => {
+        await call('mcp_client_set_tool_approval', { serverId, tool, approval })
+      },
+    }
+  }
+  if (options.mcpServer) {
+    ports.mcpServer = {
+      status: () => call('mcp_server_status'),
+      tokens: () => call('mcp_server_tokens'),
+      start: () => call('mcp_server_start'),
+      stop: () => call('mcp_server_stop'),
+      setPort: (port) => call('mcp_server_set_port', { port }),
+      issueToken: (name, scopes) => call('mcp_server_issue_token', { name, scopes }),
+      revokeToken: async (id) => {
+        await call('mcp_server_revoke_token', { id })
+      },
+      scopes: () => call('mcp_server_scopes'),
+      setScopes: (ids) => call('mcp_server_set_scopes', { ids }),
+    }
+  }
+  return ports
+}

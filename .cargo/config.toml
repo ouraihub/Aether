@@ -1,0 +1,3 @@
+# ts-rs writes `#[ts(export)]` DTOs here during `cargo test` (docs/00 §7.5; checked by `pnpm aether:dto-check`).
+[env]
+TS_RS_EXPORT_DIR = { value = "packages/ui/src/ports/generated", relative = true }
