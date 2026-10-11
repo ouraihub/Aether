@@ -15,7 +15,10 @@
     "kit:check-deps": "node scripts/check-deps.mjs",
     "kit:dto": "node scripts/dto-check.mjs --write",
     "kit:dto-check": "node scripts/dto-check.mjs",
-    "kit:i18n": "node scripts/i18n-check.mjs"
+    "kit:i18n": "node scripts/i18n-check.mjs",
+    "aether:check-deps": "pnpm run kit:check-deps",
+    "aether:dto-check": "pnpm run kit:dto-check",
+    "aether:i18n": "pnpm run kit:i18n"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
