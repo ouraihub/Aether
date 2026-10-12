@@ -103,7 +103,8 @@ export interface McpServerPort {
 
 /** Ports the host declared; components skip the area of a missing port (docs/16 §2). */
 export interface KitPorts {
-  logs: LogsPort
+  /** Absent on hosts without a local log file, such as a browser. */
+  logs?: LogsPort
   providers?: ProvidersPort
   chat?: ChatPort
   skills?: SkillsPort

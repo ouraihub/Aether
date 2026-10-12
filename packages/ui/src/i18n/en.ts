@@ -21,6 +21,7 @@ export const en: Messages = {
   'chat.stopped': 'Stopped',
   'chat.interrupted': 'Interrupted: the app closed during this reply',
   'chat.exhausted': 'Reached the tool call round limit',
+  'chat.context.remove': 'Do not send {label} with the next message',
   'chat.tool.calling': 'Calling {name}',
   'chat.tool.ok': '{name}: {summary}',
   'chat.tool.error': '{name} failed: {summary}',

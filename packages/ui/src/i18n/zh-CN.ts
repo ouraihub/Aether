@@ -17,6 +17,7 @@ export const zhCN: Messages = {
   'chat.stopped': '已停止',
   'chat.interrupted': '已中断：回复过程中应用被关闭',
   'chat.exhausted': '已达到工具调用轮数上限',
+  'chat.context.remove': '下一条消息不附带 {label}',
   'chat.tool.calling': '正在调用 {name}',
   'chat.tool.ok': '{name}：{summary}',
   'chat.tool.error': '{name} 失败：{summary}',

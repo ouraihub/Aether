@@ -1,6 +1,16 @@
 // One conversation in the panel: turns, the active run and its abort (docs/16 §4.2, §7 trap 4).
 import { isKitClientError } from '../ports'
-import type { ChatPort, KitError, ModelRef, RunEvent, SkillRef, ToolOutcome, Turn, TurnStatus } from '../ports'
+import type {
+  ChatPort,
+  ContextRef,
+  KitError,
+  ModelRef,
+  RunEvent,
+  SkillRef,
+  ToolOutcome,
+  Turn,
+  TurnStatus,
+} from '../ports'
 
 /** One tool call of a turn, as shown by ToolCallItem / ApprovalCard. */
 export interface ToolItem {
@@ -32,6 +42,7 @@ export interface RunBase {
   language: string
   model: ModelRef | null
   skills: SkillRef[]
+  context: ContextRef | null
 }
 
 export class RunSession {
@@ -152,6 +163,7 @@ export class RunSession {
       purpose: base.purpose,
       model: base.model,
       skills: base.skills,
+      context: base.context,
       input: regenerate ? '' : input,
       conversationId: this.conversationId,
       scope: base.scope,

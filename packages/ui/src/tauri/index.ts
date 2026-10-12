@@ -2,7 +2,7 @@
 // Argument names are the camelCase of the Rust command parameters (docs/15 §5).
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { KitClientError } from '../ports'
-import type { KitError, KitPorts, RunAccepted, RunEvent } from '../ports'
+import type { KitError, KitPorts, LogsPort, RunAccepted, RunEvent } from '../ports'
 
 /** Which feature ports the host enabled; the rest stay absent so their UI areas are hidden. */
 export interface TauriPortsOptions {
@@ -31,8 +31,9 @@ async function call<T>(command: string, args: Record<string, unknown> = {}): Pro
   }
 }
 
-export function createTauriPorts(options: TauriPortsOptions = {}): KitPorts {
-  const ports: KitPorts = {
+/** The plugin always registers the log commands, so desktop hosts always get `logs`. */
+export function createTauriPorts(options: TauriPortsOptions = {}): KitPorts & { logs: LogsPort } {
+  const ports: KitPorts & { logs: LogsPort } = {
     logs: {
       tail: (limit) => call('logs_tail', { limit }),
       ingest: (batch) => call('logs_ingest', { batch }),

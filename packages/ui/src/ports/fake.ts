@@ -3,7 +3,7 @@ import { KitClientError } from './contract'
 import type { ChatPort, KitPorts, LogsPort, McpClientPort, McpServerPort, ProvidersPort, SkillsPort } from './contract'
 import type { LogLevel } from './generated/LogLevel'
 
-type PortName = Exclude<keyof KitPorts, 'logs'>
+type PortName = keyof KitPorts
 
 export interface FakePortsOptions {
   logs?: Partial<LogsPort>

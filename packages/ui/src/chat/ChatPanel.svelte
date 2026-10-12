@@ -1,6 +1,7 @@
 <script lang="ts">
   // Chat (docs/16 §4.2): model, skills, optional history, markdown turns with tool calls and approvals, composer, stop, regenerate.
   // Unmounting aborts the active run, which calls chat_cancel (docs/16 §7 trap 4).
+  import XIcon from '@lucide/svelte/icons/x'
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Select from '#lib/components/ui/select/index.js'
   import { Textarea } from '#lib/components/ui/textarea/index.js'
@@ -15,6 +16,7 @@
     purpose = 'chat',
     model = null,
     scope,
+    context = null,
     skills,
     onSkillsChange,
     skillsBudget = 48_000,
@@ -24,6 +26,8 @@
     /** App default; the panel may switch it for itself. */
     model?: ModelRef | null
     scope?: string
+    /** Host data sent with each run; shown as a chip the user can drop for one message. */
+    context?: { kind: string; id: string; label: string } | null
     /** Controlled selection; without it the panel keeps its own. */
     skills?: SkillRef[]
     onSkillsChange?: (refs: SkillRef[]) => void
@@ -49,7 +53,18 @@
     ownSkills = refs
     onSkillsChange?.(refs)
   }
-  const base = $derived({ purpose, scope: scope ?? null, language: i18n.locale, model: picked, skills: selected })
+  // Key of the context the user removed; a new context brings the chip back.
+  let droppedKey = $state<string | null>(null)
+  const contextKey = $derived(context ? `${context.kind}:${context.id}` : null)
+  const activeContext = $derived(context && contextKey !== droppedKey ? context : null)
+  const base = $derived({
+    purpose,
+    scope: scope ?? null,
+    language: i18n.locale,
+    model: picked,
+    skills: selected,
+    context: activeContext ? { kind: activeContext.kind, id: activeContext.id } : null,
+  })
   const canRegenerate = $derived(session !== null && !session.running && session.turns.length > 0)
 
   async function refresh() {
@@ -86,6 +101,7 @@
     if (!session || input === '' || session.running) return
     draft = ''
     session.send(base, input)
+    droppedKey = null
   }
 </script>
 
@@ -139,6 +155,21 @@
           onchange={setSkills}
           onresolved={() => (session.skillChanged = null)}
         />
+      {/if}
+      {#if activeContext}
+        <div class="flex">
+          <span class="bg-muted flex max-w-full items-center gap-1 rounded-md py-0.5 pr-0.5 pl-2 text-xs">
+            <span class="truncate">{activeContext.label}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              class="size-5"
+              aria-label={t('chat.context.remove', { label: activeContext.label })}
+              onclick={() => (droppedKey = contextKey)}><XIcon /></Button
+            >
+          </span>
+        </div>
       {/if}
       <Textarea
         bind:value={draft}

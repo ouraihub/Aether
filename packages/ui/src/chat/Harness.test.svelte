@@ -4,9 +4,13 @@
   import type { ModelRef } from '../ports'
   import ChatPanel from './ChatPanel.svelte'
 
-  let { kit, model }: { kit: KitContext; model: ModelRef } = $props()
+  let {
+    kit,
+    model,
+    context = null,
+  }: { kit: KitContext; model: ModelRef; context?: { kind: string; id: string; label: string } | null } = $props()
   // svelte-ignore state_referenced_locally
   setKitContext(kit)
 </script>
 
-<ChatPanel {model} />
+<ChatPanel {model} {context} />

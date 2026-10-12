@@ -42,7 +42,7 @@ export interface ChatPort {
   approve(runId: string, callId: string, allow: boolean): Promise<void>
   history?: { list(scope?: string); get(id: string); remove(id: string); rename(id: string, title: string) }  // 无 store 时缺省
 }
-export interface KitPorts { logs: LogsPort; providers?: ProvidersPort; chat?: ChatPort; skills?: SkillsPort; mcpClient?: McpClientPort; mcpServer?: McpServerPort }
+export interface KitPorts { logs?: LogsPort; providers?: ProvidersPort; chat?: ChatPort; skills?: SkillsPort; mcpClient?: McpClientPort; mcpServer?: McpServerPort }  // logs 缺省：宿主没有本地日志文件（如浏览器）
 ```
 
 - 签名中的 DTO 均来自 `ports/generated`。`SkillsPort`、`McpClientPort`、`McpServerPort`、`LogsPort` 与 15 文档 §5 命令一一对应。

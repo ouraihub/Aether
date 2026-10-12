@@ -13,6 +13,7 @@
 
   const { ports, i18n, notify } = getKitContext()
   const t = i18n.t
+  const logs = ports.logs
 
   let entries = $state<LogEntry[]>([])
   let failed = $state(false)
@@ -20,8 +21,9 @@
   const shown = $derived(problemsOnly ? entries.filter((e) => e.level === 'ERROR' || e.level === 'WARN') : entries)
 
   async function refresh() {
+    if (!logs) return
     try {
-      entries = await ports.logs.tail(LIMIT)
+      entries = await logs.tail(LIMIT)
       failed = false
     } catch {
       failed = true
@@ -29,6 +31,7 @@
   }
 
   $effect(() => {
+    if (!logs) return
     let timer: number | undefined
     const sync = () => {
       window.clearInterval(timer)
@@ -47,44 +50,46 @@
 
   async function openDir() {
     try {
-      await ports.logs.openDir()
+      await logs?.openDir()
     } catch {
       notify.toast('error', t('errors.internal'))
     }
   }
 </script>
 
-<section class="flex min-h-0 flex-1 flex-col gap-3" aria-label={t('logs.title')}>
-  <header class="flex items-center gap-3">
-    <h2 class="text-base font-medium">{t('logs.title')}</h2>
-    <label class="ml-auto flex items-center gap-2 text-sm">
-      <Switch bind:checked={problemsOnly} />
-      {t('logs.problemsOnly')}
-    </label>
-    <Button variant="outline" size="sm" onclick={() => void openDir()}>{t('logs.openDir')}</Button>
-  </header>
-  {#if failed}
-    <Alert variant="destructive"><AlertDescription>{t('logs.loadFailed')}</AlertDescription></Alert>
-  {/if}
-  {#if shown.length === 0}
-    <Empty.Root>
-      <Empty.Header><Empty.Title>{t('logs.empty')}</Empty.Title></Empty.Header>
-    </Empty.Root>
-  {:else}
-    <ol class="bg-muted min-h-0 flex-1 overflow-auto rounded-md p-2 font-mono text-xs">
-      {#each shown as entry (entry.seq)}
-        <li
-          class={cn(
-            'break-all whitespace-pre-wrap',
-            entry.level === 'ERROR' && 'text-destructive',
-            (entry.level === 'DEBUG' || entry.level === 'TRACE') && 'text-muted-foreground',
-          )}
-        >
-          {entry.time}
-          {entry.level}
-          {entry.target}: {entry.message}
-        </li>
-      {/each}
-    </ol>
-  {/if}
-</section>
+{#if logs}
+  <section class="flex min-h-0 flex-1 flex-col gap-3" aria-label={t('logs.title')}>
+    <header class="flex items-center gap-3">
+      <h2 class="text-base font-medium">{t('logs.title')}</h2>
+      <label class="ml-auto flex items-center gap-2 text-sm">
+        <Switch bind:checked={problemsOnly} />
+        {t('logs.problemsOnly')}
+      </label>
+      <Button variant="outline" size="sm" onclick={() => void openDir()}>{t('logs.openDir')}</Button>
+    </header>
+    {#if failed}
+      <Alert variant="destructive"><AlertDescription>{t('logs.loadFailed')}</AlertDescription></Alert>
+    {/if}
+    {#if shown.length === 0}
+      <Empty.Root>
+        <Empty.Header><Empty.Title>{t('logs.empty')}</Empty.Title></Empty.Header>
+      </Empty.Root>
+    {:else}
+      <ol class="bg-muted min-h-0 flex-1 overflow-auto rounded-md p-2 font-mono text-xs">
+        {#each shown as entry (entry.seq)}
+          <li
+            class={cn(
+              'break-all whitespace-pre-wrap',
+              entry.level === 'ERROR' && 'text-destructive',
+              (entry.level === 'DEBUG' || entry.level === 'TRACE') && 'text-muted-foreground',
+            )}
+          >
+            {entry.time}
+            {entry.level}
+            {entry.target}: {entry.message}
+          </li>
+        {/each}
+      </ol>
+    {/if}
+  </section>
+{/if}

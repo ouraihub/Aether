@@ -12,7 +12,7 @@ interface Run {
   signal: AbortSignal | undefined
 }
 
-function setup(withHistory: boolean) {
+function setup(withHistory: boolean, context: { kind: string; id: string; label: string } | null = null) {
   const runs: Run[] = []
   const approve = vi.fn<(runId: string, callId: string, allow: boolean) => Promise<void>>(() => Promise.resolve())
   const ports = createFakePorts({
@@ -33,7 +33,7 @@ function setup(withHistory: boolean) {
   if (!withHistory && ports.chat) delete ports.chat.history
   const notify = { toast: vi.fn(), confirm: () => Promise.resolve(true) }
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
-  const view = render(Harness, { kit: { ports, i18n: createI18n('en'), notify, logger }, model })
+  const view = render(Harness, { props: { kit: { ports, i18n: createI18n('en'), notify, logger }, model, context } })
   return { runs, view, approve }
 }
 
@@ -73,6 +73,21 @@ describe('ChatPanel', () => {
     await screen.findByText('Authentication failed, check the key')
     await fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
     expect(runs[1]?.request).toMatchObject({ input: 'one', regenerate: false, conversationId: null })
+  })
+
+  it('sends the host context, drops it for one message when removed, then sends it again', async () => {
+    const { runs } = setup(false, { kind: 'note', id: 'n1', label: 'Draft' })
+    await send('one')
+    expect(runs[0]?.request.context).toEqual({ kind: 'note', id: 'n1' })
+    runs[0]?.emit({ kind: 'end', status: 'completed' })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Do not send Draft with the next message' }))
+    expect(screen.queryByText('Draft')).toBeNull()
+    await send('two')
+    expect(runs[1]?.request.context).toBeNull()
+    runs[1]?.emit({ kind: 'end', status: 'completed' })
+    await screen.findByText('Draft')
+    await send('three')
+    expect(runs[2]?.request.context).toEqual({ kind: 'note', id: 'n1' })
   })
 
   it('unmounting aborts the running run', async () => {

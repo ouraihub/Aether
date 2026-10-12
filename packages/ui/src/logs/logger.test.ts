@@ -8,14 +8,15 @@ function setup(
     Promise.resolve({ accepted: b.entries.length, rejected: 0 }),
 ) {
   const batches: IngestBatch[] = []
-  const logs = createFakePorts({
+  const { logs } = createFakePorts({
     logs: {
       ingest: (batch) => {
         batches.push(structuredClone(batch))
         return ingest(batch)
       },
     },
-  }).logs
+  })
+  if (!logs) throw new Error('fake ports always include logs')
   return { batches, logger: createLogger(logs) }
 }
 
