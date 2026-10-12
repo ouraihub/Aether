@@ -31,7 +31,7 @@ describe('createTauriPorts', () => {
       'exists',
       'exists',
     ])
-    expect(invokeMock).toHaveBeenCalledWith('plugin:kit|skills_list', {})
+    expect(invokeMock).toHaveBeenCalledWith('plugin:aether|skills_list', {})
   })
 
   it('maps a plain Tauri error (e.g. ACL rejection) to internal', async () => {
@@ -48,7 +48,7 @@ describe('createTauriPorts', () => {
   it('aborting a probe calls providers_cancel with the same job id', async () => {
     const controller = new AbortController()
     invokeMock.mockImplementation((command) => {
-      if (command === 'plugin:kit|providers_probe') {
+      if (command === 'plugin:aether|providers_probe') {
         controller.abort()
         return Promise.reject({ code: 'cancelled', message: 'cancelled' })
       }
@@ -59,7 +59,7 @@ describe('createTauriPorts', () => {
       .catch((caught: unknown) => caught)
     expect(isKitClientError(error) && error.code).toBe('cancelled')
     const probeArgs = invokeMock.mock.calls[0]?.[1] as { jobId: string }
-    expect(invokeMock.mock.calls[1]).toEqual(['plugin:kit|providers_cancel', { jobId: probeArgs.jobId }])
+    expect(invokeMock.mock.calls[1]).toEqual(['plugin:aether|providers_cancel', { jobId: probeArgs.jobId }])
   })
 
   it('aborting an accepted run calls chat_cancel once', async () => {
@@ -72,7 +72,10 @@ describe('createTauriPorts', () => {
     })
     controller.abort()
     controller.abort()
-    expect(invokeMock.mock.calls.map(([command]) => command)).toEqual(['plugin:kit|chat_run', 'plugin:kit|chat_cancel'])
+    expect(invokeMock.mock.calls.map(([command]) => command)).toEqual([
+      'plugin:aether|chat_run',
+      'plugin:aether|chat_cancel',
+    ])
     expect(invokeMock.mock.calls[1]?.[1]).toEqual({ runId: 'r1' })
   })
 

@@ -17,10 +17,10 @@ export interface TauriPortsOptions {
 
 const CANCELLED: KitError = { code: 'cancelled', message: 'cancelled' }
 
-/** Invokes `plugin:kit|<command>` and turns any rejection into a KitClientError at the boundary. */
+/** Invokes `plugin:aether|<command>` and turns any rejection into a KitClientError at the boundary. */
 async function call<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
   try {
-    return await invoke<T>(`plugin:kit|${command}`, args)
+    return await invoke<T>(`plugin:aether|${command}`, args)
   } catch (error) {
     const isKitError =
       typeof error === 'object' &&
