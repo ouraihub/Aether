@@ -1,0 +1,57 @@
+{
+  "skill_name": "aether",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add Aether streaming chat with persistent history to a Tauri host that already uses providers. Show the required Rust Builder setup, host integration, UI ports, and capability permissions.",
+      "expected_output": "A feature-consistent integration using providers plus chat, observability before tauri::Builder, a ConversationStore passed to chat, KitHost boundaries, createTauriPorts with chatHistory, and matching permissions.",
+      "files": [],
+      "expectations": [
+        "Does not call Builder.chat without Builder.providers",
+        "Initializes observability before tauri::Builder",
+        "Passes a conversation store when persistent history is requested",
+        "Separates compile-time features from Tauri capability permissions",
+        "Uses @ouraihub/aether-ui/tauri for ports rather than importing Tauri APIs in components"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Add Skills to an Aether chat application and explain how a changed Skill is handled while a run is being started.",
+      "expected_output": "A Skills store and UI port are enabled; selected Skills use id plus revision; the backend snapshots the revision, rejects a changed revision, and does not grant tools or silently truncate content.",
+      "files": [],
+      "expectations": [
+        "Treats Skills as instruction content rather than a permission grant",
+        "Preserves id plus revision for selected Skills",
+        "Handles revision conflict as an explicit re-confirmation flow",
+        "Does not execute imported Skill scripts",
+        "Does not silently discard over-budget Skill content"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Review this proposed Aether MCP integration: enable mcp-client, automatically approve every discovered tool, log raw tool arguments for debugging, and let the frontend pass an API key directly to the MCP URL. Identify and correct the security problems.",
+      "expected_output": "The review rejects automatic approval as a default, raw argument logging, and credentials in URLs or frontend state; it requires backend secret handling, trust and scope checks, typed redacted logging, and host authorization.",
+      "files": [],
+      "expectations": [
+        "Requires explicit MCP trust and approval policy",
+        "Keeps secrets in the backend and out of URLs and DTOs",
+        "Rejects raw tool arguments in logs",
+        "Preserves the host as the final authorization boundary",
+        "Distinguishes cancellation with possible side effects as unknown"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "A ChatPanel test invokes real Tauri commands, hand-writes a RunEvent type, and expects ChatPort.run to resolve only after the assistant message is complete. Fix the test design according to Aether's contracts.",
+      "expected_output": "The test injects createFakePorts, imports generated DTO types, treats run resolution as acceptance, and asserts event-driven terminal behavior including cancellation.",
+      "files": [],
+      "expectations": [
+        "Uses createFakePorts instead of real Tauri IPC",
+        "Uses generated DTO types instead of duplicate hand-written shapes",
+        "Treats ChatPort.run resolution as acceptance",
+        "Asserts end events for completion and cancellation",
+        "Tests observable behavior rather than forwarding implementation"
+      ]
+    }
+  ]
+}
