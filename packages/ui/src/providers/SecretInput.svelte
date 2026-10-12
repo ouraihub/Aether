@@ -37,7 +37,7 @@
 
 <div class="flex items-center gap-2">
   {#if value === ''}
-    <span class="text-muted-foreground flex-1 text-sm">{t('providers.key_cleared')}</span>
+    <span class="text-muted-foreground flex-1 text-kit-sm">{t('providers.key_cleared')}</span>
     <Button variant="outline" size="sm" onclick={reset}>{t('providers.key_undo')}</Button>
   {:else if editing}
     <Input
@@ -52,7 +52,7 @@
       <Button variant="outline" size="sm" onclick={reset}>{t('common.cancel')}</Button>
     {/if}
   {:else}
-    <span {id} class="flex-1 font-mono text-sm">
+    <span {id} class="flex-1 font-mono text-kit-sm">
       {saved?.keyReadable ? saved.keyMasked : t('providers.key_unreadable')}
     </span>
     <Button variant="outline" size="sm" onclick={() => (replacing = true)}>{t('providers.key_replace')}</Button>

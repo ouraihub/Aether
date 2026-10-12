@@ -163,7 +163,7 @@
           <Field.Label for="kit-provider-name">{t('providers.name')}</Field.Label>
           <Input id="kit-provider-name" maxlength={80} bind:value={draft.name} />
         </Field.Field>
-        <h3 class="text-sm font-medium">{t('providers.endpoints')}</h3>
+        <h3 class="text-kit-base font-semibold">{t('providers.endpoints')}</h3>
         {#each draft.endpoints as endpoint, index (index)}
           <EndpointCard
             bind:endpoint={

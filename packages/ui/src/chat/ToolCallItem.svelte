@@ -8,7 +8,7 @@
   const name = $derived(tool.server ? `${tool.name} · ${tool.server}` : tool.name)
 </script>
 
-<p class="text-muted-foreground truncate text-xs">
+<p class="text-muted-foreground truncate text-kit-sm">
   {#if tool.outcome === null}
     {t('chat.tool.calling', { name })}
   {:else if tool.outcome === 'denied'}

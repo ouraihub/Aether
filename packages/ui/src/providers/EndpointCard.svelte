@@ -34,8 +34,13 @@
   const prefix = $derived(`kit-endpoint-${index}`)
 </script>
 
-<div class="flex flex-col gap-3 rounded-lg border p-3">
-  <button type="button" class="flex items-center gap-2 text-left text-sm" aria-expanded={expanded} onclick={ontoggle}>
+<div class="flex flex-col gap-3 rounded-kit border p-3">
+  <button
+    type="button"
+    class="flex items-center gap-2 text-left text-kit-base"
+    aria-expanded={expanded}
+    onclick={ontoggle}
+  >
     {#if expanded}<ChevronDownIcon />{:else}<ChevronRightIcon />{/if}
     <span class="font-medium">{endpoint.slug || '—'}</span>
     <span class="text-muted-foreground flex-1 truncate">{endpoint.baseUrl}</span>

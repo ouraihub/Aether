@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import type { ComponentProps } from 'svelte'
 import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from '../i18n'
-import { createFakePorts, type RunEvent, type RunRequest } from '../ports'
+import { createFakePorts, type ChatHistoryPort, type ProvidersPort, type RunEvent, type RunRequest } from '../ports'
+import type ChatPanel from './ChatPanel.svelte'
 import Harness from './Harness.test.svelte'
 
 const model = { endpointId: 'e1', modelId: 'm1' }
@@ -12,13 +14,24 @@ interface Run {
   signal: AbortSignal | undefined
 }
 
-function setup(withHistory: boolean, context: { kind: string; id: string; label: string } | null = null) {
+interface Extra {
+  props?: Partial<ComponentProps<typeof ChatPanel>>
+  history?: Partial<ChatHistoryPort>
+  providers?: Partial<ProvidersPort>
+}
+
+function setup(
+  withHistory: boolean,
+  context: { kind: string; id: string; label: string } | null = null,
+  extra: Extra = {},
+) {
   const runs: Run[] = []
   const approve = vi.fn<(runId: string, callId: string, allow: boolean) => Promise<void>>(() => Promise.resolve())
   const ports = createFakePorts({
     providers: {
       modelOptions: () =>
         Promise.resolve([{ ...model, label: 'Local · main · m1', modelType: 'chat', supportsTools: null }]),
+      ...extra.providers,
     },
     chat: {
       run: (request, emit, options) => {
@@ -30,11 +43,13 @@ function setup(withHistory: boolean, context: { kind: string; id: string; label:
       approve,
     },
   })
+  if (ports.chat?.history) Object.assign(ports.chat.history, extra.history)
   if (!withHistory && ports.chat) delete ports.chat.history
-  const notify = { toast: vi.fn(), confirm: () => Promise.resolve(true) }
+  const notify = { toast: vi.fn(), confirm: vi.fn(() => Promise.resolve(true)) }
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
-  const view = render(Harness, { props: { kit: { ports, i18n: createI18n('en'), notify, logger }, model, context } })
-  return { runs, view, approve }
+  const kit = { ports, i18n: createI18n('en'), notify, logger }
+  const view = render(Harness, { props: { kit, model, context, ...extra.props } })
+  return { runs, view, approve, notify }
 }
 
 async function send(text: string) {
@@ -127,5 +142,104 @@ describe('ChatPanel', () => {
     await screen.findByText('Stopped')
     expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull()
     expect(approve).toHaveBeenCalledTimes(2)
+  })
+
+  it('inserts the finished turn markdown', async () => {
+    const onInsert = vi.fn()
+    const { runs } = setup(false, null, { props: { onInsert } })
+    await send('hi')
+    runs[0]?.emit({ kind: 'text_delta', text: 'Hi **there**' })
+    expect((await screen.findByRole('button', { name: 'Insert' })).hasAttribute('disabled')).toBe(true)
+    runs[0]?.emit({ kind: 'end', status: 'completed' })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Insert' }).hasAttribute('disabled')).toBe(false))
+    await fireEvent.click(screen.getByRole('button', { name: 'Insert' }))
+    expect(onInsert).toHaveBeenCalledWith('Hi **there**')
+  })
+
+  it('copies the turn markdown to the clipboard', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const { runs } = setup(false)
+    await send('hi')
+    runs[0]?.emit({ kind: 'text_delta', text: '`code`' })
+    runs[0]?.emit({ kind: 'end', status: 'completed' })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Copy' }))
+    expect(writeText).toHaveBeenCalledWith('`code`')
+    await screen.findByRole('button', { name: 'Copied' })
+  })
+
+  it('retries a failed turn by regenerating it', async () => {
+    const { runs } = setup(true)
+    await send('hi')
+    runs[0]?.emit({ kind: 'end', status: 'failed', error: { code: 'upstream', message: 'x' } })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+    expect(runs[1]?.request).toMatchObject({ regenerate: true, conversationId: 'c1' })
+  })
+
+  it('deletes the current conversation after confirming, then starts a new one', async () => {
+    const remove = vi.fn(() => Promise.resolve())
+    const onConversationChange = vi.fn()
+    const { runs, notify } = setup(true, null, { history: { remove }, props: { onConversationChange } })
+    await send('hi')
+    runs[0]?.emit({ kind: 'end', status: 'completed' })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Delete conversation' }))
+    expect(notify.confirm).toHaveBeenCalledOnce()
+    await waitFor(() => expect(remove).toHaveBeenCalledWith('c1'))
+    await screen.findByText('Ask anything to start')
+    expect(screen.queryByRole('listitem')).toBeNull()
+    expect(onConversationChange).toHaveBeenLastCalledWith(null)
+  })
+
+  it('restores the given conversation and continues it', async () => {
+    const turn = {
+      id: 't1',
+      status: 'completed' as const,
+      input: 'earlier',
+      text: 'answer',
+      modelId: null,
+      errorCode: null,
+    }
+    const summary = { id: 'c9', title: 'Old', scope: null, createdAt: 0, updatedAt: 0 }
+    const get = vi.fn(() => Promise.resolve({ summary, turns: [turn] }))
+    const onConversationChange = vi.fn()
+    const { runs } = setup(true, null, { history: { get }, props: { conversationId: 'c9', onConversationChange } })
+    await screen.findByText('earlier')
+    expect(get).toHaveBeenCalledWith('c9')
+    expect(onConversationChange).not.toHaveBeenCalled()
+    await send('more')
+    expect(runs[0]?.request.conversationId).toBe('c9')
+  })
+
+  it('starts a new conversation when the given one is gone', async () => {
+    const onConversationChange = vi.fn()
+    const { notify } = setup(true, null, { props: { conversationId: 'gone', onConversationChange } })
+    await waitFor(() => expect(onConversationChange).toHaveBeenCalledWith(null))
+    expect(notify.toast).not.toHaveBeenCalled()
+  })
+
+  it('reports the conversation a run creates', async () => {
+    const onConversationChange = vi.fn()
+    setup(true, null, { props: { onConversationChange } })
+    await send('hi')
+    await waitFor(() => expect(onConversationChange).toHaveBeenCalledWith('c1'))
+  })
+
+  it('without chat models offers to open settings', async () => {
+    const onOpenSettings = vi.fn()
+    setup(false, null, { providers: { modelOptions: () => Promise.resolve([]) }, props: { onOpenSettings } })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }))
+    expect(onOpenSettings).toHaveBeenCalledOnce()
+  })
+
+  it('Esc closes the panel unless a run is active', async () => {
+    const onClose = vi.fn()
+    setup(false, null, { props: { onClose } })
+    const input = screen.getByRole('textbox', { name: 'Message' })
+    await send('hi')
+    await fireEvent.keyDown(input, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+    await fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await fireEvent.keyDown(input, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledOnce()
   })
 })

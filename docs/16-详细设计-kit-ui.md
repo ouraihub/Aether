@@ -15,7 +15,7 @@ packages/ui/src/
   mcp/              # McpClientSettings、McpServerSettings
   logs/             # LogPanel、LogSettings、createLogger
   components/ui/    # shadcn-svelte 生成的组件源码（button、dialog、select、field、empty、alert、sonner…），由 CLI 维护
-  context.ts  i18n/  markdown.ts  utils.ts（cn）  styles/kit.css
+  context.ts  i18n/  markdown.ts  utils.ts（cn、tv）  styles/kit.css  styles/tokens.css
   notify.svelte.ts  KitNotifier.svelte   # createDefaultNotify() 与其 Toaster + AlertDialog
   index.ts          # 根入口：setKitContext、createI18n、renderMarkdown、createDefaultNotify、KitNotifier
   dev/              # 组件试验页（`pnpm -F @ouraihub/aether-ui dev`），不导出
@@ -24,7 +24,7 @@ packages/ui/src/
 ```json
 "name": "@ouraihub/aether-ui",
 "exports": { ".": "...", "./ports": "...", "./tauri": "...", "./providers": "...", "./chat": "...",
-             "./skills": "...", "./mcp": "...", "./logs": "...", "./styles.css": "..." }
+             "./skills": "...", "./mcp": "...", "./logs": "...", "./styles.css": "...", "./tokens.css": "..." }
 ```
 
 - 以源码发布，宿主 Vite 直接编译。一个包、子路径导出，不为每个组件建包。
@@ -65,7 +65,21 @@ setKitContext(ctx)  // 宿主根组件调用一次；未自带通知实现的宿
 ```
 
 - aether 不读写宿主偏好；需要持久化的选择（默认模型、上次选的技能）通过组件 props/事件交给应用。
-- **主题就是 shadcn-svelte 的 CSS 变量**（`--background`、`--foreground`、`--card`、`--muted-foreground`、`--primary`、`--destructive`、`--border`、`--radius` 等）。三个已用 shadcn-svelte 的宿主无需额外配置；未用的宿主引入 `@ouraihub/aether-ui/styles.css`（只含这组变量的默认值，亮/暗两套）。aether 不定义自己的颜色变量。
+- **主题就是 shadcn-svelte 的 CSS 变量**（`--background`、`--foreground`、`--card`、`--muted-foreground`、`--primary`、`--destructive`、`--border` 等）。三个已用 shadcn-svelte 的宿主无需额外配置；未用的宿主引入 `@ouraihub/aether-ui/styles.css`（这组变量的默认值，亮/暗两套，中性色带少量 265° 色相）。aether 不定义自己的颜色变量。
+- **尺寸令牌**（`styles/tokens.css`，`styles.css` 已包含；自带 Tailwind 入口的宿主在 `@import 'tailwindcss'` 之后引入 `@ouraihub/aether-ui/tokens.css` 并 `@source` aether 的 `src`）。默认值取自 AutoNote，宿主在自己的 `:root` 覆盖：
+
+  | 变量 | 默认 | Tailwind 工具类 | 用途 |
+  | --- | --- | --- | --- |
+  | `--kit-text-xs` | 11.5px | `text-kit-xs` | 元信息、分组标题 |
+  | `--kit-text-sm` | 12px | `text-kit-sm` | 次要文字、说明、状态行 |
+  | `--kit-text-base` | 13px | `text-kit-base` | 正文、控件文字 |
+  | `--kit-text-lg` | 13.5px | `text-kit-lg` | 弹窗标题 |
+  | `--kit-control-h` | 30px | `h-kit-control` / `size-kit-control` | 按钮、输入框、下拉 |
+  | `--kit-control-h-sm` | 28px | `h-kit-control-sm` / `size-kit-control-sm` | `size="sm"` 控件 |
+  | `--kit-radius` | 8px | `rounded-kit` | 控件、卡片、气泡；`--radius` 默认也取它 |
+  | `--kit-radius-sm` | 6px | `rounded-kit-sm` | 小控件、列表项、标签 |
+
+  字重：正文 400，标签与按钮 500，区块标题 600。暗色变体同时匹配 `.dark` 与 `[data-theme="dark"]` 祖先。组件内 `cn`/`tv` 用 `utils.ts` 中扩展过的合并配置，宿主传入的 `text-*`/`h-*`/`rounded-*` 能正确覆盖令牌类。
 - **弹窗层级**：aether 的对话框用 shadcn Dialog，渲染到 body（portal），不手写 `z-index`。宿主若自己的设置面板也是 shadcn Dialog，后打开的天然在上层；宿主若用非 shadcn 的高 `z-index` 容器，由宿主负责不把 aether 弹窗嵌进该容器之下（陷阱 1）。
 
 ## 4. 组件
@@ -86,14 +100,16 @@ interface ChatPanelProps {
   context?: { kind: string; id: string; label: string } | null   // 显示为可移除标签
   skills?: SkillRef[]                               // 受控：当前选中的技能
   onSkillsChange?: (refs: SkillRef[]) => void       // 应用决定是否记住
-  onInsert?: (markdown: string) => void
+  onInsert?: (markdown: string) => void             // 有它才显示"插入"；运行中禁用
   onToolPayload?: (tool: string, payload: unknown) => void
-  onOpenSettings?: () => void
+  onOpenSettings?: () => void                       // 没有任何对话模型时显示"打开设置"
+  conversationId?: string | null                    // 挂载时恢复的会话；已不存在（not_found）则新对话
+  onConversationChange?: (id: string | null) => void  // 显示的会话变化时调用（新运行建会话、打开历史、删除、新对话），应用据此持久化
   onClose?: () => void
 }
 ```
 
-- 历史下拉（有 `history` 端口时）、新对话、上下文标签（× 本轮不带）、Markdown 渲染（`{@attach}` + 已清洗 HTML）、复制 / 插入 / 最后一轮重新生成、停止、失败原因与重试、窄屏全屏 + Esc 关闭。
+- 历史下拉（有 `history` 端口时）、新对话、删除当前会话（`notify.confirm` 确认后 `history.remove`，再回到新对话）、上下文标签（× 本轮不带）、Markdown 渲染（`{@attach}` + 已清洗 HTML）、每轮复制（剪贴板，短暂显示"已复制"）/ 插入、最后一轮重新生成、停止、失败原因与重试（= 重新生成最后一轮）、空状态（无模型 → 提示 + "打开设置"；空会话 → 简短提示）、窄屏全屏 + Esc 关闭（有 `onClose`、焦点在面板内且没有运行时）。
 - `SkillPicker`：输入框上方的技能选择（列表只含元数据）；显示所选正文合计 / 预算；`end` 或请求错误为 `skill_changed` 时提示"技能已更新，请重新确认"并打开预览。
 - 工具：`tool_call` 显示"正在调用 <name>"（MCP 标服务名）；`approval_required` 显示 `ApprovalCard`（工具名、来源、参数预览、"允许本次 / 拒绝"）；`tool_result` 折叠为一行，`unknown` 标"结果未知，可能已执行"，`denied` 标"已拒绝"。
 - `end`：`completed` + `exhausted` 时显示"已达到工具调用轮数上限"；`failed` 显示错误与"重试"；`cancelled` 显示"已停止"。

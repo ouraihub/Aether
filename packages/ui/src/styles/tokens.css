@@ -1,0 +1,22 @@
+/* Size tokens and their Tailwind utilities (docs/16 §3). Hosts with their own Tailwind entry import this after tailwindcss and override the --kit-* values. */
+:root {
+	--kit-text-xs: 11.5px;
+	--kit-text-sm: 12px;
+	--kit-text-base: 13px;
+	--kit-text-lg: 13.5px;
+	--kit-control-h: 30px;
+	--kit-control-h-sm: 28px;
+	--kit-radius: 8px;
+	--kit-radius-sm: 6px;
+}
+
+@theme inline {
+	--text-kit-xs: var(--kit-text-xs);
+	--text-kit-sm: var(--kit-text-sm);
+	--text-kit-base: var(--kit-text-base);
+	--text-kit-lg: var(--kit-text-lg);
+	--spacing-kit-control: var(--kit-control-h);
+	--spacing-kit-control-sm: var(--kit-control-h-sm);
+	--radius-kit: var(--kit-radius);
+	--radius-kit-sm: var(--kit-radius-sm);
+}

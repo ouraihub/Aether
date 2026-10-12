@@ -70,7 +70,7 @@
         {t('providers.picker_desc', { count: models.length, url: result?.probeUrl ?? '' })}
       </Dialog.Description>
     </Dialog.Header>
-    <label class="flex items-center gap-2 text-sm">
+    <label class="flex items-center gap-2 text-kit-base">
       <input
         type="checkbox"
         class="accent-primary"
@@ -82,10 +82,10 @@
     <div class="flex min-h-0 flex-col gap-3 overflow-y-auto">
       {#each groups as [group, items = []] (group)}
         <section class="flex flex-col gap-1">
-          <h3 class="text-muted-foreground text-xs font-medium">{group || t('providers.no_group')}</h3>
+          <h3 class="text-muted-foreground text-kit-xs font-medium">{group || t('providers.no_group')}</h3>
           {#each items as model (model.id)}
             <div class="flex items-center gap-2">
-              <label class="flex flex-1 items-center gap-2 truncate text-sm">
+              <label class="flex flex-1 items-center gap-2 truncate text-kit-base">
                 <input type="checkbox" class="accent-primary" bind:checked={checked[model.id]} />
                 <span class="truncate font-mono">{model.id}</span>
               </label>

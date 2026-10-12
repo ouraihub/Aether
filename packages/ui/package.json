@@ -16,6 +16,7 @@
     "./mcp": "./src/mcp/index.ts",
     "./logs": "./src/logs/index.ts",
     "./styles.css": "./src/styles/kit.css",
+    "./tokens.css": "./src/styles/tokens.css",
     "./fixtures/*": "./fixtures/*"
   },
   "scripts": {

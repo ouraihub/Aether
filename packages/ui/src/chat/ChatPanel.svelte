@@ -1,12 +1,14 @@
 <script lang="ts">
-  // Chat (docs/16 §4.2): model, skills, optional history, markdown turns with tool calls and approvals, composer, stop, regenerate.
+  // Chat (docs/16 §4.2): model, skills, optional history, markdown turns with tool calls and approvals, copy / insert,
+  // composer, stop, regenerate / retry. The host persists the shown conversation via `conversationId` + `onConversationChange`.
   // Unmounting aborts the active run, which calls chat_cancel (docs/16 §7 trap 4).
   import XIcon from '@lucide/svelte/icons/x'
   import { Button } from '#lib/components/ui/button/index.js'
+  import * as Empty from '#lib/components/ui/empty/index.js'
   import * as Select from '#lib/components/ui/select/index.js'
   import { Textarea } from '#lib/components/ui/textarea/index.js'
   import { getKitContext } from '../context'
-  import type { ConversationSummary, ModelRef, SkillRef } from '../ports'
+  import { isKitClientError, type ConversationSummary, type ModelRef, type SkillRef } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
   import MessageItem from './MessageItem.svelte'
   import { RunSession } from './run-session.svelte'
@@ -20,6 +22,10 @@
     skills,
     onSkillsChange,
     skillsBudget = 48_000,
+    onInsert,
+    onOpenSettings,
+    conversationId = null,
+    onConversationChange,
     onClose,
   }: {
     purpose?: string
@@ -33,6 +39,14 @@
     onSkillsChange?: (refs: SkillRef[]) => void
     /** The backend's `Budget.skills_chars`, shown next to the picker. */
     skillsBudget?: number
+    /** Shows "insert" on assistant turns; receives the turn's markdown. */
+    onInsert?: (markdown: string) => void
+    /** Shown as a button when there is no chat model to pick. */
+    onOpenSettings?: () => void
+    /** Conversation to show on mount; one that no longer exists starts a new conversation. */
+    conversationId?: string | null
+    /** Called whenever the shown conversation changes (`null` = new conversation). */
+    onConversationChange?: (id: string | null) => void
     onClose?: () => void
   } = $props()
 
@@ -66,6 +80,11 @@
     context: activeContext ? { kind: activeContext.kind, id: activeContext.id } : null,
   })
   const canRegenerate = $derived(session !== null && !session.running && session.turns.length > 0)
+  let noModels = $state(false)
+  void ports.providers
+    ?.modelOptions({ modelType: 'chat' })
+    .then((list) => (noModels = list.length === 0))
+    .catch(() => undefined)
 
   async function refresh() {
     if (!history) return
@@ -82,6 +101,30 @@
     if (session && !session.running) void refresh()
   })
 
+  // svelte-ignore state_referenced_locally
+  let reported = conversationId
+  let restored = $state(false)
+  $effect(() => {
+    const id = session?.conversationId ?? null
+    if (!restored || id === reported) return
+    reported = id
+    onConversationChange?.(id)
+  })
+  // svelte-ignore state_referenced_locally
+  void restore(conversationId)
+
+  async function restore(id: string | null) {
+    if (history && session && id !== null) {
+      try {
+        const conversation = await history.get(id)
+        session.show(id, conversation.turns)
+      } catch (error) {
+        if (!isKitClientError(error) || error.code !== 'not_found') notify.toast('error', t('chat.historyFailed'))
+      }
+    }
+    restored = true
+  }
+
   async function open(id: string) {
     if (!history || !session) return
     if (id === '') {
@@ -96,6 +139,25 @@
     }
   }
 
+  async function remove() {
+    const id = session?.conversationId
+    if (!history || !session || !id || session.running) return
+    const ok = await notify.confirm({ title: t('chat.deleteTitle'), body: t('chat.deleteBody'), danger: true })
+    if (!ok) return
+    try {
+      await history.remove(id)
+    } catch {
+      notify.toast('error', t('chat.deleteFailed'))
+      return
+    }
+    if (session.conversationId === id) session.show(null)
+    void refresh()
+  }
+
+  function onkeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && onClose && !session?.running && !e.defaultPrevented) onClose()
+  }
+
   function send() {
     const input = draft.trim()
     if (!session || input === '' || session.running) return
@@ -106,7 +168,8 @@
 </script>
 
 {#if session}
-  <section class="flex min-h-0 flex-1 flex-col gap-3" aria-label={t('chat.title')}>
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Esc from any control inside the panel) -->
+  <section class="flex min-h-0 flex-1 flex-col gap-3" aria-label={t('chat.title')} {onkeydown}>
     <header class="flex items-center gap-2">
       <div class="w-72">
         <ModelSelect value={picked} filter={{ modelType: 'chat' }} onchange={(m) => (picked = m)} />
@@ -125,6 +188,11 @@
             </Select.Group>
           </Select.Content>
         </Select.Root>
+        {#if session.conversationId}
+          <Button variant="ghost" size="sm" disabled={session.running} onclick={() => void remove()}>
+            {t('chat.delete')}
+          </Button>
+        {/if}
       {:else}
         <Button variant="outline" size="sm" disabled={session.running} onclick={() => session.show(null)}>
           {t('chat.newConversation')}
@@ -134,11 +202,27 @@
         <Button class="ml-auto" variant="ghost" size="sm" onclick={onClose}>{t('chat.close')}</Button>
       {/if}
     </header>
-    <ol class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto" aria-label={t('chat.messages')}>
-      {#each session.turns as turn, i (i)}
-        <MessageItem {turn} onApprove={(tool, allow) => session.approve(tool, allow)} />
-      {/each}
-    </ol>
+    {#if noModels}
+      <Empty.Root>
+        <Empty.Description>{t('chat.noModels')}</Empty.Description>
+        {#if onOpenSettings}
+          <Button variant="outline" size="sm" onclick={onOpenSettings}>{t('chat.openSettings')}</Button>
+        {/if}
+      </Empty.Root>
+    {:else if session.turns.length === 0}
+      <p class="text-muted-foreground text-kit-sm flex flex-1 items-center justify-center">{t('chat.empty')}</p>
+    {:else}
+      <ol class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto" aria-label={t('chat.messages')}>
+        {#each session.turns as turn, i (i)}
+          <MessageItem
+            {turn}
+            {onInsert}
+            onRetry={i === session.turns.length - 1 && !session.running ? () => session.regenerate(base) : undefined}
+            onApprove={(tool, allow) => session.approve(tool, allow)}
+          />
+        {/each}
+      </ol>
+    {/if}
     <form
       class="flex flex-col gap-2"
       onsubmit={(e) => {
@@ -158,7 +242,7 @@
       {/if}
       {#if activeContext}
         <div class="flex">
-          <span class="bg-muted flex max-w-full items-center gap-1 rounded-md py-0.5 pr-0.5 pl-2 text-xs">
+          <span class="bg-muted rounded-kit-sm text-kit-sm flex max-w-full items-center gap-1 py-0.5 pr-0.5 pl-2">
             <span class="truncate">{activeContext.label}</span>
             <Button
               type="button"
