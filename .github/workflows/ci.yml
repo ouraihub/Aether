@@ -35,6 +35,9 @@ jobs:
         shell: cmd
         run: call scripts\msvc-env.bat
       - run: pnpm run check
+      # tauri::generate_context! in the examples needs each `frontendDist` to exist.
+      - name: Build example frontends
+        run: pnpm -r --filter "./examples/*/ui" run build
       - name: Crate dependency rules (docs/00 §3)
         run: pnpm run kit:check-deps
       - name: DTO contract check
@@ -42,9 +45,6 @@ jobs:
       - name: i18n contract check
         run: pnpm run kit:i18n
       - run: cargo fmt --all -- --check
-      # tauri::generate_context! in the examples needs each `frontendDist` to exist.
-      - name: Build example frontends
-        run: pnpm -r --filter "./examples/*/ui" run build
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features
       - name: Each plugin feature builds on its own
