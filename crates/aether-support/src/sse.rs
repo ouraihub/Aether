@@ -149,7 +149,7 @@ mod tests {
     /// Every shared fixture yields the same events whether fed whole, in 7-byte or in 1-byte chunks.
     #[test]
     fn fixtures_are_chunking_independent() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/sse");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/ui/fixtures/sse");
         for protocol in ["anthropic-messages", "openai-chat", "openai-responses"] {
             let mut files: Vec<_> = std::fs::read_dir(root.join(protocol))
                 .unwrap()
@@ -180,7 +180,7 @@ mod tests {
     fn chinese_fixture_round_trips_text() {
         let bytes = std::fs::read(
             Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../fixtures/sse/openai-chat/chinese.sse"),
+                .join("../../packages/ui/fixtures/sse/openai-chat/chinese.sse"),
         )
         .unwrap();
         let text: String = parse_in(&bytes, 1)

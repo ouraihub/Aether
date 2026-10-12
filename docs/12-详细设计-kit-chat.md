@@ -74,7 +74,7 @@ pub enum Approval { Auto, Ask, Deny }
 | openai-chat | `/v1/chat/completions` | Bearer；`stream_options.include_usage=true` | `tools[{type:function,function}]`；`delta.tool_calls[index]` 分片 | `finish_reason=length` |
 | openai-responses | `/v1/responses` | Bearer | `tools[{type:function,name,...}]`；`response.function_call_arguments.delta`；结果为 `function_call_output`，用 `call_id` 关联 | `incomplete_details.reason=max_output_tokens` |
 
-- 每种协议在 `fixtures/sse/<protocol>/` 至少有：纯文本、单工具、多工具、截断、上游错误、中文跨 UTF-8 边界 6 份样本。支持范围以 fixture + 真实上游联验为准，不以"接口相似"代替。
+- 每种协议在 `packages/ui/fixtures/sse/<protocol>/` 至少有：纯文本、单工具、多工具、截断、上游错误、中文跨 UTF-8 边界 6 份样本。无工具样本的期望结果（文本、usage、终态、错误码）写在同目录 `expect.json`，Rust 与宿主的 TS 实现读同一份断言。支持范围以 fixture + 真实上游联验为准，不以"接口相似"代替。
 - 超时：连接 15s；首包 120s；开始输出后空闲 60s；不设总时长（不用 reqwest 的整体 `timeout()`）。禁止重定向；地址经 `net` 策略。
 - 上游非 2xx：读最多 8 KiB，`upstream(status, body)`；401/403 → `unauthorized`，429 → `rate_limited`。
 - 工具参数按调用拼接（openai-chat 按 `index`、responses 按 `item_id`、anthropic 按 content block 序号），流结束时每个参数必须是合法 JSON object，否则该轮视为截断。

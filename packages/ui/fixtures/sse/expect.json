@@ -1,0 +1,20 @@
+{
+  "anthropic-messages": {
+    "text": { "status": "completed", "text": "Hello! How can I help you today?", "inputTokens": 25, "outputTokens": 12 },
+    "chinese": { "status": "completed", "text": "你好！这是一段中文回复。", "inputTokens": 18, "outputTokens": 15 },
+    "truncated": { "status": "completed", "text": "Here is a long story. Once upon a time there", "inputTokens": 40, "outputTokens": 16 },
+    "upstream-error": { "status": "failed", "text": "Let me", "errorCode": "upstream", "errorMessage": "Overloaded" }
+  },
+  "openai-chat": {
+    "text": { "status": "completed", "text": "Hello! How can I help you today?", "inputTokens": 19, "outputTokens": 10 },
+    "chinese": { "status": "completed", "text": "你好！这是一段中文回复。", "inputTokens": 12, "outputTokens": 9 },
+    "truncated": { "status": "completed", "text": "Here is a long story. Once upon a time there", "inputTokens": 30, "outputTokens": 16 },
+    "upstream-error": { "status": "failed", "text": "Let me", "errorCode": "upstream", "errorMessage": "The server had an error" }
+  },
+  "openai-responses": {
+    "text": { "status": "completed", "text": "Hello! How can I help you today?", "inputTokens": 37, "outputTokens": 11 },
+    "chinese": { "status": "completed", "text": "你好！这是一段中文回复。", "inputTokens": 20, "outputTokens": 9 },
+    "truncated": { "status": "completed", "text": "Here is a long story. Once upon a time there", "inputTokens": 30, "outputTokens": 16 },
+    "upstream-error": { "status": "failed", "text": "", "errorCode": "upstream", "errorMessage": "The model failed to generate a response." }
+  }
+}

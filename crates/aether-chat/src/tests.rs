@@ -1,4 +1,4 @@
-//! Protocol layer against a loopback upstream replaying `fixtures/sse` (docs/12 §3).
+//! Protocol layer against a loopback upstream replaying `packages/ui/fixtures/sse` (docs/12 §3).
 #![expect(
     clippy::unwrap_used,
     clippy::panic,
@@ -122,17 +122,28 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> String {
     }
 }
 
-fn fixture(protocol: Protocol, name: &str) -> String {
-    let dir = match protocol {
+fn dir(protocol: Protocol) -> &'static str {
+    match protocol {
         Protocol::AnthropicMessages => "anthropic-messages",
         Protocol::OpenaiChat => "openai-chat",
         Protocol::OpenaiResponses => "openai-responses",
-    };
+    }
+}
+
+fn fixture(protocol: Protocol, name: &str) -> String {
     let path = format!(
-        "{}/../../fixtures/sse/{dir}/{name}.sse",
-        env!("CARGO_MANIFEST_DIR")
+        "{}/../../packages/ui/fixtures/sse/{}/{name}.sse",
+        env!("CARGO_MANIFEST_DIR"),
+        dir(protocol)
     );
     std::fs::read_to_string(path).unwrap()
+}
+
+/// The outcome of replaying one fixture, shared with the TypeScript side (`expect.json`).
+fn expected(protocol: Protocol, name: &str) -> serde_json::Value {
+    let text = include_str!("../../../packages/ui/fixtures/sse/expect.json");
+    let all: serde_json::Value = serde_json::from_str(text).unwrap();
+    all[dir(protocol)][name].clone()
 }
 
 /// A complete 200 SSE reply.
@@ -262,26 +273,11 @@ fn summary_text(summary: &RunSummary) -> &str {
 #[tokio::test]
 async fn streams_text_and_usage_for_every_protocol() {
     for protocol in PROTOCOLS {
-        // (fixture, text, usage per protocol: anthropic, chat, responses)
-        let cases = [
-            (
-                "text",
-                "Hello! How can I help you today?",
-                [(25, 12), (19, 10), (37, 11)],
-            ),
-            (
-                "chinese",
-                "你好！这是一段中文回复。",
-                [(18, 15), (12, 9), (20, 9)],
-            ),
-            (
-                "truncated",
-                "Here is a long story. Once upon a time there",
-                [(40, 16), (30, 16), (30, 16)],
-            ),
-        ];
-        let index = PROTOCOLS.iter().position(|p| *p == protocol).unwrap();
-        for (name, text, usage) in cases {
+        for name in ["text", "chinese", "truncated"] {
+            let want = expected(protocol, name);
+            let text = want["text"].as_str().unwrap();
+            let i = u32::try_from(want["inputTokens"].as_u64().unwrap()).unwrap();
+            let o = u32::try_from(want["outputTokens"].as_u64().unwrap()).unwrap();
             let body = fixture(protocol, name);
             let cut = body.len();
             let (base, seen) = upstream(Reply::Sse { body, cut }).await;
@@ -295,7 +291,6 @@ async fn streams_text_and_usage_for_every_protocol() {
             assert!(matches!(events[0], RunEvent::RoundStart { round: 1 }));
             assert_eq!(streamed(&events), text, "{protocol:?} {name}");
             assert_eq!(summary_text(&summary), text);
-            let (i, o) = usage[index];
             let expected = Usage {
                 input_tokens: Some(i),
                 output_tokens: Some(o),
@@ -348,15 +343,11 @@ async fn streams_text_and_usage_for_every_protocol() {
 
 #[tokio::test]
 async fn in_stream_upstream_error_fails_and_keeps_partial_text() {
-    for (protocol, partial, message) in [
-        (Protocol::AnthropicMessages, "Let me", "Overloaded"),
-        (Protocol::OpenaiChat, "Let me", "The server had an error"),
-        (
-            Protocol::OpenaiResponses,
-            "",
-            "The model failed to generate a response.",
-        ),
-    ] {
+    for protocol in PROTOCOLS {
+        let want = expected(protocol, "upstream-error");
+        let partial = want["text"].as_str().unwrap();
+        let message = want["errorMessage"].as_str().unwrap();
+        assert_eq!(want["errorCode"], "upstream");
         let body = fixture(protocol, "upstream-error");
         let cut = body.len();
         let (base, _) = upstream(Reply::Sse { body, cut }).await;

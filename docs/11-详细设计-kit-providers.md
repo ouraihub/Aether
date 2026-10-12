@@ -102,7 +102,7 @@ pub fn api_base(base_url: &str) -> String;  // 去尾 '/'，未以 /v1 结尾则
 
 ## 6. 推断
 
-- 规则与测试数据：`fixtures/model-classify.json`（Rust 与 TS 共用）。
+- 规则与测试数据：`packages/ui/fixtures/model-classify.json`（Rust 与 TS 共用；放在 npm 包内，宿主经 git 依赖安装后即可读取）。
 - 类型：id 含 `embed` → embedding；`rerank` → rerank；`tts`/`speech` → tts；`whisper`/`stt`/`transcri` → stt；`dall-e`/`image`/`flux`/`imagen` → image；`video`/`sora`/`veo` → video；其他 → chat。
 - `context_window`/`max_output`/`can_vision`：按家族前缀（claude、gpt、o\d、gemini、deepseek、qwen、glm、kimi、moonshot）查表；查不到为 `null`/`false`。
 - `supports_tools`：chat 且家族在表内 → `true`；否则 `null`。

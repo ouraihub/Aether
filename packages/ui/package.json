@@ -15,7 +15,8 @@
     "./skills": "./src/skills/index.ts",
     "./mcp": "./src/mcp/index.ts",
     "./logs": "./src/logs/index.ts",
-    "./styles.css": "./src/styles/kit.css"
+    "./styles.css": "./src/styles/kit.css",
+    "./fixtures/*": "./fixtures/*"
   },
   "scripts": {
     "dev": "vite",

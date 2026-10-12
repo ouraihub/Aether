@@ -1,5 +1,5 @@
 //! Model metadata inferred from the id alone (docs/11 §6). Test data:
-//! `fixtures/model-classify.json`, shared with the TypeScript side.
+//! `packages/ui/fixtures/model-classify.json`, shared with the TypeScript side.
 
 use crate::ModelType;
 
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn every_fixture_entry_matches() {
-        let text = include_str!("../../../fixtures/model-classify.json");
+        let text = include_str!("../../../packages/ui/fixtures/model-classify.json");
         let cases: Vec<Case> = serde_json::from_str(text).unwrap();
         assert!(cases.len() >= 30);
         for case in cases {
