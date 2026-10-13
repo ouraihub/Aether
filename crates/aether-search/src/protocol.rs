@@ -303,22 +303,29 @@ pub(crate) fn parse_mcp(body: &str, limit: usize) -> Result<Vec<SearchHit>, KitE
     }
     let joined = texts.join("\n\n");
     Ok(collect(
-        joined.split("\n\n").map(|block| {
+        joined.split("\nTitle:").enumerate().map(|(index, block)| {
             let (mut title, mut url, mut snippets) = (String::new(), String::new(), Vec::new());
             let mut content = false;
-            for line in block.lines() {
+            for (line_index, line) in block.lines().enumerate() {
+                if index > 0 && line_index == 0 {
+                    title = line.trim().to_owned();
+                    continue;
+                }
                 if content {
                     snippets.push(line)
                 } else if let Some(v) = line.strip_prefix("Title:") {
                     title = v.trim().to_owned()
                 } else if let Some(v) = line.strip_prefix("URL:") {
                     url = v.trim().to_owned()
-                } else if let Some(v) = line.strip_prefix("Text:") {
+                } else if let Some(v) = line
+                    .strip_prefix("Text:")
+                    .or_else(|| line.strip_prefix("Highlights:"))
+                {
                     content = true;
                     snippets.push(v.trim_start())
                 }
             }
-            (title, url, snippets.join("\n"))
+            (title, url, snippets.join("\n").trim().to_owned())
         }),
         limit,
     ))

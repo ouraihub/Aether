@@ -40,3 +40,4 @@
 - UI lint/typecheck、49 项测试通过，57 个生成 DTO 与 Rust 一致，i18n/模块依赖边界检查通过。
 - AutoNote 隔离真实 Tauri/WebView2 窗口：搜索/读取实际匿名 Exa MCP/Jina 返回结果；配置省略密钥保持、清除、结果数和重启读回通过。真实本地 HTTP 服务证明 chat 搜索在模型前、来源可见、笔记上下文保留、搜索失败和停止不发模型请求、关闭联网只发模型。
 - 真实付费服务商凭据未联验；协议行为由固定响应与本地请求验证，不把夹具冒充上游联验。
+- 使用用户授权的本地 Exa MCP 密钥，通过 AutoNote Worker 实际调用 `https://mcp.exa.ai/mcp`，HTTP 200 返回 Cloudflare 官方文档结果。发现上游已使用 `Highlights:`；两端解析补齐此标记，按 `Title:` 分隔结果而非按空行截断正文。新增多段摘要回归，Rust 搜索 6 项和 Worker 搜索/运行/配置 34 项通过。密钥不写入文档或源码。

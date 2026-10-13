@@ -65,6 +65,25 @@ fn each_provider_preserves_its_result_content_and_rejects_bad_shape() {
     );
     assert!(protocol::parse_mcp("{\"error\":{\"message\":\"bad\"}}", 5).is_err());
 }
+#[test]
+fn mcp_highlights_keep_paragraphs_between_results() {
+    let body = json!({"result":{"content":[{"text":"Title: First\nURL: https://example.com/first\nHighlights:\nIntro\n\n# Body\nDetails\n\nTitle: Second\nURL: https://example.com/second\nText: Last"}]}}).to_string();
+    assert_eq!(
+        protocol::parse_mcp(&body, 5).unwrap(),
+        vec![
+            SearchHit {
+                title: "First".into(),
+                url: "https://example.com/first".into(),
+                snippet: "Intro\n\n# Body\nDetails".into()
+            },
+            SearchHit {
+                title: "Second".into(),
+                url: "https://example.com/second".into(),
+                snippet: "Last".into()
+            },
+        ]
+    );
+}
 #[cfg(windows)]
 #[test]
 fn omission_clear_default_and_capability_isolation_survive_restart() {
