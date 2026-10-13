@@ -35,27 +35,39 @@
   }
 </script>
 
-<div class="flex items-center gap-2">
+<div class="flex min-w-0 items-center gap-2">
   {#if value === ''}
-    <span class="text-muted-foreground flex-1 text-kit-sm">{t('providers.key_cleared')}</span>
-    <Button variant="outline" size="sm" onclick={reset}>{t('providers.key_undo')}</Button>
+    <span class="text-muted-foreground min-w-0 flex-1 text-kit-sm">{t('providers.key_cleared')}</span>
+    <Button class="shrink-0" variant="outline" size="sm" onclick={reset}>{t('providers.key_undo')}</Button>
   {:else if editing}
     <Input
       {id}
       type="password"
       autocomplete="off"
-      class="flex-1"
+      class="min-w-0 flex-1"
       value={text}
       oninput={(event) => input(event.currentTarget.value)}
     />
     {#if replacing}
-      <Button variant="outline" size="sm" onclick={reset}>{t('common.cancel')}</Button>
+      <Button class="shrink-0" variant="outline" size="sm" onclick={reset}>{t('common.cancel')}</Button>
     {/if}
   {:else}
-    <span {id} class="flex-1 font-mono text-kit-sm">
-      {saved?.keyReadable ? saved.keyMasked : t('providers.key_unreadable')}
+    {@const shown = saved?.keyReadable ? (saved.keyMasked ?? '') : t('providers.key_unreadable')}
+    <!-- Long masks shrink in the middle so the head/tail stay legible and the buttons never overflow. -->
+    <span {id} class="flex min-w-0 flex-1 whitespace-nowrap font-mono text-kit-sm">
+      {#if saved?.keyReadable && shown.length > 8}
+        <span class="sr-only">{shown}</span>
+        <span aria-hidden="true" class="shrink-0">{shown.slice(0, 4)}</span>
+        <span aria-hidden="true" class="min-w-0 truncate">{shown.slice(4, -4)}</span>
+        <span aria-hidden="true" class="shrink-0">{shown.slice(-4)}</span>
+      {:else}
+        <span class="truncate">{shown}</span>
+      {/if}
     </span>
-    <Button variant="outline" size="sm" onclick={() => (replacing = true)}>{t('providers.key_replace')}</Button>
-    <Button variant="outline" size="sm" onclick={() => (value = '')}>{t('providers.key_clear')}</Button>
+    <Button class="shrink-0" variant="outline" size="sm" onclick={() => (replacing = true)}
+      >{t('providers.key_replace')}</Button
+    >
+    <Button class="shrink-0" variant="outline" size="sm" onclick={() => (value = '')}>{t('providers.key_clear')}</Button
+    >
   {/if}
 </div>

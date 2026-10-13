@@ -97,6 +97,10 @@ mod chat_contract {
         #[serde(default)]
         #[ts(optional = nullable)]
         pub scope: Option<String>,
+        /// Explicit one-shot pre-search before model execution.
+        #[serde(default)]
+        #[ts(optional)]
+        pub web_search: Option<bool>,
         /// Re-run the last turn with the same input.
         pub regenerate: bool,
         /// UI language, e.g. `zh-CN`; selects fixed prompt texts.

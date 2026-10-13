@@ -6,6 +6,7 @@ import type {
   KitError,
   ModelRef,
   RunEvent,
+  SearchHit,
   SkillRef,
   ToolOutcome,
   Turn,
@@ -34,6 +35,15 @@ export interface ChatTurn {
   tools: ToolItem[]
   /** The round limit stopped the tool loop. */
   exhausted: boolean
+  search: SearchState
+}
+
+export interface SearchState {
+  status: 'idle' | 'searching' | 'complete' | 'failed'
+  query: string | null
+  provider: string | null
+  hits: SearchHit[]
+  error: string | null
 }
 
 export interface RunBase {
@@ -49,6 +59,7 @@ export class RunSession {
   turns = $state<ChatTurn[]>([])
   conversationId = $state<string | null>(null)
   running = $state(false)
+  search = $state<SearchState>({ status: 'idle', query: null, provider: null, hits: [], error: null })
   /** Id of a selected skill the backend rejected as `skill_changed`; the user has to confirm it again. */
   skillChanged = $state<string | null>(null)
   #abort: AbortController | null = null
@@ -60,17 +71,24 @@ export class RunSession {
     this.#port = port
   }
 
-  send(base: RunBase, input: string) {
-    this.turns.push({ input, text: '', status: 'running', error: null, tools: [], exhausted: false })
-    this.#start(base, input, false)
+  send(base: RunBase, input: string, webSearch = false) {
+    const search: SearchState = {
+      status: webSearch ? 'searching' : 'idle',
+      query: webSearch ? input : null,
+      provider: null,
+      hits: [],
+      error: null,
+    }
+    this.turns.push({ input, text: '', status: 'running', error: null, tools: [], exhausted: false, search })
+    this.#start(base, input, false, webSearch)
   }
 
   /** Reruns the last turn in place: stored (`regenerate`) with history, a fresh run without. */
-  regenerate(base: RunBase) {
+  regenerate(base: RunBase, webSearch = false) {
     const last = this.turns.at(-1)
     if (!last || this.running) return
     Object.assign(last, { text: '', status: 'running', error: null, tools: [], exhausted: false })
-    this.#start(base, last.input, this.conversationId !== null)
+    this.#start(base, last.input, this.conversationId !== null, webSearch)
   }
 
   /** Cancels the active run; its `end` arrives as `cancelled`. */
@@ -93,6 +111,7 @@ export class RunSession {
   show(conversationId: string | null, turns: readonly Turn[] = []) {
     this.stop()
     this.conversationId = conversationId
+    this.search = { status: 'idle', query: null, provider: null, hits: [], error: null }
     this.turns = turns.map((t) => ({
       input: t.input,
       text: t.text,
@@ -100,26 +119,51 @@ export class RunSession {
       error: t.errorCode,
       tools: [],
       exhausted: false,
+      search: { status: 'idle', query: null, provider: null, hits: [], error: null },
     }))
   }
 
-  #start(base: RunBase, input: string, regenerate: boolean) {
+  #start(base: RunBase, input: string, regenerate: boolean, webSearch: boolean) {
     // The proxied element, so streamed writes are reactive.
     const turn = this.turns[this.turns.length - 1]
     if (!turn) return
     const abort = new AbortController()
     this.#abort = abort
+    this.search = {
+      status: webSearch ? 'searching' : 'idle',
+      query: webSearch ? input : null,
+      provider: null,
+      hits: [],
+      error: null,
+    }
+    turn.search = this.search
     this.running = true
     const finish = (status: TurnStatus, error: string | null) => {
       turn.status = status
       turn.error = error
       if (this.#abort !== abort) return
+      if (this.search.status === 'searching')
+        this.search = { ...this.search, status: status === 'failed' ? 'failed' : 'idle', error }
       this.#abort = null
       this.running = false
     }
     const onEvent = (event: RunEvent) => {
+      if (this.#abort !== abort) return
       const tool = (callId: string) => turn.tools.find((x) => x.callId === callId)
       switch (event.kind) {
+        case 'search_start':
+          this.search.status = 'searching'
+          break
+        case 'search_result':
+          this.search = {
+            status: 'complete',
+            query: event.query,
+            provider: event.provider,
+            hits: event.hits,
+            error: null,
+          }
+          turn.search = this.search
+          break
         case 'text_delta':
           turn.text += event.text
           break
@@ -169,6 +213,7 @@ export class RunSession {
       scope: base.scope,
       regenerate,
       language: base.language,
+      ...(base.purpose === 'chat' && webSearch ? { webSearch: true } : {}),
     }
     this.#runId = null
     this.#port.run(request, onEvent, { signal: abort.signal }).then(

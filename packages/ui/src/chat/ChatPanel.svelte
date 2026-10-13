@@ -6,6 +6,7 @@
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Empty from '#lib/components/ui/empty/index.js'
   import * as Select from '#lib/components/ui/select/index.js'
+  import GlobeIcon from '@lucide/svelte/icons/globe'
   import { Textarea } from '#lib/components/ui/textarea/index.js'
   import { getKitContext } from '../context'
   import { isKitClientError, type ConversationSummary, type ModelRef, type SkillRef } from '../ports'
@@ -80,6 +81,7 @@
     context: activeContext ? { kind: activeContext.kind, id: activeContext.id } : null,
   })
   const canRegenerate = $derived(session !== null && !session.running && session.turns.length > 0)
+  let webSearch = $state(false)
   let noModels = $state(false)
   void ports.providers
     ?.modelOptions({ modelType: 'chat' })
@@ -162,7 +164,7 @@
     const input = draft.trim()
     if (!session || input === '' || session.running) return
     draft = ''
-    session.send(base, input)
+    session.send(base, input, webSearch)
     droppedKey = null
   }
 </script>
@@ -217,7 +219,9 @@
           <MessageItem
             {turn}
             {onInsert}
-            onRetry={i === session.turns.length - 1 && !session.running ? () => session.regenerate(base) : undefined}
+            onRetry={i === session.turns.length - 1 && !session.running
+              ? () => session.regenerate(base, webSearch)
+              : undefined}
             onApprove={(tool, allow) => session.approve(tool, allow)}
           />
         {/each}
@@ -239,6 +243,14 @@
           onchange={setSkills}
           onresolved={() => (session.skillChanged = null)}
         />
+      {/if}
+      {#if ports.search && purpose === 'chat'}
+        {#if session.search.status === 'searching'}<p class="text-muted-foreground text-kit-sm" aria-live="polite">
+            {t('chat.searching')}
+          </p>{/if}
+        {#if session.search.status === 'complete'}<p class="text-muted-foreground text-kit-sm" aria-live="polite">
+            {t('chat.searchResults', { count: session.search.hits.length })}
+          </p>{/if}
       {/if}
       {#if activeContext}
         <div class="flex">
@@ -266,17 +278,49 @@
           }
         }}
       />
-      <div class="flex justify-end gap-2">
-        {#if canRegenerate}
-          <Button type="button" variant="outline" onclick={() => session.regenerate(base)}
-            >{t('chat.regenerate')}</Button
+      <div class="flex items-center gap-2">
+        {#if ports.search && purpose === 'chat'}
+          <Button
+            type="button"
+            variant={webSearch ? 'secondary' : 'ghost'}
+            size="icon-sm"
+            aria-label={t('chat.network')}
+            aria-pressed={webSearch}
+            disabled={session.running}
+            title={`${t(webSearch ? 'chat.networkOn' : 'chat.networkOff')} · ${t('chat.networkPrivacy')}`}
+            onclick={() => (webSearch = !webSearch)}
           >
+            {#if webSearch}
+              <GlobeIcon />
+            {:else}
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M2 12h20M12 2a20 20 0 0 1 0 20 20 20 0 0 1 0-20" />
+                <path d="m3 3 18 18" />
+              </svg>
+            {/if}
+          </Button>
         {/if}
-        {#if session.running}
-          <Button type="button" variant="destructive" onclick={() => session.stop()}>{t('chat.stop')}</Button>
-        {:else}
-          <Button type="submit" disabled={draft.trim() === '' || picked === null}>{t('chat.send')}</Button>
-        {/if}
+        <div class="ml-auto flex items-center gap-2">
+          {#if canRegenerate}
+            <Button type="button" variant="outline" onclick={() => session.regenerate(base, webSearch)}
+              >{t('chat.regenerate')}</Button
+            >
+          {/if}
+          {#if session.running}
+            <Button type="button" variant="destructive" onclick={() => session.stop()}>{t('chat.stop')}</Button>
+          {:else}
+            <Button type="submit" disabled={draft.trim() === '' || picked === null}>{t('chat.send')}</Button>
+          {/if}
+        </div>
       </div>
     </form>
   </section>

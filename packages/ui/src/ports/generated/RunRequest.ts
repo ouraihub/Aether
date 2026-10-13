@@ -36,6 +36,10 @@ conversationId?: string | null,
  */
 scope?: string | null, 
 /**
+ * Explicit one-shot pre-search before model execution.
+ */
+webSearch?: boolean, 
+/**
  * Re-run the last turn with the same input.
  */
 regenerate: boolean, 

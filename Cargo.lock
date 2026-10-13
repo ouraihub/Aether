@@ -100,6 +100,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-search"
+version = "0.1.0"
+dependencies = [
+ "aether-support",
+ "base64 0.22.1",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
 name = "aether-skills"
 version = "0.1.0"
 dependencies = [
@@ -3875,6 +3890,7 @@ dependencies = [
  "aether-mcp-server",
  "aether-observability",
  "aether-providers",
+ "aether-search",
  "aether-skills",
  "aether-support",
  "async-trait",

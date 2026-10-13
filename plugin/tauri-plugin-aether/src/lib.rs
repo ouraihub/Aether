@@ -18,6 +18,8 @@ mod mcp_client;
 mod mcp_server;
 #[cfg(feature = "providers")]
 mod providers;
+#[cfg(feature = "search")]
+mod search;
 #[cfg(feature = "skills")]
 mod skills;
 #[cfg(test)]
@@ -48,6 +50,8 @@ pub struct Builder {
     providers: Option<aether_providers::Store>,
     #[cfg(feature = "skills")]
     skills: Option<aether_skills::Store>,
+    #[cfg(feature = "search")]
+    search: Option<aether_search::Store>,
 }
 
 impl Builder {
@@ -67,6 +71,8 @@ impl Builder {
             providers: None,
             #[cfg(feature = "skills")]
             skills: None,
+            #[cfg(feature = "search")]
+            search: None,
         }
     }
 
@@ -111,6 +117,13 @@ impl Builder {
         self.skills = Some(store);
         self
     }
+    /// Search settings and execution (feature `search`).
+    #[cfg(feature = "search")]
+    #[must_use]
+    pub fn search(mut self, store: aether_search::Store) -> Self {
+        self.search = Some(store);
+        self
+    }
 
     /// Builds the plugin. Only commands of enabled features are registered.
     ///
@@ -131,18 +144,31 @@ impl Builder {
             providers,
             #[cfg(feature = "skills")]
             skills,
+            #[cfg(feature = "search")]
+            search,
         } = self;
-        // Providers first: "chat without providers" reports `providers` (the chat feature
-        // always enables it), whatever else is missing.
         #[cfg(feature = "providers")]
         let providers = providers::Providers::new(
             providers.ok_or_else(|| KitError::bad_request("providers", "missing_instance"))?,
         );
+        #[cfg(feature = "search")]
+        let search = search.map(Arc::new);
         #[cfg(feature = "chat")]
         let chat = {
             let (config, store) =
                 chat.ok_or_else(|| KitError::bad_request("chat", "missing_instance"))?;
-            chat::Chat::new(config, store)?
+            #[cfg(feature = "search")]
+            let result = chat::Chat::new(
+                config,
+                store,
+                search
+                    .as_ref()
+                    .ok_or_else(|| KitError::bad_request("search", "missing_instance"))?
+                    .clone(),
+            )?;
+            #[cfg(not(feature = "search"))]
+            let result = chat::Chat::new(config, store)?;
+            result
         };
         #[cfg(feature = "mcp-client")]
         let mcp_client = mcp_client::McpClient {
@@ -161,6 +187,10 @@ impl Builder {
                 skills.ok_or_else(|| KitError::bad_request("skills", "missing_instance"))?,
             ),
         };
+        #[cfg(feature = "search")]
+        let search = search::Search::from_arc(
+            search.ok_or_else(|| KitError::bad_request("search", "missing_instance"))?,
+        );
         #[cfg(feature = "chat")]
         let has_history = chat.has_history();
         let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> =
@@ -240,6 +270,22 @@ impl Builder {
                 skills::skills_reorder,
                 #[cfg(feature = "skills")]
                 skills::skills_delete,
+                #[cfg(feature = "search")]
+                search::search_settings,
+                #[cfg(feature = "search")]
+                search::search_save,
+                #[cfg(feature = "search")]
+                search::search_set_default,
+                #[cfg(feature = "search")]
+                search::search_reveal,
+                #[cfg(feature = "search")]
+                search::search_check,
+                #[cfg(feature = "search")]
+                search::search_query,
+                #[cfg(feature = "search")]
+                search::search_fetch,
+                #[cfg(feature = "search")]
+                search::search_cancel,
             ]);
         Ok(tauri::plugin::Builder::<R>::new("aether")
             .invoke_handler(move |invoke| {
@@ -266,6 +312,8 @@ impl Builder {
                 app.manage(providers);
                 #[cfg(feature = "skills")]
                 app.manage(skills);
+                #[cfg(feature = "search")]
+                app.manage(search);
                 Ok(())
             })
             .on_event(on_event)

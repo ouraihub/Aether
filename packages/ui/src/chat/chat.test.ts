@@ -2,7 +2,14 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import type { ComponentProps } from 'svelte'
 import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from '../i18n'
-import { createFakePorts, type ChatHistoryPort, type ProvidersPort, type RunEvent, type RunRequest } from '../ports'
+import {
+  createFakePorts,
+  type ChatHistoryPort,
+  type ProvidersPort,
+  type RunEvent,
+  type RunRequest,
+  type SearchPort,
+} from '../ports'
 import type ChatPanel from './ChatPanel.svelte'
 import Harness from './Harness.test.svelte'
 
@@ -18,6 +25,7 @@ interface Extra {
   props?: Partial<ComponentProps<typeof ChatPanel>>
   history?: Partial<ChatHistoryPort>
   providers?: Partial<ProvidersPort>
+  search?: Partial<SearchPort>
 }
 
 function setup(
@@ -33,10 +41,10 @@ function setup(
         Promise.resolve([{ ...model, label: 'Local · main · m1', modelType: 'chat', supportsTools: null }]),
       ...extra.providers,
     },
+    ...(extra.search ? { search: extra.search } : {}),
     chat: {
       run: (request, emit, options) => {
         runs.push({ request, emit, signal: options?.signal })
-        // Like the backend: aborting cancels, and the run ends once as `cancelled`.
         options?.signal?.addEventListener('abort', () => emit({ kind: 'end', status: 'cancelled' }))
         return Promise.resolve({ runId: `r${runs.length}`, conversationId: withHistory ? 'c1' : null })
       },
@@ -241,5 +249,26 @@ describe('ChatPanel', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
     await fireEvent.keyDown(input, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledOnce()
+  })
+  it('sends explicit web search and keeps sources on its turn', async () => {
+    const { runs } = setup(false, null, { search: {} })
+    await fireEvent.click(screen.getByRole('button', { name: 'Web search' }))
+    await send('latest news')
+    expect(runs[0]?.request).toMatchObject({ webSearch: true, input: 'latest news' })
+    runs[0]?.emit({ kind: 'search_start' })
+    runs[0]?.emit({
+      kind: 'search_result',
+      query: 'latest news',
+      provider: 'jina',
+      hits: [{ title: 'Example', url: 'https://example.com', snippet: 'Result' }],
+    })
+    runs[0]?.emit({ kind: 'end', status: 'completed' })
+    await screen.findByRole('link', { name: 'Example' })
+    expect(screen.getByText('Found 1 results')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Web search' }).getAttribute('aria-pressed')).toBe('true')
+    await fireEvent.click(screen.getByRole('button', { name: 'Web search' }))
+    await send('do not search')
+    expect(runs[1]?.request.webSearch).not.toBe(true)
+    runs[1]?.emit({ kind: 'end', status: 'completed' })
   })
 })

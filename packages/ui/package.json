@@ -12,6 +12,7 @@
     "./tauri": "./src/tauri/index.ts",
     "./providers": "./src/providers/index.ts",
     "./chat": "./src/chat/index.ts",
+    "./search": "./src/search/index.ts",
     "./skills": "./src/skills/index.ts",
     "./mcp": "./src/mcp/index.ts",
     "./logs": "./src/logs/index.ts",

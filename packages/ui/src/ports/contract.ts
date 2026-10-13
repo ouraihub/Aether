@@ -31,6 +31,7 @@ import type { ScopeState } from './generated/ScopeState'
 import type { Status } from './generated/Status'
 import type { TokenRecord } from './generated/TokenRecord'
 import type { ToolDto } from './generated/ToolDto'
+import type { SearchPort } from './search'
 
 export interface CallOptions {
   signal?: AbortSignal
@@ -107,6 +108,7 @@ export interface KitPorts {
   logs?: LogsPort
   providers?: ProvidersPort
   chat?: ChatPort
+  search?: SearchPort
   skills?: SkillsPort
   mcpClient?: McpClientPort
   mcpServer?: McpServerPort

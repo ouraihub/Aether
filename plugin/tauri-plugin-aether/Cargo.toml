@@ -10,6 +10,7 @@ links = "tauri-plugin-aether"
 [features]
 default = []
 providers = ["dep:aether-providers"]
+search = ["dep:aether-search"]
 chat = ["providers", "dep:aether-chat"]
 skills = ["dep:aether-skills"]
 mcp-client = ["dep:aether-mcp-client"]
@@ -30,6 +31,7 @@ aether-providers = { workspace = true, optional = true }
 aether-chat = { workspace = true, optional = true }
 aether-skills = { workspace = true, optional = true }
 aether-mcp-client = { workspace = true, optional = true }
+aether-search = { workspace = true, optional = true }
 aether-mcp-server = { workspace = true, optional = true }
 
 [dev-dependencies]

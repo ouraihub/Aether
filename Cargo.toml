@@ -4,7 +4,7 @@ members = [
   "crates/aether-observability",
   "crates/aether-providers",
   "crates/aether-chat",
-  "crates/aether-skills",
+  "crates/aether-search",
   "crates/aether-mcp-client",
   "crates/aether-mcp-server",
   "plugin/tauri-plugin-aether",
@@ -30,6 +30,7 @@ aether-chat = { path = "crates/aether-chat" }
 aether-skills = { path = "crates/aether-skills" }
 aether-mcp-client = { path = "crates/aether-mcp-client" }
 aether-mcp-server = { path = "crates/aether-mcp-server" }
+aether-search = { path = "crates/aether-search" }
 tauri-plugin-aether = { path = "plugin/tauri-plugin-aether" }
 
 tauri = "=2.12.1"

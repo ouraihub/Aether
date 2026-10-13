@@ -218,6 +218,19 @@ pub enum EndStatus {
     Cancelled,
 }
 
+/// A search result source shown in the UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SearchHit {
+    /// Result title.
+    pub title: String,
+    /// Result URL.
+    pub url: String,
+    /// Result summary.
+    pub snippet: String,
+}
+
 /// Streamed to the UI; every run ends with exactly one `end`.
 #[derive(Debug, Serialize, TS)]
 #[serde(
@@ -227,6 +240,17 @@ pub enum EndStatus {
 )]
 #[ts(export)]
 pub enum RunEvent {
+    /// Search starts before the model request.
+    SearchStart,
+    /// Search results returned for the current query.
+    SearchResult {
+        /// User query sent to the provider.
+        query: String,
+        /// Provider id.
+        provider: String,
+        /// Search hits.
+        hits: Vec<SearchHit>,
+    },
     /// A model round starts.
     RoundStart {
         /// 1-based round number.

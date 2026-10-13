@@ -59,6 +59,20 @@ const FEATURES: &[(&str, &str, &[&str])] = &[
         ],
     ),
     (
+        "search",
+        "CARGO_FEATURE_SEARCH",
+        &[
+            "search_settings",
+            "search_save",
+            "search_set_default",
+            "search_reveal",
+            "search_check",
+            "search_query",
+            "search_fetch",
+            "search_cancel",
+        ],
+    ),
+    (
         "mcp-client",
         "CARGO_FEATURE_MCP_CLIENT",
         &[

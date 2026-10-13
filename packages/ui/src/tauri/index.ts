@@ -2,11 +2,12 @@
 // Argument names are the camelCase of the Rust command parameters (docs/15 §5).
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { KitClientError } from '../ports'
-import type { KitError, KitPorts, LogsPort, RunAccepted, RunEvent } from '../ports'
+import type { KitError, KitPorts, LogsPort, RunAccepted, RunEvent, SearchPort } from '../ports'
 
 /** Which feature ports the host enabled; the rest stay absent so their UI areas are hidden. */
 export interface TauriPortsOptions {
   providers?: boolean
+  search?: boolean
   chat?: boolean
   /** The host passed a conversation store (`aether:chat-history`); needs `chat`. */
   chatHistory?: boolean
@@ -62,6 +63,36 @@ export function createTauriPorts(options: TauriPortsOptions = {}): KitPorts & { 
         }
       },
     }
+  }
+  if (options.search) {
+    const searchCall = async <T>(
+      command: string,
+      args: Record<string, unknown> = {},
+      callOptions?: { signal?: AbortSignal },
+    ): Promise<T> => {
+      const signal = callOptions?.signal
+      if (signal?.aborted) throw new KitClientError(CANCELLED)
+      const jobId = crypto.randomUUID()
+      const cancel = () => void call('search_cancel', { jobId }).catch(() => undefined)
+      signal?.addEventListener('abort', cancel, { once: true })
+      try {
+        return await call<T>(command, { ...args, jobId })
+      } finally {
+        signal?.removeEventListener('abort', cancel)
+      }
+    }
+    const search: SearchPort = {
+      settings: (capability, o) => searchCall('search_settings', { capability }, o),
+      save: (input, o) => searchCall('search_save', { input }, o),
+      setDefault: (capability, provider, maxResults, o) =>
+        searchCall('search_set_default', { capability, provider, maxResults: maxResults ?? null }, o),
+      reveal: (capability, provider, currentPassword, o) =>
+        searchCall('search_reveal', { capability, provider, currentPassword: currentPassword ?? null }, o),
+      check: (capability, provider, o) => searchCall('search_check', { capability, provider }, o),
+      search: (query, o) => searchCall('search_query', { query }, o),
+      fetch: (url, o) => searchCall('search_fetch', { url }, o),
+    }
+    ports.search = search
   }
   if (options.chat) {
     ports.chat = {

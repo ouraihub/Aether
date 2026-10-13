@@ -2,6 +2,7 @@
 import { KitClientError } from './contract'
 import type { ChatPort, KitPorts, LogsPort, McpClientPort, McpServerPort, ProvidersPort, SkillsPort } from './contract'
 import type { LogLevel } from './generated/LogLevel'
+import type { SearchPort } from './search'
 
 type PortName = keyof KitPorts
 
@@ -9,6 +10,7 @@ export interface FakePortsOptions {
   logs?: Partial<LogsPort>
   providers?: Partial<ProvidersPort>
   chat?: Partial<ChatPort>
+  search?: Partial<SearchPort>
   skills?: Partial<SkillsPort>
   mcpClient?: Partial<McpClientPort>
   mcpServer?: Partial<McpServerPort>
@@ -20,7 +22,7 @@ const STOPPED = { running: false, port: 0, url: '', toolCount: 0 }
 
 export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
   let level: LogLevel = 'INFO'
-  const ports: Required<KitPorts> = {
+  const ports: Required<Omit<KitPorts, 'search'>> = {
     logs: {
       tail: () => Promise.resolve([]),
       ingest: (batch) => Promise.resolve({ accepted: batch.entries.length, rejected: 0 }),
@@ -112,6 +114,20 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     },
   }
   const result: KitPorts = { ...ports }
+  if (options.search) {
+    const unavailable = () =>
+      Promise.reject(new KitClientError({ code: 'internal', message: 'Configure the fake search method' }))
+    result.search = {
+      settings: unavailable,
+      save: unavailable,
+      setDefault: unavailable,
+      reveal: unavailable,
+      check: unavailable,
+      search: unavailable,
+      fetch: unavailable,
+      ...options.search,
+    }
+  }
   for (const name of options.omit ?? []) delete result[name]
   return result
 }

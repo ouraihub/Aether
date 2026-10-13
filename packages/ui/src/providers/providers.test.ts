@@ -49,7 +49,7 @@ describe('ProvidersSettings', () => {
     const saves = setup()
     await fireEvent.click(await screen.findByRole('button', { name: 'Fetch models' }))
     await screen.findByRole('dialog', { name: 'Pick models' })
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'gpt-4o' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Add gpt-4o' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Use 1 models' }))
     await fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
     await waitFor(() => expect(saves).toHaveLength(1))
@@ -57,6 +57,22 @@ describe('ProvidersSettings', () => {
     expect(saved?.id).toBe('e1')
     expect(saved && 'apiKey' in saved).toBe(false)
     expect(saved?.models.map((m) => m.id)).toEqual(['gpt-4o'])
+  })
+
+  it('bulk changes only search results and preserves picks outside the filter', async () => {
+    const saves = setup()
+    await fireEvent.click(await screen.findByRole('button', { name: 'Fetch models' }))
+    await screen.findByRole('dialog', { name: 'Pick models' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add gpt-4o' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Search model ID' }), { target: { value: 'embedding' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add all' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Remove all' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Search model ID' }), { target: { value: '' } })
+    expect(screen.getByRole('button', { name: 'Remove gpt-4o' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Add text-embedding-3' })).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Use 1 models' }))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saves[0]?.endpoints[0]?.models.map((m) => m.id)).toEqual(['gpt-4o']))
   })
 
   it('clears the key only through the explicit Clear button', async () => {

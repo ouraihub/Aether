@@ -6,6 +6,7 @@
   import { renderMarkdown } from '../markdown'
   import ApprovalCard from './ApprovalCard.svelte'
   import type { ChatTurn, ToolItem } from './run-session.svelte'
+  import ExternalLinkIcon from '@lucide/svelte/icons/external-link'
   import ToolCallItem from './ToolCallItem.svelte'
 
   let {
@@ -23,6 +24,14 @@
   const { i18n, notify } = getKitContext()
   const { t } = i18n
   const html = $derived(renderMarkdown(turn.text))
+  function safeUrl(value: string): string | null {
+    try {
+      const protocol = new URL(value).protocol
+      return protocol === 'http:' || protocol === 'https:' ? value : null
+    } catch {
+      return null
+    }
+  }
   let copied = $state(false)
 
   async function copy() {
@@ -63,6 +72,21 @@
         >
       {/if}
     </div>
+  {/if}
+  {#if turn.search.status === 'complete'}
+    <section class="flex flex-col gap-1 text-kit-sm" aria-label={t('chat.sources')}>
+      <p class="text-muted-foreground">{t('chat.sources')}</p>
+      {#each turn.search.hits as hit (hit.url)}
+        {@const url = safeUrl(hit.url)}
+        {#if url}<a
+            class="text-primary flex min-w-0 items-center gap-1 underline"
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            ><ExternalLinkIcon data-icon="inline-start" /><span class="truncate">{hit.title || url}</span></a
+          >{/if}
+      {/each}
+    </section>
   {/if}
   {#if turn.status === 'cancelled'}
     <p class="text-muted-foreground text-kit-sm">{t('chat.stopped')}</p>

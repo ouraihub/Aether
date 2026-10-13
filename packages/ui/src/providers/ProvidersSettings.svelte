@@ -130,8 +130,8 @@
 </script>
 
 {#if port}
-  <div class="flex min-h-0 gap-4">
-    <nav class="flex w-52 shrink-0 flex-col gap-1" aria-label={t('providers.title')}>
+  <div class="flex min-h-0 flex-col gap-4 sm:flex-row">
+    <nav class="flex w-full shrink-0 flex-col gap-1 sm:w-52" aria-label={t('providers.title')}>
       {#each providers as p (p.id)}
         <Button
           variant={draft?.id === p.id ? 'secondary' : 'ghost'}
