@@ -12,6 +12,7 @@
   import EndpointCard from './EndpointCard.svelte'
   import ModelPickerDialog from './ModelPickerDialog.svelte'
 
+  let { onchanged }: { onchanged?: () => void } = $props()
   const { ports, i18n, notify } = getKitContext()
   const { t } = i18n
   const port = ports.providers
@@ -76,6 +77,7 @@
       const id = draft.id ?? providers.find((p) => !before.has(p.id))?.id ?? null
       const saved = providers.find((p) => p.id === id)
       load(saved ? toDraft(saved) : null)
+      onchanged?.()
       notify.toast('success', t('providers.saved'))
     } catch (error) {
       notify.toast('error', errorText(error))
@@ -96,6 +98,7 @@
     try {
       providers = await port.remove(draft.id)
       load(providers[0] ? toDraft(providers[0]) : null)
+      onchanged?.()
     } catch (error) {
       notify.toast('error', errorText(error))
     }
