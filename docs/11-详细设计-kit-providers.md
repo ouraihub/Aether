@@ -60,7 +60,9 @@ interface ProbeError { kind: 'missing_key' | 'unauthorized' | 'not_found' | 'rat
   status: number | null; message: string | null /* 上游原文，已打码，≤300 字符 */; hint: string | null /* i18n key */ }
 ```
 
-nativeWebSearch默认false，用户显式声明；只允许chat模型与Messages/Responses协议，保存拒绝Chat Completions声明。搜索优先路由见17；不凭兼容端点模型名字猜测原生搜索。ModelSave的reasoning可省略/nullable，其他字段按生成DTO提交。新系统直接使用最终model表字段，不为新原生能力导入历史配置。
+nativeWebSearch默认false，用户显式声明；只允许chat模型与Messages/Responses协议，保存拒绝Chat Completions声明。搜索优先路由见17；不凭兼容端点模型名字猜测原生搜索。ModelSave的reasoning可省略/nullable，其他字段按生成DTO提交。
+
+providers.db保留migration1原始建表、migration2新增reasoning；migration3新增native_web_search（NOT NULL DEFAULT 0）。2026-10-14修复：首个原生搜索版本误改migration1而保留user_version=2，导致旧库模型列表/能力/连接查询缺列。打开时按实际列区分两种v2，经既有升级事务/备份升至v3；已包含列的v2只推进版本，保留原生声明。不得删库、清空模型/密钥或用空列表吞掉SQL错误。回归覆盖两种v2、重启、模型/思考参数/密文保留。
 
 - `keyMasked` 为首 4 尾 4 打码；`keyReadable=false` 表示密文存在但无法解密（换了 Windows 账户）。
 - 保存是**整服务商替换**：事务内按 `ProviderSave` 重写线路与模型，请求里没有的线路被删除。已有线路必须带回 `id`。

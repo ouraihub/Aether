@@ -43,7 +43,6 @@ CREATE TABLE models (
   context_window INTEGER, max_output INTEGER,
   can_vision INTEGER NOT NULL DEFAULT 0,
   supports_tools INTEGER,
-  native_web_search INTEGER NOT NULL DEFAULT 0,
   position INTEGER NOT NULL,
   PRIMARY KEY (endpoint_id, model_id)
 );",
@@ -74,7 +73,31 @@ impl Store {
     /// # Errors
     /// `incompatible_db` for a newer schema; `internal` when SQLite fails.
     pub fn open(root: &Path) -> Result<Self, KitError> {
-        let db = db::open(&root.join("providers.db"), MIGRATIONS)?;
+        let path = root.join("providers.db");
+        // The first native-search release added this column without advancing v2.
+        let has_native = if path.exists() {
+            let existing = Db::open(&path)?;
+            existing.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('models') WHERE name = 'native_web_search')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )?
+        } else {
+            false
+        };
+        let steps = [
+            MIGRATIONS[0],
+            MIGRATIONS[1],
+            Migration {
+                version: 3,
+                sql: if has_native {
+                    ""
+                } else {
+                    "ALTER TABLE models ADD COLUMN native_web_search INTEGER NOT NULL DEFAULT 0;"
+                },
+            },
+        ];
+        let db = db::open(&path, &steps)?;
         Ok(Self { db: Mutex::new(db) })
     }
 
@@ -613,6 +636,54 @@ mod tests {
 
     fn fail_seal(_: &str) -> Result<Vec<u8>, KitError> {
         Err(KitError::unsupported("secret_store"))
+    }
+
+    #[test]
+    fn version_two_upgrade_preserves_models_credentials_and_native_declarations() {
+        for already_has_native in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("providers.db");
+            let db = Db::open(&path).unwrap();
+            db.execute_batch(
+                "CREATE TABLE providers (id TEXT PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+                 CREATE TABLE endpoints (id TEXT PRIMARY KEY, provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE, slug TEXT NOT NULL, base_url TEXT NOT NULL, protocol TEXT NOT NULL, key_ciphertext BLOB, position INTEGER NOT NULL, UNIQUE(provider_id, slug));
+                 CREATE TABLE models (endpoint_id TEXT NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE, model_id TEXT NOT NULL, model_type TEXT NOT NULL, type_source TEXT NOT NULL, context_window INTEGER, max_output INTEGER, can_vision INTEGER NOT NULL DEFAULT 0, supports_tools INTEGER, position INTEGER NOT NULL, reasoning TEXT, PRIMARY KEY(endpoint_id, model_id));
+                 INSERT INTO providers VALUES ('p', 'Saved', 0, 1, 1);
+                 INSERT INTO endpoints VALUES ('e', 'p', 'saved', 'https://example.com', 'openai-responses', X'01020304', 0);
+                 INSERT INTO models VALUES ('e', 'saved-model', 'chat', 'user', 200000, 8192, 1, 1, 0, '{\"dialect\":\"openai\",\"efforts\":[\"low\",\"high\"]}');
+                 PRAGMA user_version = 2;",
+            ).unwrap();
+            if already_has_native {
+                db.execute_batch("ALTER TABLE models ADD COLUMN native_web_search INTEGER NOT NULL DEFAULT 0; UPDATE models SET native_web_search = 1;").unwrap();
+            }
+            drop(db);
+            for _ in 0..2 {
+                let store = Store::open(dir.path()).unwrap();
+                let options = store.model_options(ModelFilter::default()).unwrap();
+                assert_eq!(options[0].model_id, "saved-model");
+                assert_eq!(options[0].native_web_search, already_has_native);
+                assert_eq!(options[0].reasoning.as_ref().unwrap().efforts.len(), 2);
+                assert_eq!(
+                    store.list().unwrap()[0].endpoints[0].models[0].context_window,
+                    Some(200_000)
+                );
+                let db = store.lock().unwrap();
+                let cipher: Vec<u8> = db
+                    .query_row(
+                        "SELECT key_ciphertext FROM endpoints WHERE id = 'e'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(cipher, [1, 2, 3, 4]);
+                assert_eq!(
+                    db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+                        .unwrap(),
+                    3
+                );
+            }
+            assert!(path.with_file_name("providers.db.bak-v2").is_file());
+        }
     }
 
     #[test]
