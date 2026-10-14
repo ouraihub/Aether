@@ -73,6 +73,8 @@ export const en: Messages = {
   'chat.resetReasoning': 'Reset to default',
   'chat.reasoningDefaultHint':
     'Default sends no reasoning control; the provider decides. Choose an effort to override it.',
+  'chat.reasoningUnconfigured':
+    'No reasoning capabilities are configured for this model. Set its supported protocol and efforts in model settings to enable the slider.',
   'chat.unknown': 'Unknown',
   'chat.contextUsage': 'Context usage',
   'chat.usage': 'Token usage',

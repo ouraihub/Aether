@@ -64,6 +64,7 @@ export const zhCN: Messages = {
   'chat.reasoningSmarter': '更智能',
   'chat.resetReasoning': '恢复默认',
   'chat.reasoningDefaultHint': '默认不发送思考参数，由服务商决定。选择档位可指定强度。',
+  'chat.reasoningUnconfigured': '此模型尚未配置思考能力。在模型设置中声明支持的思考协议和档位后，即可使用滑块。',
   'chat.unknown': '未知',
   'chat.contextUsage': '上下文用量',
   'chat.usage': 'Token 用量',

@@ -772,7 +772,7 @@
             </div>{/if}
         </div>
         <div class="tool-group send-tools">
-          {#if allowedEfforts.length > 0}
+          {#if picked}
             <Popover.Root bind:open={reasoningOpen}>
               <Popover.Trigger disabled={session.running}>
                 {#snippet child({ props })}
@@ -816,7 +816,17 @@
                     onclick={() => (reasoningEffort = 'default')}>{t('chat.resetReasoning')}</Button
                   >
                 </div>
-                {#if allowedEfforts.length > 1}
+                {#if allowedEfforts.length === 0}
+                  <p class="reasoning-hint">{t('chat.reasoningUnconfigured')}</p>
+                  {#if onOpenSettings}<Button
+                      variant="outline"
+                      size="sm"
+                      onclick={() => {
+                        reasoningOpen = false
+                        onOpenSettings()
+                      }}>{t('chat.openSettings')}</Button
+                    >{/if}
+                {:else if allowedEfforts.length > 1}
                   <div class="reasoning-scale" aria-hidden="true">
                     <span>{t('chat.reasoningFaster')}</span><span>{t('chat.reasoningSmarter')}</span>
                   </div>

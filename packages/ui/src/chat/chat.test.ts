@@ -790,9 +790,19 @@ describe('ChatPanel', () => {
     await fireEvent.keyDown(models, { key: 'ArrowDown' })
     await fireEvent.keyDown(models, { key: 'End' })
     await fireEvent.keyDown(models, { key: 'Enter' })
-    await waitFor(() => expect(screen.queryByRole('button', { name: /^Reasoning effort:/ })).toBeNull())
   })
 
+  it('keeps reasoning discoverable without sending unsupported efforts', async () => {
+    const onOpenSettings = vi.fn()
+    const { runs } = setup(false, null, { props: { onOpenSettings } })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Reasoning effort: Default' }))
+    expect(await screen.findByText(/No reasoning capabilities are configured/)).toBeTruthy()
+    expect(screen.queryByRole('slider')).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
+    expect(onOpenSettings).toHaveBeenCalledOnce()
+    await send('provider default')
+    expect(runs[0]?.request.reasoningEffort).toBe('default')
+  })
   it('retries a failed history restore without losing the saved conversation or replacing its identity', async () => {
     const onConversationChange = vi.fn()
     const get = vi
