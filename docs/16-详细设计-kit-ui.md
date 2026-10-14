@@ -118,6 +118,7 @@ interface ChatPanelProps {
 - 用户复核后批准完整回复操作：展开按钮固定输入卡片右上角；回复左侧复制／更多／重答／换模型／翻译／删除／保存笔记，右侧用作上下文。候选共享questionId只显示一次问题，来源模型和选中态可读；selectTurn持久选择同会话路径，“分支”也选择同会话路径并清空草稿，fork仅“复制为新对话”。更多编辑CAS、Markdown下载均有真实行为；编辑／语言Dialog错误保草稿，当前选中及有后代回复不可删除。调用稳定turnId；运行中禁止结构变更；End后读回须先完成后端持久化。CH8附件／并发比较尚未授权。
 - 思考强度：Gauge／当前档位入口向上右对齐弹层，强度／恢复默认、更快—更智能、原生离散range；只遍历模型声明档位。default独立于显式档位，弹层打开和视觉中位不写medium；拖动／方向键／Home/End后才写合法值；none为显式关闭。选中模型时始终保留入口，无能力时明确说明并提供宿主设置入口，不显示伪造滑块；单显式档位用默认＋选项，切模型恢复default，运行中禁用，Esc先关弹层回焦点。复用RunRequest.reasoningEffort，不引入serviceTier/FastMode、模型目录或偏好存储。
 - ProvidersSettings保存／删除成功后通过可选onchanged回调通知宿主；宿主刷新角色选择和密钥线路，不因旧的初次加载快照把刚保存的模型继续显示为不可选。
+- 思考滑块按合法档位绘制等距刻度点，每个点对应一个effort；当前点由圆形thumb替代，其余点保留在轨道中心。原生range仍step=1，刻度不接管鼠标／触摸／键盘事件；主题色进度和背景色刻度沿用现有token。
 - `SkillPicker`：输入框上方的技能选择（列表只含元数据）；显示所选正文合计 / 预算；`end` 或请求错误为 `skill_changed` 时提示"技能已更新，请重新确认"并打开预览。
 - 工具：`tool_call` 显示"正在调用 <name>"（MCP 标服务名）；`approval_required` 显示 `ApprovalCard`（工具名、来源、参数预览、"允许本次 / 拒绝"）；`tool_result` 折叠为一行，`unknown` 标"结果未知，可能已执行"，`denied` 标"已拒绝"。
 - `end`：`completed` + `exhausted` 时显示"已达到工具调用轮数上限"；`failed` 显示错误与"重试"；`cancelled` 显示"已停止"。

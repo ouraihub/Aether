@@ -830,28 +830,43 @@
                   <div class="reasoning-scale" aria-hidden="true">
                     <span>{t('chat.reasoningFaster')}</span><span>{t('chat.reasoningSmarter')}</span>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max={allowedEfforts.length - 1}
-                    step="1"
-                    value={effortIndex}
-                    aria-label={t('chat.reasoningEffort')}
-                    aria-valuetext={effortLabel}
-                    disabled={session.running}
-                    oninput={commitReasoning}
-                    onpointerup={(event) => {
-                      if (event.button === 0) commitReasoning(event)
-                    }}
-                    onkeyup={(event) => {
-                      if (
-                        !event.isComposing &&
-                        ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)
-                      ) {
-                        commitReasoning(event)
-                      }
-                    }}
-                  />
+                  <div
+                    class="reasoning-slider"
+                    style:--reasoning-progress={`${(effortIndex / (allowedEfforts.length - 1)) * 100}%`}
+                  >
+                    <input
+                      type="range"
+                      min="0"
+                      max={allowedEfforts.length - 1}
+                      step="1"
+                      value={effortIndex}
+                      aria-label={t('chat.reasoningEffort')}
+                      aria-valuetext={effortLabel}
+                      disabled={session.running}
+                      oninput={commitReasoning}
+                      onpointerup={(event) => {
+                        if (event.button === 0) commitReasoning(event)
+                      }}
+                      onkeyup={(event) => {
+                        if (
+                          !event.isComposing &&
+                          ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)
+                        ) {
+                          commitReasoning(event)
+                        }
+                      }}
+                    />
+                    <div class="reasoning-ticks" aria-hidden="true">
+                      {#each allowedEfforts as effort, index (effort)}
+                        <span
+                          class="reasoning-tick"
+                          data-effort={effort}
+                          class:current={index === effortIndex}
+                          style:left={`${(index / (allowedEfforts.length - 1)) * 100}%`}
+                        ></span>
+                      {/each}
+                    </div>
+                  </div>
                 {:else}
                   <Field.FieldSet disabled={session.running}>
                     <Field.FieldLegend class="sr-only">{t('chat.reasoningEffort')}</Field.FieldLegend>
@@ -1216,9 +1231,74 @@
   :global(.reasoning-popover input) {
     accent-color: var(--color-primary);
   }
-  :global(.reasoning-popover input[type='range']) {
+  .reasoning-slider {
+    position: relative;
+    height: 1.75rem;
+    display: flex;
+    align-items: center;
+  }
+  :global(.reasoning-slider input[type='range']) {
+    appearance: none;
     width: 100%;
+    height: 1.75rem;
     margin: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  :global(.reasoning-slider input::-webkit-slider-runnable-track) {
+    height: 0.375rem;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--color-primary) var(--reasoning-progress),
+      var(--color-muted) var(--reasoning-progress)
+    );
+  }
+  :global(.reasoning-slider input::-moz-range-track) {
+    height: 0.375rem;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--color-primary) var(--reasoning-progress),
+      var(--color-muted) var(--reasoning-progress)
+    );
+  }
+  :global(.reasoning-slider input::-webkit-slider-thumb) {
+    appearance: none;
+    width: 1.125rem;
+    height: 1.125rem;
+    margin-top: -0.375rem;
+    border: 1px solid var(--color-border);
+    border-radius: 50%;
+    background: var(--color-popover);
+  }
+  :global(.reasoning-slider input::-moz-range-thumb) {
+    width: 1.125rem;
+    height: 1.125rem;
+    box-sizing: border-box;
+    border: 1px solid var(--color-border);
+    border-radius: 50%;
+    background: var(--color-popover);
+  }
+  .reasoning-ticks {
+    position: absolute;
+    inset: 50% 0.5625rem auto;
+    pointer-events: none;
+  }
+  .reasoning-tick {
+    position: absolute;
+    width: 0.25rem;
+    height: 0.25rem;
+    border-radius: 50%;
+    background: var(--color-popover);
+    transform: translate(-50%, -50%);
+  }
+  .reasoning-tick.current {
+    visibility: hidden;
+  }
+  :global(.reasoning-slider input:disabled) {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
   :global(.reasoning-popover input:focus-visible) {
     outline: 2px solid var(--color-ring);
