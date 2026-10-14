@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { ContextUsage, TokenUsage } from '../ports'
   import { getKitContext } from '../context'
+  import ChartNoAxesColumnIcon from '@lucide/svelte/icons/chart-no-axes-column'
+  let details = $state<HTMLDetailsElement | null>(null)
   interface Props {
     context: ContextUsage | null
     usage: TokenUsage | null
@@ -16,11 +18,24 @@
   const fields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const
 </script>
 
-<details class="text-muted-foreground text-kit-sm min-w-0" aria-label={t('chat.usage')}>
-  <summary class="cursor-pointer"
-    >{t('chat.contextUsage')}: {percent === null ? t('chat.unknown') : `${percent.toFixed(1)}%`}</summary
-  >
-  <div class="flex flex-col gap-2 py-2">
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions (Esc closes this disclosure first) -->
+<details
+  class="usage-details"
+  bind:this={details}
+  aria-label={t('chat.usage')}
+  onkeydown={(e) => {
+    if (e.key === 'Escape' && details?.open) {
+      details.open = false
+      e.preventDefault()
+      e.stopPropagation()
+    }
+  }}
+>
+  <summary aria-label={t('chat.usage')} title={t('chat.contextUsage')}>
+    <ChartNoAxesColumnIcon aria-hidden="true" />
+    <span>{percent === null ? t('chat.unknown') : `${percent.toFixed(1)}%`}</span>
+  </summary>
+  <div class="usage-content">
     <p>
       {t('chat.contextUsage')}: {context?.tokens ?? t('chat.unknown')}{#if context?.contextWindow != null}
         / {context.contextWindow}{/if} · {t(
@@ -51,3 +66,64 @@
     <p>{t('chat.usageHint')}</p>
   </div>
 </details>
+
+<style>
+  .usage-details {
+    position: relative;
+    min-width: 0;
+    color: var(--color-muted-foreground);
+    font-size: var(--kit-font-size-sm, 0.8125rem);
+  }
+  summary {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: var(--kit-radius, var(--radius));
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  summary:focus-visible {
+    outline: 2px solid var(--color-ring);
+  }
+  summary :global(svg) {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+  }
+  .usage-content {
+    position: absolute;
+    bottom: calc(100% + 0.5rem);
+    right: 0;
+    width: min(20rem, calc(100cqw - 5rem));
+    max-height: 45cqh;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--kit-radius, var(--radius));
+    background: var(--color-popover);
+    color: var(--color-popover-foreground);
+  }
+  p {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th,
+  td {
+    padding: 0.25rem;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+  meter {
+    width: 100%;
+  }
+</style>

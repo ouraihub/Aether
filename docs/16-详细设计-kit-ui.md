@@ -110,6 +110,9 @@ interface ChatPanelProps {
 ```
 
 - 历史下拉（有 `history` 端口时）、新对话、删除当前会话（`notify.confirm` 确认后 `history.remove`，再回到新对话）、上下文标签（× 本轮不带）、Markdown 渲染（`{@attach}` + 已清洗 HTML）、每轮复制（剪贴板，短暂显示"已复制"）/ 插入、最后一轮重新生成、停止、失败原因与重试（= 重新生成最后一轮）、空状态（无模型 → 提示 + "打开设置"；空会话 → 简短提示）、窄屏全屏 + Esc 关闭（有 `onClose`、焦点在面板内且没有运行时）。
+- 2026-10-14批准的Voynote参考改造：紧凑两行顶部，一体输入卡片（Enter换行、Ctrl/Cmd+Enter发送、IME期间不发送、展开保留草稿），AI回复卡片与框架独立正文排版；末轮重新生成／重试在回复内。消息区单独滚动，向上阅读暂停跟随。历史／新建／删除／重命名复用现有端口；加载失败与无模型分开。首批不新增消息树／附件DTO或无后端按钮。输入未接纳失败可恢复，终态保留部分输出。通用局部CSS在完整框架入口与宿主Tailwind入口均有效，不覆盖宿主主题。
+- 上下文标签移除仅代表本轮context=null；scope仍为会话归属。宿主必须继续校验会话和关联资源访问权限，不能以无payload免鉴权；若非空context仍需匹配scope。写作必填由宿主继续执行。
+- 实施证据：完整UI lint/格式/typecheck（0错误0警告）与11文件68项通过，i18n337键、DTO64文件、依赖13crate一致。真实Chromium→AutoNote HTTP端口→Hono/SQLite→HTTPS回环SSE验Enter/CtrlEnter、思考high出站参数、移除context且历史保留、重命名HTTP读回、Esc只关会话Dialog、长流向上阅读scrollTop保持0；320/375/414/768容器无横向溢出。独立styles.css入口与宿主Tailwind入口均读到有效正文背景／边框；静态运行期语义变量防止inline主题被裁剪。付费供应商与原生手机软键盘不在此回环证明中。
 - `SkillPicker`：输入框上方的技能选择（列表只含元数据）；显示所选正文合计 / 预算；`end` 或请求错误为 `skill_changed` 时提示"技能已更新，请重新确认"并打开预览。
 - 工具：`tool_call` 显示"正在调用 <name>"（MCP 标服务名）；`approval_required` 显示 `ApprovalCard`（工具名、来源、参数预览、"允许本次 / 拒绝"）；`tool_result` 折叠为一行，`unknown` 标"结果未知，可能已执行"，`denied` 标"已拒绝"。
 - `end`：`completed` + `exhausted` 时显示"已达到工具调用轮数上限"；`failed` 显示错误与"重试"；`cancelled` 显示"已停止"。

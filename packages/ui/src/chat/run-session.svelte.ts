@@ -103,7 +103,7 @@ export class RunSession {
       hits: [],
       error: null,
     }
-    if (this.running) return
+    if (this.running || input.trim() === '') return Promise.resolve(false)
     this.turns.push({
       input,
       text: '',
@@ -117,7 +117,7 @@ export class RunSession {
       exhausted: false,
       search,
     })
-    this.#start(base, input, false, webSearch)
+    return this.#start(base, input, false, webSearch)
   }
 
   /** Reruns the last turn in place: stored (`regenerate`) with history, a fresh run without. */
@@ -135,7 +135,7 @@ export class RunSession {
       tools: [],
       exhausted: false,
     })
-    this.#start(base, last.input, this.conversationId !== null, webSearch)
+    void this.#start(base, last.input, this.conversationId !== null, webSearch)
   }
 
   /** Cancels the active run; its `end` arrives as `cancelled`. */
@@ -180,7 +180,7 @@ export class RunSession {
   #start(base: RunBase, input: string, regenerate: boolean, webSearch: boolean) {
     // The proxied element, so streamed writes are reactive.
     const turn = this.turns[this.turns.length - 1]
-    if (!turn) return
+    if (!turn) return Promise.resolve(false)
     const abort = new AbortController()
     this.#abort = abort
     this.contextUsage = null
@@ -293,19 +293,21 @@ export class RunSession {
       ...(base.purpose === 'chat' && webSearch ? { webSearch: true } : {}),
     }
     this.#runId = null
-    this.#port.run(request, onEvent, { signal: abort.signal }).then(
+    return this.#port.run(request, onEvent, { signal: abort.signal }).then(
       (accepted) => {
-        if (this.#abort !== abort && this.#abort !== null) return
-        if (!this.turns.includes(turn)) return
+        if (this.#abort !== abort && this.#abort !== null) return true
+        if (!this.turns.includes(turn)) return true
         this.#runId = accepted.runId
         if (accepted.conversationId) this.conversationId = accepted.conversationId
+        return true
       },
       // Rejected before acceptance: no `end` will follow.
       (error: unknown) => {
-        if (this.#abort !== abort) return
+        if (this.#abort !== abort) return true
         const code = isKitClientError(error) ? error.code : 'internal'
         if (isKitClientError(error)) this.#checkSkill(error)
         finish(code === 'cancelled' ? 'cancelled' : 'failed', code === 'cancelled' ? null : code)
+        return code === 'cancelled'
       },
     )
   }
