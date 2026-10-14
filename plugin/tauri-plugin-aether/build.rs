@@ -64,6 +64,9 @@ const FEATURES: &[(&str, &str, &[&str])] = &[
         &[
             "search_settings",
             "search_save",
+            "search_save_preferences",
+            "search_save_key",
+            "search_remove_key",
             "search_set_default",
             "search_reveal",
             "search_check",

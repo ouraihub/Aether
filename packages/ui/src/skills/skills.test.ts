@@ -39,7 +39,17 @@ function mount(options: FakePortsOptions, skills?: { id: string; revision: numbe
   const ports = createFakePorts({
     providers: {
       modelOptions: () =>
-        Promise.resolve([{ endpointId: 'e1', modelId: 'm1', label: 'm1', modelType: 'chat', supportsTools: null }]),
+        Promise.resolve([
+          {
+            endpointId: 'e1',
+            modelId: 'm1',
+            label: 'm1',
+            modelType: 'chat',
+            supportsTools: null,
+            reasoning: null,
+            nativeWebSearch: false,
+          },
+        ]),
     },
     ...options,
   })

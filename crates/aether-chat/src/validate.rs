@@ -77,6 +77,24 @@ pub(crate) fn prepare(input: &mut RunInput) -> Result<String, KitError> {
             return Err(KitError::needs_config("missing_key"));
         }
     }
+
+    if input.native_web_search
+        && (!connection.native_web_search
+            || connection.protocol == aether_support::Protocol::OpenaiChat)
+    {
+        return Err(KitError::bad_request("nativeWebSearch", "unsupported"));
+    }
+    if input.native_web_search && input.tools.iter().any(|tool| tool.name == "web_search") {
+        return Err(KitError::bad_request("tools", "duplicate"));
+    }
+    if input.reasoning_effort != aether_support::ReasoningEffort::Default {
+        let Some(config) = input.connection.reasoning.as_ref() else {
+            return Err(KitError::needs_config("reasoning"));
+        };
+        if !config.allows(input.reasoning_effort) {
+            return Err(KitError::bad_request("reasoningEffort", "unsupported"));
+        }
+    }
     if connection.supports_tools == Some(false) && !input.tools.is_empty() {
         tracing::info!(run_id = %input.run_id, count = input.tools.len(), "chat.run.tools_dropped");
         input.tools.clear();

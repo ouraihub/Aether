@@ -9,7 +9,10 @@ mod store;
 mod url;
 
 pub use aether_support::secret::KeyChange;
-pub use aether_support::{Connection, KitError, KitErrorCode, Protocol};
+pub use aether_support::{
+    Connection, ContextSource, ContextUsage, KitError, KitErrorCode, Protocol, ReasoningBlock,
+    ReasoningConfig, ReasoningDialect, ReasoningEffort, TokenUsage,
+};
 pub use dto::*;
 pub use infer::{Inferred, infer};
 pub use store::Store;

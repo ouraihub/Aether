@@ -193,6 +193,7 @@ async fn tool_calls_round_trip_through_the_next_request() {
         let assistant = Message::Assistant {
             text: String::new(),
             tool_calls: calls.clone(),
+            reasoning: vec![],
         };
         assert_eq!(summary.messages[0], assistant, "{protocol:?}");
         let tools = match protocol {

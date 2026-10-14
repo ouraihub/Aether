@@ -275,6 +275,12 @@ impl Builder {
                 #[cfg(feature = "search")]
                 search::search_save,
                 #[cfg(feature = "search")]
+                search::search_save_preferences,
+                #[cfg(feature = "search")]
+                search::search_save_key,
+                #[cfg(feature = "search")]
+                search::search_remove_key,
+                #[cfg(feature = "search")]
                 search::search_set_default,
                 #[cfg(feature = "search")]
                 search::search_reveal,

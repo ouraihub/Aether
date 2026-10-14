@@ -9,10 +9,19 @@
   import GlobeIcon from '@lucide/svelte/icons/globe'
   import { Textarea } from '#lib/components/ui/textarea/index.js'
   import { getKitContext } from '../context'
-  import { isKitClientError, type ConversationSummary, type ModelRef, type SkillRef } from '../ports'
+  import {
+    isKitClientError,
+    type ConversationSummary,
+    type ModelRef,
+    type SkillRef,
+    type ModelOption,
+    type ReasoningEffort,
+  } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
-  import MessageItem from './MessageItem.svelte'
   import { RunSession } from './run-session.svelte'
+  import UsageDetails from './UsageDetails.svelte'
+  import MessageItem from './MessageItem.svelte'
+  import { REASONING_EFFORTS } from '../providers/reasoning'
   import SkillPicker from './SkillPicker.svelte'
 
   let {
@@ -59,6 +68,15 @@
 
   // svelte-ignore state_referenced_locally
   let picked = $state<ModelRef | null>(model)
+  let capability = $state<ModelOption | null>(null)
+  let reasoningEffort = $state<ReasoningEffort>('default')
+  const allowedEfforts = $derived(capability?.reasoning?.efforts ?? [])
+  function pickModel(next: ModelRef, option: ModelOption | null) {
+    picked = next
+    capability = option
+    reasoningEffort = 'default'
+    session?.resetContext()
+  }
   let draft = $state('')
   let conversations = $state<ConversationSummary[]>([])
   // svelte-ignore state_referenced_locally
@@ -78,15 +96,37 @@
     language: i18n.locale,
     model: picked,
     skills: selected,
+    reasoningEffort,
     context: activeContext ? { kind: activeContext.kind, id: activeContext.id } : null,
   })
   const canRegenerate = $derived(session !== null && !session.running && session.turns.length > 0)
   let webSearch = $state(false)
   let noModels = $state(false)
-  void ports.providers
-    ?.modelOptions({ modelType: 'chat' })
-    .then((list) => (noModels = list.length === 0))
-    .catch(() => undefined)
+  $effect(() => {
+    let alive = true
+    void ports.providers
+      ?.modelOptions({ modelType: 'chat' })
+      .then((list) => {
+        if (!alive) return
+        noModels = list.length === 0
+        capability =
+          list.find((item) => item.endpointId === picked?.endpointId && item.modelId === picked?.modelId) ?? null
+        if (!allowedEfforts.includes(reasoningEffort) && reasoningEffort !== 'default') reasoningEffort = 'default'
+      })
+      .catch(() => {
+        if (alive) notify.toast('error', t('chat.modelsFailed'))
+      })
+    return () => {
+      alive = false
+    }
+  })
+  const currentContext = $derived(
+    session?.contextUsage &&
+      session.contextUsage.endpointId === picked?.endpointId &&
+      session.contextUsage.modelId === picked?.modelId
+      ? session.contextUsage
+      : null,
+  )
 
   async function refresh() {
     if (!history) return
@@ -174,8 +214,28 @@
   <section class="flex min-h-0 flex-1 flex-col gap-3" aria-label={t('chat.title')} {onkeydown}>
     <header class="flex items-center gap-2">
       <div class="w-72">
-        <ModelSelect value={picked} filter={{ modelType: 'chat' }} onchange={(m) => (picked = m)} />
+        <ModelSelect value={picked} filter={{ modelType: 'chat' }} disabled={session.running} onchange={pickModel} />
       </div>
+      {#if allowedEfforts.length > 0}
+        <Select.Root
+          type="single"
+          value={reasoningEffort}
+          onValueChange={(value) => (reasoningEffort = value as ReasoningEffort)}
+        >
+          <Select.Trigger class="w-36" disabled={session.running} aria-label={t('chat.reasoningEffort')}
+            >{t(`chat.effort.${reasoningEffort}`)}</Select.Trigger
+          >
+          <Select.Content
+            ><Select.Group>
+              <Select.Item value="default" label={t('chat.effort.default')} />
+              {#each REASONING_EFFORTS.filter( (effort) => allowedEfforts.includes(effort) ) as effort (effort)}<Select.Item
+                  value={effort}
+                  label={t(`chat.effort.${effort}`)}
+                />{/each}
+            </Select.Group></Select.Content
+          >
+        </Select.Root>
+      {/if}
       {#if history}
         <Select.Root type="single" value={session.conversationId ?? ''} onValueChange={(id) => void open(id)}>
           <Select.Trigger class="w-64" aria-label={t('chat.history')}>
@@ -309,6 +369,11 @@
             {/if}
           </Button>
         {/if}
+        <UsageDetails
+          context={currentContext}
+          usage={session.turns.at(-1)?.usage ?? null}
+          total={session.cumulativeUsage}
+        />
         <div class="ml-auto flex items-center gap-2">
           {#if canRegenerate}
             <Button type="button" variant="outline" onclick={() => session.regenerate(base, webSearch)}

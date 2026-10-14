@@ -11,9 +11,14 @@ pub mod id;
 pub mod mask;
 pub mod net;
 pub mod paths;
+pub mod reasoning;
 pub mod secret;
 pub mod sse;
 
 pub use connection::{Connection, Protocol};
 pub use contract::{Approval, SkillRef};
 pub use error::{Details, KitError, KitErrorCode};
+pub use reasoning::{
+    ContextSource, ContextUsage, ReasoningBlock, ReasoningConfig, ReasoningDialect,
+    ReasoningEffort, TokenUsage,
+};

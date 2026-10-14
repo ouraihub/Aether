@@ -182,7 +182,6 @@ pub(crate) fn assemble(
     if let Some(prompt) = host.system_prompt(req) {
         system.push(SystemPart::Host(prompt));
     }
-    // Skills sit between the host prompt and the context (docs/12 §2.2 order).
     system.extend(skills);
     if let Some(block) = host.context(req)? {
         system.push(SystemPart::Context {
@@ -194,7 +193,6 @@ pub(crate) fn assemble(
         (Some(store), Some(id)) => {
             let mut turns = store.load(id)?.turns;
             if req.regenerate {
-                // Regenerate reruns the last turn's own input against the turns before it.
                 let last = turns.pop().ok_or_else(|| KitError::not_found("turn"))?;
                 (turns, last.input)
             } else {
@@ -203,7 +201,7 @@ pub(crate) fn assemble(
         }
         _ => (Vec::new(), req.input.clone()),
     };
-    let used_chars: usize = input.chars().count()
+    let used_chars = input.chars().count()
         + system
             .iter()
             .map(|part| match part {
@@ -216,6 +214,7 @@ pub(crate) fn assemble(
         .context_window
         .saturating_sub(budget.max_output)
         .saturating_sub(used);
+    let reasoning_effort = req.reasoning_effort.unwrap_or_default();
     Ok(RunInput {
         run_id,
         connection,
@@ -224,6 +223,8 @@ pub(crate) fn assemble(
         input,
         tools: host.tools(req).into_iter().map(|tool| tool.spec).collect(),
         budget,
+        reasoning_effort,
+        native_web_search: false,
     })
 }
 
@@ -309,6 +310,11 @@ pub(crate) async fn chat_run<R: Runtime>(
     if web_search {
         return Err(KitError::unsupported("search"));
     }
+    #[cfg(feature = "search")]
+    if web_search {
+        input.native_web_search =
+            chat.search.preferences()?.model_tools_preferred && input.connection.native_web_search;
+    }
     // Before `validate`, so a name clash with a host tool is rejected (docs/15 §4 step 5).
     #[cfg(feature = "mcp-client")]
     let executor = {
@@ -352,7 +358,7 @@ pub(crate) async fn chat_run<R: Runtime>(
     tauri::async_runtime::spawn(async move {
         let chat = app.state::<Chat>();
         #[cfg(feature = "search")]
-        if web_search {
+        if web_search && !input.native_web_search {
             let searched = async {
                 on_event.send(RunEvent::SearchStart).map_err(|_| KitError::cancelled())?;
                 let result = tokio::select! {
@@ -416,6 +422,12 @@ pub(crate) async fn chat_run<R: Runtime>(
                         error_code: code,
                         input_tokens: None,
                         output_tokens: None,
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        reasoning_tokens: None,
+                        context_usage: None,
+                        reasoning_effort: Some(input.reasoning_effort),
+                        endpoint_id: input.connection.endpoint_id.clone(),
                     };
                     if let Err(error) = blocking(move || store.finish_turn(turn, record)).await {
                         tracing::warn!(run_id = %task_run_id, code = ?error.code(), "chat.turn.finish_failed");
@@ -426,6 +438,8 @@ pub(crate) async fn chat_run<R: Runtime>(
             }
         }
         let (mut rounds, mut tools, mut error_code) = (0_u8, 0_u32, None);
+        let endpoint_id = input.connection.endpoint_id.clone();
+        let reasoning_effort = input.reasoning_effort;
         let summary = chat
             .runner
             .run(input, &executor, &chat.approvals, &cancel, |event| {
@@ -436,6 +450,8 @@ pub(crate) async fn chat_run<R: Runtime>(
                     RunEvent::SearchStart
                     | RunEvent::SearchResult { .. }
                     | RunEvent::TextDelta { .. }
+                    | RunEvent::ReasoningDelta { .. }
+                    | RunEvent::Context { .. }
                     | RunEvent::ApprovalRequired { .. }
                     | RunEvent::ToolResult { .. }
                     | RunEvent::Usage { .. }
@@ -456,6 +472,12 @@ pub(crate) async fn chat_run<R: Runtime>(
                 error_code,
                 input_tokens: summary.usage.input_tokens,
                 output_tokens: summary.usage.output_tokens,
+                cache_read_tokens: summary.usage.cache_read_tokens,
+                cache_write_tokens: summary.usage.cache_write_tokens,
+                reasoning_tokens: summary.usage.reasoning_tokens,
+                context_usage: summary.context_usage,
+                reasoning_effort: Some(reasoning_effort),
+                endpoint_id,
             };
             if let Err(error) = blocking(move || store.finish_turn(turn, record)).await {
                 tracing::warn!(run_id = %task_run_id, code = ?error.code(), "chat.turn.finish_failed");
@@ -555,24 +577,40 @@ pub(crate) struct Turn {
     id: String,
     status: TurnStatus,
     input: String,
-    /// Assistant text of all rounds, including partial text of a failed/cancelled turn.
     text: String,
     model_id: Option<String>,
-    /// `KitErrorCode` of a failed turn, or `interrupted` after a crash.
     error_code: Option<String>,
+    #[ts(optional = nullable)]
+    usage: Option<aether_support::TokenUsage>,
+    #[ts(optional = nullable)]
+    context_usage: Option<aether_support::ContextUsage>,
+    #[ts(optional = nullable)]
+    reasoning_effort: Option<aether_support::ReasoningEffort>,
+    reasoning_text: Option<String>,
 }
 
 impl From<aether_chat::Turn> for Turn {
     fn from(t: aether_chat::Turn) -> Self {
-        let text = t
-            .messages
-            .iter()
-            .filter_map(|m| match m {
-                Message::Assistant { text, .. } if !text.is_empty() => Some(text.as_str()),
-                Message::Assistant { .. } | Message::User(_) | Message::Tool { .. } => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        let mut text = String::new();
+        let mut reasoning_text = String::new();
+        for message in &t.messages {
+            if let Message::Assistant {
+                text: body,
+                reasoning,
+                ..
+            } = message
+            {
+                if !body.is_empty() {
+                    if !text.is_empty() {
+                        text.push_str("\n\n")
+                    };
+                    text.push_str(body)
+                };
+                if !reasoning.is_empty() {
+                    reasoning_text.push_str("[reasoning]")
+                }
+            }
+        }
         Self {
             id: t.id,
             status: match t.status {
@@ -585,6 +623,16 @@ impl From<aether_chat::Turn> for Turn {
             text,
             model_id: t.model_id,
             error_code: t.error_code,
+            usage: Some(aether_support::TokenUsage {
+                input_tokens: t.input_tokens,
+                output_tokens: t.output_tokens,
+                cache_read_tokens: t.cache_read_tokens,
+                cache_write_tokens: t.cache_write_tokens,
+                reasoning_tokens: t.reasoning_tokens,
+            }),
+            context_usage: t.context_usage,
+            reasoning_effort: t.reasoning_effort,
+            reasoning_text: Some(reasoning_text),
         }
     }
 }

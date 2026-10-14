@@ -5,6 +5,7 @@ import { createI18n } from '../i18n'
 import {
   createFakePorts,
   type ChatHistoryPort,
+  type Conversation,
   type ProvidersPort,
   type RunEvent,
   type RunRequest,
@@ -38,7 +39,16 @@ function setup(
   const ports = createFakePorts({
     providers: {
       modelOptions: () =>
-        Promise.resolve([{ ...model, label: 'Local · main · m1', modelType: 'chat', supportsTools: null }]),
+        Promise.resolve([
+          {
+            ...model,
+            label: 'Local · main · m1',
+            modelType: 'chat',
+            supportsTools: null,
+            reasoning: null,
+            nativeWebSearch: false,
+          },
+        ]),
       ...extra.providers,
     },
     ...(extra.search ? { search: extra.search } : {}),
@@ -199,16 +209,18 @@ describe('ChatPanel', () => {
   })
 
   it('restores the given conversation and continues it', async () => {
-    const turn = {
+    const turn: Conversation['turns'][number] = {
       id: 't1',
-      status: 'completed' as const,
+      status: 'completed',
       input: 'earlier',
       text: 'answer',
       modelId: null,
       errorCode: null,
+      reasoningEffort: 'default',
+      reasoningText: null,
     }
-    const summary = { id: 'c9', title: 'Old', scope: null, createdAt: 0, updatedAt: 0 }
-    const get = vi.fn(() => Promise.resolve({ summary, turns: [turn] }))
+    const summary: Conversation['summary'] = { id: 'c9', title: 'Old', scope: null, createdAt: 0, updatedAt: 0 }
+    const get = vi.fn<ChatHistoryPort['get']>(() => Promise.resolve({ summary, turns: [turn] }))
     const onConversationChange = vi.fn()
     const { runs } = setup(true, null, { history: { get }, props: { conversationId: 'c9', onConversationChange } })
     await screen.findByText('earlier')
@@ -264,11 +276,73 @@ describe('ChatPanel', () => {
     })
     runs[0]?.emit({ kind: 'end', status: 'completed' })
     await screen.findByRole('link', { name: 'Example' })
-    expect(screen.getByText('Found 1 results')).toBeTruthy()
+    expect(screen.getByText('1 results found')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Web search' }).getAttribute('aria-pressed')).toBe('true')
     await fireEvent.click(screen.getByRole('button', { name: 'Web search' }))
     await send('do not search')
     expect(runs[1]?.request.webSearch).not.toBe(true)
     runs[1]?.emit({ kind: 'end', status: 'completed' })
+  })
+  it('shows the last request context separately from known cumulative usage and clears it on regeneration', async () => {
+    const { runs } = setup(true)
+    await send('first')
+    const usage = {
+      inputTokens: 120,
+      outputTokens: 30,
+      cacheReadTokens: 80,
+      cacheWriteTokens: null,
+      reasoningTokens: 20,
+    }
+    runs[0]?.emit({ kind: 'usage', ...usage })
+    runs[0]?.emit({ kind: 'usage', ...usage })
+    runs[0]?.emit({ kind: 'context', usage: { tokens: 150, contextWindow: 1000, source: 'reported', ...model } })
+    runs[0]?.emit({ kind: 'end', status: 'completed' })
+    await screen.findByText('Context usage: 15.0%')
+    await send('second')
+    runs[1]?.emit({ kind: 'usage', ...usage, inputTokens: 200, outputTokens: 40 })
+    runs[1]?.emit({ kind: 'context', usage: { tokens: 240, contextWindow: 1000, source: 'reported', ...model } })
+    runs[1]?.emit({ kind: 'end', status: 'completed' })
+    await screen.findByText('Context usage: 24.0%')
+    const inputRow = screen.getByRole('row', { name: 'Input 200 320' })
+    expect(inputRow).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+    await screen.findByText('Context usage: Unknown')
+    expect(screen.queryByRole('meter')).toBeNull()
+  })
+
+  it('restores reasoning and statistics from history without inventing unknown fields', async () => {
+    setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: {
+        get: () =>
+          Promise.resolve({
+            summary: { id: 'saved', title: 'Saved', scope: null, createdAt: 0, updatedAt: 0 },
+            turns: [
+              {
+                id: 't',
+                status: 'completed',
+                input: 'question',
+                text: 'answer',
+                errorCode: null,
+                ...model,
+                reasoningEffort: 'high',
+                reasoningText: 'summary',
+                usage: {
+                  inputTokens: 12,
+                  outputTokens: 3,
+                  cacheReadTokens: null,
+                  cacheWriteTokens: null,
+                  reasoningTokens: null,
+                },
+                contextUsage: { tokens: 15, contextWindow: 1000, source: 'reported', ...model },
+              },
+            ],
+          }),
+      },
+    })
+    await screen.findByText('answer')
+    await screen.findByText('Context usage: 1.5%')
+    expect(screen.getByText('summary')).toBeTruthy()
+    expect(screen.getByRole('row', { name: 'Cache read Unknown Unknown' })).toBeTruthy()
   })
 })

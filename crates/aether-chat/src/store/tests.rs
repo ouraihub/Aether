@@ -20,6 +20,12 @@ fn completed(messages: Vec<Message>) -> TurnRecord {
         error_code: None,
         input_tokens: Some(10),
         output_tokens: Some(5),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        reasoning_tokens: None,
+        context_usage: None,
+        reasoning_effort: None,
+        endpoint_id: None,
     }
 }
 
@@ -37,6 +43,7 @@ fn tool_turn(seq: u32, input: &str) -> Turn {
                     name: "search".into(),
                     args: json!({"q": "x"}),
                 }],
+                reasoning: vec![],
             },
             Message::Tool {
                 call_id: format!("c{seq}"),
@@ -45,6 +52,7 @@ fn tool_turn(seq: u32, input: &str) -> Turn {
             Message::Assistant {
                 text: "done".into(),
                 tool_calls: vec![],
+                reasoning: vec![],
             },
         ],
         model_id: None,
@@ -52,6 +60,12 @@ fn tool_turn(seq: u32, input: &str) -> Turn {
         error_code: None,
         input_tokens: None,
         output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        reasoning_tokens: None,
+        context_usage: None,
+        reasoning_effort: None,
+        endpoint_id: None,
         created_at: 0,
     }
 }
@@ -130,6 +144,7 @@ fn reopen_reads_history_back() {
     let partial = vec![Message::Assistant {
         text: "部分".into(),
         tool_calls: vec![],
+        reasoning: vec![],
     }];
     store
         .finish_turn(
@@ -221,6 +236,7 @@ fn regenerate_reruns_the_last_turn_in_place() {
             completed(vec![Message::Assistant {
                 text: "a1".into(),
                 tool_calls: vec![],
+                reasoning: vec![],
             }]),
         )
         .unwrap();
@@ -251,7 +267,8 @@ fn regenerate_reruns_the_last_turn_in_place() {
             Message::User("q1".into()),
             Message::Assistant {
                 text: "a1".into(),
-                tool_calls: vec![]
+                tool_calls: vec![],
+                reasoning: vec![]
             },
         ]
     );
@@ -259,6 +276,7 @@ fn regenerate_reruns_the_last_turn_in_place() {
     let answer = vec![Message::Assistant {
         text: "a2'".into(),
         tool_calls: vec![],
+        reasoning: vec![],
     }];
     store.finish_turn(again, completed(answer.clone())).unwrap();
     let turns = store.load(&id).unwrap().turns;

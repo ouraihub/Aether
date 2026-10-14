@@ -48,6 +48,12 @@ fn local() -> RunInput {
 }
 
 #[tokio::test]
+async fn undeclared_native_search_is_rejected_before_network() {
+    let mut req = local();
+    req.native_web_search = true;
+    rejected(req, KitErrorCode::BadRequest, "unsupported").await;
+}
+#[tokio::test]
 async fn skills_over_budget_fail_and_are_never_truncated() {
     let mut fits = local();
     fits.budget.skills_chars = 10;

@@ -16,7 +16,13 @@ const endpoint: Endpoint = {
   models: [],
 }
 const stored: Provider = { id: 'p1', name: 'Local', endpoints: [endpoint] }
-const model = { contextWindow: null, maxOutput: null, canVision: false, supportsTools: null } as const
+const model = {
+  contextWindow: null,
+  maxOutput: null,
+  canVision: false,
+  supportsTools: null,
+  nativeWebSearch: false,
+} as const
 
 function setup() {
   const saves: ProviderSave[] = []
@@ -32,8 +38,15 @@ function setup() {
           probeUrl: endpoint.probeUrl,
           error: null,
           models: [
-            { ...model, id: 'gpt-4o', group: 'gpt', modelType: 'chat', typeSource: 'inferred' },
-            { ...model, id: 'text-embedding-3', group: null, modelType: 'embedding', typeSource: 'inferred' },
+            { ...model, id: 'gpt-4o', group: 'gpt', modelType: 'chat', typeSource: 'inferred', reasoning: null },
+            {
+              ...model,
+              id: 'text-embedding-3',
+              group: null,
+              modelType: 'embedding',
+              typeSource: 'inferred',
+              reasoning: null,
+            },
           ],
         }),
     },

@@ -47,6 +47,13 @@
 </script>
 
 <li class="flex flex-col gap-2">
+  {#if turn.reasoningText}
+    <details class="text-muted-foreground text-kit-sm">
+      <summary class="cursor-pointer">{t('chat.reasoning')}</summary>
+      <p class="whitespace-pre-wrap">{turn.reasoningText}</p>
+    </details>
+  {/if}
+
   <p class="bg-muted rounded-kit text-kit-base self-end px-3 py-2 whitespace-pre-wrap">{turn.input}</p>
   {#each turn.tools as tool (tool.callId)}
     {#if tool.pending === null}

@@ -19,7 +19,8 @@ use crate::dto::{
     ProviderSave, TypeSource,
 };
 
-const MIGRATIONS: &[Migration] = &[Migration {
+const MIGRATIONS: &[Migration] = &[
+Migration {
     version: 1,
     sql: "
 CREATE TABLE providers (
@@ -42,10 +43,13 @@ CREATE TABLE models (
   context_window INTEGER, max_output INTEGER,
   can_vision INTEGER NOT NULL DEFAULT 0,
   supports_tools INTEGER,
+  native_web_search INTEGER NOT NULL DEFAULT 0,
   position INTEGER NOT NULL,
   PRIMARY KEY (endpoint_id, model_id)
 );",
-}];
+},
+Migration { version: 2, sql: "ALTER TABLE models ADD COLUMN reasoning TEXT;" },
+];
 
 const MAX_NAME_CHARS: usize = 80;
 const MAX_ENDPOINTS: usize = 20;
@@ -123,10 +127,8 @@ impl Store {
     pub fn model_options(&self, filter: ModelFilter) -> Result<Vec<ModelOption>, KitError> {
         let db = self.lock()?;
         let mut stmt = db.prepare_cached(
-            "SELECT p.name, e.slug, m.endpoint_id, m.model_id, m.model_type, m.supports_tools
-             FROM models m
-             JOIN endpoints e ON e.id = m.endpoint_id
-             JOIN providers p ON p.id = e.provider_id
+            "SELECT p.name, e.slug, m.endpoint_id, m.model_id, m.model_type, m.supports_tools, m.reasoning, m.native_web_search
+             FROM models m JOIN endpoints e ON e.id = m.endpoint_id JOIN providers p ON p.id = e.provider_id
              ORDER BY p.position, p.id, e.position, m.position",
         )?;
         let rows = stmt
@@ -138,12 +140,29 @@ impl Store {
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, Option<bool>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, bool>(7)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         let mut options = Vec::new();
-        for (provider, slug, endpoint_id, model_id, model_type, supports_tools) in rows {
+        for (
+            provider,
+            slug,
+            endpoint_id,
+            model_id,
+            model_type,
+            supports_tools,
+            reasoning,
+            native_web_search,
+        ) in rows
+        {
             let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
+            let reasoning = reasoning
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(KitError::internal)?;
             if filter.model_type.is_some_and(|wanted| wanted != model_type)
                 || filter
                     .supports_tools
@@ -157,6 +176,8 @@ impl Store {
                 model_id,
                 model_type,
                 supports_tools,
+                reasoning,
+                native_web_search,
             });
         }
         Ok(options)
@@ -170,43 +191,46 @@ impl Store {
     /// key cannot be decrypted; `internal` when SQLite fails.
     pub fn resolve(&self, model: &ModelRef) -> Result<Connection, KitError> {
         let db = self.lock()?;
-        let row = db
-            .query_row(
-                "SELECT e.base_url, e.protocol, e.key_ciphertext,
-                        m.context_window, m.max_output, m.supports_tools
-                 FROM models m JOIN endpoints e ON e.id = m.endpoint_id
-                 WHERE m.endpoint_id = ?1 AND m.model_id = ?2",
-                params![model.endpoint_id, model.model_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<Vec<u8>>>(2)?,
-                        row.get::<_, Option<u32>>(3)?,
-                        row.get::<_, Option<u32>>(4)?,
-                        row.get::<_, Option<bool>>(5)?,
-                    ))
-                },
-            )
-            .optional()?;
-        let (base_url, protocol, key, context_window, max_output, supports_tools) =
-            row.ok_or_else(|| KitError::not_found("model"))?;
-        Ok(Connection {
-            base_url: api_base(&base_url),
-            protocol: parse_protocol(&protocol)?,
-            api_key: open_key(key.as_deref())?,
-            model_id: Some(model.model_id.clone()),
+        let row = db.query_row(
+            "SELECT e.base_url, e.protocol, e.key_ciphertext, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search
+             FROM models m JOIN endpoints e ON e.id = m.endpoint_id WHERE m.endpoint_id = ?1 AND m.model_id = ?2",
+            params![model.endpoint_id, model.model_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<Vec<u8>>>(2)?,
+                row.get::<_, Option<u32>>(3)?, row.get::<_, Option<u32>>(4)?, row.get::<_, Option<bool>>(5)?, row.get::<_, Option<String>>(6)?, row.get::<_, bool>(7)?)),
+        ).optional()?;
+        let (
+            base_url,
+            protocol,
+            key,
             context_window,
             max_output,
             supports_tools,
+            reasoning,
+            native_web_search,
+        ) = row.ok_or_else(|| KitError::not_found("model"))?;
+        let protocol = parse_protocol(&protocol)?;
+        let reasoning = reasoning
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(KitError::internal)?;
+        Ok(Connection {
+            base_url: api_base(&base_url),
+            protocol,
+            api_key: open_key(key.as_deref())?,
+            model_id: Some(model.model_id.clone()),
+            endpoint_id: Some(model.endpoint_id.clone()),
+            context_window,
+            max_output,
+            supports_tools,
+            reasoning,
+            native_web_search,
         })
     }
 
-    /// The connection snapshot of an endpoint without a model, e.g. for writing a
-    /// third-party tool's configuration.
-    ///
+    /// The connection snapshot of an endpoint without a model.
     /// # Errors
-    /// `not_found{entity:"endpoint"}`; `needs_config{reason:"key_unreadable"}`; `internal`.
+    /// Reports missing endpoints, unreadable credentials or storage failures.
     pub fn endpoint_connection(&self, endpoint_id: &str) -> Result<Connection, KitError> {
         let (base_url, protocol, api_key) = self.endpoint(endpoint_id)?;
         Ok(Connection {
@@ -214,9 +238,12 @@ impl Store {
             protocol,
             api_key,
             model_id: None,
+            endpoint_id: Some(endpoint_id.to_owned()),
             context_window: None,
             max_output: None,
             supports_tools: None,
+            reasoning: None,
+            native_web_search: false,
         })
     }
 
@@ -367,6 +394,21 @@ fn validate(input: &ProviderSave) -> Result<(), KitError> {
         }
         let mut models = HashSet::new();
         for model in &endpoint.models {
+            if model.native_web_search
+                && (model.model_type != ModelType::Chat
+                    || endpoint.protocol == Protocol::OpenaiChat)
+            {
+                return Err(KitError::bad_request(
+                    "nativeWebSearch",
+                    "unsupported_protocol",
+                ));
+            }
+            if let Some(Some(config)) = &model.reasoning
+                && (model.model_type != ModelType::Chat
+                    || !config.validate(endpoint.protocol, model.max_output))
+            {
+                return Err(KitError::bad_request("reasoning", "invalid"));
+            }
             if model.id.is_empty() {
                 return Err(KitError::bad_request("models", "empty_id"));
             }
@@ -394,27 +436,25 @@ fn write_endpoint(
     let base_url = endpoint.base_url.trim();
     let protocol = protocol_str(endpoint.protocol);
     let id = if let Some(id) = &endpoint.id {
-        tx.execute(
-            "UPDATE endpoints SET slug = ?2, base_url = ?3, protocol = ?4, key_ciphertext = ?5,
-             position = ?6 WHERE id = ?1",
-            params![id, endpoint.slug, base_url, protocol, key, position],
-        )?;
-        tx.execute("DELETE FROM models WHERE endpoint_id = ?1", [id])?;
+        tx.execute("UPDATE endpoints SET slug = ?2, base_url = ?3, protocol = ?4, key_ciphertext = ?5, position = ?6 WHERE id = ?1", params![id, endpoint.slug, base_url, protocol, key, position])?;
         id.clone()
     } else {
         let id = new_id()?;
-        tx.execute(
-            "INSERT INTO endpoints (id, provider_id, slug, base_url, protocol, key_ciphertext, position)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![id, provider_id, endpoint.slug, base_url, protocol, key, position],
-        )?;
+        tx.execute("INSERT INTO endpoints (id, provider_id, slug, base_url, protocol, key_ciphertext, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", params![id, provider_id, endpoint.slug, base_url, protocol, key, position])?;
         id
     };
-    let mut insert = tx.prepare_cached(
-        "INSERT INTO models (endpoint_id, model_id, model_type, type_source, context_window,
-         max_output, can_vision, supports_tools, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-    )?;
+    let old: HashMap<String, Option<String>> = tx
+        .prepare("SELECT model_id, reasoning FROM models WHERE endpoint_id = ?1")?
+        .query_map([&id], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    tx.execute("DELETE FROM models WHERE endpoint_id = ?1", [&id])?;
+    let mut insert = tx.prepare_cached("INSERT INTO models (endpoint_id, model_id, model_type, type_source, context_window, max_output, can_vision, supports_tools, position, reasoning, native_web_search) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)")?;
     for (position, model) in endpoint.models.iter().enumerate() {
+        let reasoning = match &model.reasoning {
+            Some(Some(config)) => Some(serde_json::to_string(config).map_err(KitError::internal)?),
+            Some(None) => None,
+            None => old.get(&model.id).cloned().flatten(),
+        };
         insert.execute(params![
             id,
             model.id,
@@ -425,6 +465,8 @@ fn write_endpoint(
             model.can_vision,
             model.supports_tools,
             i64::try_from(position).unwrap_or(i64::MAX),
+            reasoning,
+            model.native_web_search
         ])?;
     }
     Ok(())
@@ -432,14 +474,12 @@ fn write_endpoint(
 
 fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
     let mut models: HashMap<String, Vec<Model>> = HashMap::new();
-    let mut stmt = db.prepare_cached(
-        "SELECT endpoint_id, model_id, model_type, type_source, context_window, max_output,
-         can_vision, supports_tools FROM models ORDER BY endpoint_id, position",
-    )?;
+    let mut stmt = db.prepare_cached("SELECT endpoint_id, model_id, model_type, type_source, context_window, max_output, can_vision, supports_tools, reasoning, native_web_search FROM models ORDER BY endpoint_id, position")?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let model_type: String = row.get(2)?;
         let type_source: String = row.get(3)?;
+        let reasoning: Option<String> = row.get(8)?;
         models.entry(row.get(0)?).or_default().push(Model {
             id: row.get(1)?,
             model_type: ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?,
@@ -448,21 +488,22 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
             max_output: row.get(5)?,
             can_vision: row.get(6)?,
             supports_tools: row.get(7)?,
+            reasoning: reasoning
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(KitError::internal)?,
+            native_web_search: row.get(9)?,
         });
     }
-
     let mut endpoints: HashMap<String, Vec<Endpoint>> = HashMap::new();
-    let mut stmt = db.prepare_cached(
-        "SELECT provider_id, id, slug, base_url, protocol, key_ciphertext
-         FROM endpoints ORDER BY provider_id, position",
-    )?;
+    let mut stmt = db.prepare_cached("SELECT provider_id, id, slug, base_url, protocol, key_ciphertext FROM endpoints ORDER BY provider_id, position")?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(1)?;
         let base_url: String = row.get(3)?;
         let protocol: String = row.get(4)?;
         let key: Option<Vec<u8>> = row.get(5)?;
-        // An unreadable key (another Windows user, foreign marker) is shown, not fatal.
         let plain = key.as_deref().map(secret::open).and_then(Result::ok);
         endpoints.entry(row.get(0)?).or_default().push(Endpoint {
             slug: row.get(2)?,
@@ -476,7 +517,6 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
             id,
         });
     }
-
     let mut stmt = db.prepare_cached("SELECT id, name FROM providers ORDER BY position, id")?;
     let providers = stmt
         .query_map([], |row| {
@@ -575,6 +615,29 @@ mod tests {
         Err(KitError::unsupported("secret_store"))
     }
 
+    #[test]
+    fn native_search_declaration_survives_reopen_and_rejects_chat_protocol() {
+        let (dir, store) = store();
+        let mut e = endpoint(None, "a", &["m1"]);
+        e["models"][0]["nativeWebSearch"] = json!(true);
+        assert!(
+            store
+                .save(request(json!({"name":"Native","endpoints":[e.clone()]})))
+                .is_err()
+        );
+        e["protocol"] = json!("openai-responses");
+        let saved = store
+            .save(request(json!({"name":"Native","endpoints":[e]})))
+            .unwrap();
+        let reference = ModelRef {
+            endpoint_id: saved[0].endpoints[0].id.clone(),
+            model_id: "m1".into(),
+        };
+        drop(store);
+        let reopened = Store::open(dir.path()).unwrap();
+        assert!(reopened.resolve(&reference).unwrap().native_web_search);
+        assert!(reopened.model_options(ModelFilter::default()).unwrap()[0].native_web_search);
+    }
     #[test]
     fn save_replaces_the_whole_provider_and_survives_reopen() {
         let (dir, store) = store();

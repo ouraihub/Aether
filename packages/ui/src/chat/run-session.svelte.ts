@@ -25,15 +25,18 @@ export interface ToolItem {
   summary: string
 }
 
+import type { ContextUsage, TokenUsage, ReasoningEffort } from '../ports'
+
 export interface ChatTurn {
   input: string
   text: string
+  reasoningText: string
+  reasoningEffort: ReasoningEffort
+  usage: TokenUsage | null
+  contextUsage: ContextUsage | null
   status: TurnStatus
-  /** Error code of a failed turn (`interrupted` after a crash). */
   error: string | null
-  /** Tool calls of the live run; stored turns only keep their text. */
   tools: ToolItem[]
-  /** The round limit stopped the tool loop. */
   exhausted: boolean
   search: SearchState
 }
@@ -53,12 +56,14 @@ export interface RunBase {
   model: ModelRef | null
   skills: SkillRef[]
   context: ContextRef | null
+  reasoningEffort?: ReasoningEffort
 }
 
 export class RunSession {
   turns = $state<ChatTurn[]>([])
   conversationId = $state<string | null>(null)
   running = $state(false)
+  contextUsage = $state<ContextUsage | null>(null)
   search = $state<SearchState>({ status: 'idle', query: null, provider: null, hits: [], error: null })
   /** Id of a selected skill the backend rejected as `skill_changed`; the user has to confirm it again. */
   skillChanged = $state<string | null>(null)
@@ -70,6 +75,25 @@ export class RunSession {
   constructor(port: ChatPort) {
     this.#port = port
   }
+  resetContext() {
+    this.contextUsage = null
+  }
+
+  get cumulativeUsage(): TokenUsage {
+    const total: TokenUsage = {
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheWriteTokens: null,
+      reasoningTokens: null,
+    }
+    for (const turn of this.turns)
+      for (const key of Object.keys(total) as (keyof TokenUsage)[]) {
+        const value = turn.usage?.[key]
+        if (value != null) total[key] = (total[key] ?? 0) + value
+      }
+    return total
+  }
 
   send(base: RunBase, input: string, webSearch = false) {
     const search: SearchState = {
@@ -79,7 +103,20 @@ export class RunSession {
       hits: [],
       error: null,
     }
-    this.turns.push({ input, text: '', status: 'running', error: null, tools: [], exhausted: false, search })
+    if (this.running) return
+    this.turns.push({
+      input,
+      text: '',
+      reasoningText: '',
+      reasoningEffort: base.reasoningEffort ?? 'default',
+      usage: null,
+      contextUsage: null,
+      status: 'running',
+      error: null,
+      tools: [],
+      exhausted: false,
+      search,
+    })
     this.#start(base, input, false, webSearch)
   }
 
@@ -87,7 +124,17 @@ export class RunSession {
   regenerate(base: RunBase, webSearch = false) {
     const last = this.turns.at(-1)
     if (!last || this.running) return
-    Object.assign(last, { text: '', status: 'running', error: null, tools: [], exhausted: false })
+    Object.assign(last, {
+      text: '',
+      reasoningText: '',
+      reasoningEffort: base.reasoningEffort ?? 'default',
+      usage: null,
+      contextUsage: null,
+      status: 'running',
+      error: null,
+      tools: [],
+      exhausted: false,
+    })
     this.#start(base, last.input, this.conversationId !== null, webSearch)
   }
 
@@ -110,11 +157,18 @@ export class RunSession {
 
   show(conversationId: string | null, turns: readonly Turn[] = []) {
     this.stop()
+    this.#abort = null
+    this.running = false
+    this.contextUsage = turns.at(-1)?.contextUsage ?? null
     this.conversationId = conversationId
     this.search = { status: 'idle', query: null, provider: null, hits: [], error: null }
     this.turns = turns.map((t) => ({
       input: t.input,
       text: t.text,
+      reasoningText: t.reasoningText ?? '',
+      reasoningEffort: t.reasoningEffort ?? 'default',
+      usage: t.usage ?? null,
+      contextUsage: t.contextUsage ?? null,
       status: t.status,
       error: t.errorCode,
       tools: [],
@@ -129,6 +183,7 @@ export class RunSession {
     if (!turn) return
     const abort = new AbortController()
     this.#abort = abort
+    this.contextUsage = null
     this.search = {
       status: webSearch ? 'searching' : 'idle',
       query: webSearch ? input : null,
@@ -139,9 +194,13 @@ export class RunSession {
     turn.search = this.search
     this.running = true
     const finish = (status: TurnStatus, error: string | null) => {
+      if (this.#abort !== abort) return
       turn.status = status
       turn.error = error
-      if (this.#abort !== abort) return
+      if (status !== 'completed') {
+        turn.contextUsage = null
+        this.contextUsage = null
+      }
       if (this.search.status === 'searching')
         this.search = { ...this.search, status: status === 'failed' ? 'failed' : 'idle', error }
       this.#abort = null
@@ -166,6 +225,22 @@ export class RunSession {
           break
         case 'text_delta':
           turn.text += event.text
+          break
+        case 'reasoning_delta':
+          turn.reasoningText += event.text
+          break
+        case 'context':
+          turn.contextUsage = event.usage
+          this.contextUsage = event.usage
+          break
+        case 'usage':
+          turn.usage = {
+            inputTokens: event.inputTokens,
+            outputTokens: event.outputTokens,
+            cacheReadTokens: event.cacheReadTokens,
+            cacheWriteTokens: event.cacheWriteTokens,
+            reasoningTokens: event.reasoningTokens,
+          }
           break
         case 'tool_call':
           // A repeated call id is fed back without running again (docs/12 §5): one row.
@@ -199,7 +274,8 @@ export class RunSession {
           finish(event.status, event.error?.code ?? null)
           break
         case 'round_start':
-        case 'usage':
+          turn.contextUsage = null
+          this.contextUsage = null
           break
       }
     }
@@ -213,16 +289,20 @@ export class RunSession {
       scope: base.scope,
       regenerate,
       language: base.language,
+      reasoningEffort: base.reasoningEffort ?? 'default',
       ...(base.purpose === 'chat' && webSearch ? { webSearch: true } : {}),
     }
     this.#runId = null
     this.#port.run(request, onEvent, { signal: abort.signal }).then(
       (accepted) => {
+        if (this.#abort !== abort && this.#abort !== null) return
+        if (!this.turns.includes(turn)) return
         this.#runId = accepted.runId
         if (accepted.conversationId) this.conversationId = accepted.conversationId
       },
       // Rejected before acceptance: no `end` will follow.
       (error: unknown) => {
+        if (this.#abort !== abort) return
         const code = isKitClientError(error) ? error.code : 'internal'
         if (isKitClientError(error)) this.#checkSkill(error)
         finish(code === 'cancelled' ? 'cancelled' : 'failed', code === 'cancelled' ? null : code)

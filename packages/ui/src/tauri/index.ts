@@ -84,10 +84,14 @@ export function createTauriPorts(options: TauriPortsOptions = {}): KitPorts & { 
     const search: SearchPort = {
       settings: (capability, o) => searchCall('search_settings', { capability }, o),
       save: (input, o) => searchCall('search_save', { input }, o),
-      setDefault: (capability, provider, maxResults, o) =>
-        searchCall('search_set_default', { capability, provider, maxResults: maxResults ?? null }, o),
-      reveal: (capability, provider, currentPassword, o) =>
-        searchCall('search_reveal', { capability, provider, currentPassword: currentPassword ?? null }, o),
+      setDefault: (capability, provider, o) => searchCall('search_set_default', { capability, provider }, o),
+      savePreferences: (input, o) => searchCall('search_save_preferences', { input }, o),
+      saveKey: (capability, provider, value, keyId, o) =>
+        searchCall('search_save_key', { capability, provider, value, keyId: keyId ?? null }, o),
+      removeKey: (capability, provider, keyId, o) =>
+        searchCall('search_remove_key', { capability, provider, keyId }, o),
+      reveal: (capability, provider, keyId, currentPassword, o) =>
+        searchCall('search_reveal', { capability, provider, keyId, currentPassword: currentPassword ?? null }, o),
       check: (capability, provider, o) => searchCall('search_check', { capability, provider }, o),
       search: (query, o) => searchCall('search_query', { query }, o),
       fetch: (url, o) => searchCall('search_fetch', { url }, o),

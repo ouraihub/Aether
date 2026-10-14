@@ -32,6 +32,12 @@ pub struct Usage {
     pub input_tokens: Option<u32>,
     /// Output tokens.
     pub output_tokens: Option<u32>,
+    /// Cached input tokens.
+    pub cache_read_tokens: Option<u32>,
+    /// Cached write tokens.
+    pub cache_write_tokens: Option<u32>,
+    /// Reasoning tokens.
+    pub reasoning_tokens: Option<u32>,
 }
 
 impl Usage {
@@ -43,19 +49,24 @@ impl Usage {
         };
         self.input_tokens = sum(self.input_tokens, round.input_tokens);
         self.output_tokens = sum(self.output_tokens, round.output_tokens);
+        self.cache_read_tokens = sum(self.cache_read_tokens, round.cache_read_tokens);
+        self.cache_write_tokens = sum(self.cache_write_tokens, round.cache_write_tokens);
+        self.reasoning_tokens = sum(self.reasoning_tokens, round.reasoning_tokens);
     }
 }
 
-/// What a run produced; matches its `end` event.
+/// Outcome and known usage of a completed or interrupted run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunSummary {
     /// Terminal status.
     pub status: EndStatus,
-    /// This turn's assistant messages, including partial text of a failed or cancelled run.
+    /// Produced messages, including partial output.
     pub messages: Vec<Message>,
-    /// Reported usage.
+    /// Known provider-reported token counts.
     pub usage: Usage,
-    /// The round limit stopped the tool loop.
+    /// Last request context estimate or report.
+    pub context_usage: Option<aether_support::ContextUsage>,
+    /// Tool loop stopped at its configured round limit.
     pub exhausted: bool,
 }
 
@@ -113,6 +124,9 @@ impl Runner {
                 emitter.emit(RunEvent::Usage {
                     input_tokens: turn.usage.input_tokens,
                     output_tokens: turn.usage.output_tokens,
+                    cache_read_tokens: turn.usage.cache_read_tokens,
+                    cache_write_tokens: turn.usage.cache_write_tokens,
+                    reasoning_tokens: turn.usage.reasoning_tokens,
                 });
                 (EndStatus::Completed, None, exhausted)
             }
@@ -134,6 +148,7 @@ impl Runner {
             status,
             messages: turn.messages,
             usage: turn.usage,
+            context_usage: None,
             exhausted,
         }
     }
@@ -182,6 +197,7 @@ impl Runner {
             turn.messages.push(Message::Assistant {
                 text: mem::take(&mut turn.text),
                 tool_calls: tool_calls.clone(),
+                reasoning: Vec::new(),
             });
             for call in &tool_calls {
                 if run.cancel.is_cancelled() {
@@ -310,6 +326,7 @@ impl Runner {
             turn: messages,
             max_output: input.budget.max_output,
             tools,
+            native_web_search: input.native_web_search,
         };
         let known: Vec<&str> = connection.api_key.iter().map(|key| key.as_str()).collect();
         let first_byte = async {
@@ -374,6 +391,7 @@ impl Turn {
             self.messages.push(Message::Assistant {
                 text: mem::take(&mut self.text),
                 tool_calls: Vec::new(),
+                reasoning: Vec::new(),
             });
         }
     }

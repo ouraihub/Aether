@@ -13,22 +13,16 @@ use serde::de::DeserializeOwned;
 
 use crate::types::{EndStatus, Message};
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: "CREATE TABLE conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL, scope TEXT,
-            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-          CREATE INDEX conversations_scope ON conversations(scope, updated_at DESC);
-          CREATE TABLE turns (
-            id TEXT PRIMARY KEY,
-            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-            seq INTEGER NOT NULL,
-            status TEXT NOT NULL CHECK (status IN ('running','completed','failed','cancelled')),
-            input TEXT NOT NULL, messages TEXT NOT NULL DEFAULT '[]',
-            model_id TEXT, skills TEXT NOT NULL DEFAULT '[]',
-            error_code TEXT, input_tokens INTEGER, output_tokens INTEGER,
-            created_at INTEGER NOT NULL, UNIQUE (conversation_id, seq)
-          );",
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: "CREATE TABLE conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL, scope TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL); CREATE INDEX conversations_scope ON conversations(scope, updated_at DESC); CREATE TABLE turns (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, seq INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('running','completed','failed','cancelled')), input TEXT NOT NULL, messages TEXT NOT NULL DEFAULT '[]', model_id TEXT, skills TEXT NOT NULL DEFAULT '[]', error_code TEXT, input_tokens INTEGER, output_tokens INTEGER, created_at INTEGER NOT NULL, UNIQUE (conversation_id, seq));",
+    },
+    Migration {
+        version: 2,
+        sql: "ALTER TABLE turns ADD COLUMN cache_read_tokens INTEGER; ALTER TABLE turns ADD COLUMN cache_write_tokens INTEGER; ALTER TABLE turns ADD COLUMN reasoning_tokens INTEGER; ALTER TABLE turns ADD COLUMN context_usage TEXT; ALTER TABLE turns ADD COLUMN reasoning_effort TEXT; ALTER TABLE turns ADD COLUMN endpoint_id TEXT;",
+    },
+];
 
 /// Title = first input without line breaks, cut to this many characters.
 const TITLE_CHARS: usize = 40;
@@ -142,6 +136,18 @@ pub struct Turn {
     pub input_tokens: Option<u32>,
     /// Output tokens reported by the upstream.
     pub output_tokens: Option<u32>,
+    /// Tokens read from provider cache.
+    pub cache_read_tokens: Option<u32>,
+    /// Tokens written to provider cache.
+    pub cache_write_tokens: Option<u32>,
+    /// Reasoning output tokens.
+    pub reasoning_tokens: Option<u32>,
+    /// Last request context report or estimate.
+    pub context_usage: Option<aether_support::ContextUsage>,
+    /// Requested reasoning effort.
+    pub reasoning_effort: Option<aether_support::ReasoningEffort>,
+    /// Endpoint used for this turn.
+    pub endpoint_id: Option<String>,
     /// Unix milliseconds.
     pub created_at: i64,
 }
@@ -174,6 +180,18 @@ pub struct TurnRecord {
     pub input_tokens: Option<u32>,
     /// Output tokens.
     pub output_tokens: Option<u32>,
+    /// Tokens read from provider cache.
+    pub cache_read_tokens: Option<u32>,
+    /// Tokens written to provider cache.
+    pub cache_write_tokens: Option<u32>,
+    /// Reasoning output tokens.
+    pub reasoning_tokens: Option<u32>,
+    /// Last request context report or estimate.
+    pub context_usage: Option<aether_support::ContextUsage>,
+    /// Requested reasoning effort.
+    pub reasoning_effort: Option<aether_support::ReasoningEffort>,
+    /// Endpoint used for this turn.
+    pub endpoint_id: Option<String>,
 }
 
 /// History for the next request: only `completed` turns, dropping whole turns from the
@@ -208,8 +226,16 @@ pub fn trim_history(turns: &[Turn], max_tokens: u32) -> Vec<Message> {
 fn message_chars(message: &Message) -> usize {
     match message {
         Message::User(text) | Message::Tool { text, .. } => text.chars().count(),
-        Message::Assistant { text, tool_calls } => {
+        Message::Assistant {
+            text,
+            tool_calls,
+            reasoning,
+        } => {
             text.chars().count()
+                + reasoning
+                    .iter()
+                    .map(|block| block.value.to_string().chars().count())
+                    .sum::<usize>()
                 + tool_calls
                     .iter()
                     .map(|call| call.name.chars().count() + call.args.to_string().chars().count())
@@ -276,11 +302,7 @@ impl ConversationStore for SqliteStore {
             )
             .optional()?
             .ok_or_else(|| KitError::not_found("conversation"))?;
-        let mut stmt = db.prepare(
-            "SELECT id, seq, status, input, messages, model_id, skills, error_code,
-                    input_tokens, output_tokens, created_at
-             FROM turns WHERE conversation_id = ?1 ORDER BY seq",
-        )?;
+        let mut stmt = db.prepare("SELECT id, seq, status, input, messages, model_id, skills, error_code, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, context_usage, reasoning_effort, endpoint_id, created_at FROM turns WHERE conversation_id = ?1 ORDER BY seq")?;
         let turns = stmt
             .query_map(params![id], turn)?
             .collect::<Result<_, _>>()?;
@@ -346,12 +368,7 @@ impl ConversationStore for SqliteStore {
         if status == TurnStatus::Running {
             return Err(KitError::conflict("turn_running"));
         }
-        tx.execute(
-            "UPDATE turns SET status = 'running', messages = '[]', model_id = NULL, skills = '[]',
-                    error_code = NULL, input_tokens = NULL, output_tokens = NULL
-             WHERE id = ?1",
-            params![turn_id],
-        )?;
+        tx.execute("UPDATE turns SET status = 'running', messages = '[]', model_id = NULL, skills = '[]', error_code = NULL, input_tokens = NULL, output_tokens = NULL, cache_read_tokens = NULL, cache_write_tokens = NULL, reasoning_tokens = NULL, context_usage = NULL, reasoning_effort = NULL, endpoint_id = NULL WHERE id = ?1", params![turn_id])?;
         tx.execute(
             "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
             params![now_millis(), conversation_id],
@@ -374,21 +391,20 @@ impl ConversationStore for SqliteStore {
         };
         let mut db = self.lock()?;
         let tx = db.transaction()?;
+        let context_usage = record
+            .context_usage
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(KitError::internal)?;
+        let reasoning_effort = record
+            .reasoning_effort
+            .map(|value| serde_json::to_string(&value))
+            .transpose()
+            .map_err(KitError::internal)?;
         let changed = tx.execute(
-            "UPDATE turns SET status = ?1, messages = ?2, model_id = ?3, skills = ?4, error_code = ?5,
-                    input_tokens = ?6, output_tokens = ?7
-             WHERE id = ?8 AND conversation_id = ?9 AND status = 'running'",
-            params![
-                status,
-                messages,
-                record.model_id,
-                skills,
-                record.error_code,
-                record.input_tokens,
-                record.output_tokens,
-                turn.turn_id,
-                turn.conversation_id
-            ],
+            "UPDATE turns SET status = ?1, messages = ?2, model_id = ?3, skills = ?4, error_code = ?5, input_tokens = ?6, output_tokens = ?7, cache_read_tokens = ?8, cache_write_tokens = ?9, reasoning_tokens = ?10, context_usage = ?11, reasoning_effort = ?12, endpoint_id = ?13 WHERE id = ?14 AND conversation_id = ?15 AND status = 'running'",
+            params![status, messages, record.model_id, skills, record.error_code, record.input_tokens, record.output_tokens, record.cache_read_tokens, record.cache_write_tokens, record.reasoning_tokens, context_usage, reasoning_effort, record.endpoint_id, turn.turn_id, turn.conversation_id],
         )?;
         if changed == 0 {
             return Err(KitError::not_found("turn"));
@@ -466,7 +482,23 @@ fn turn(row: &Row<'_>) -> rusqlite::Result<Turn> {
         error_code: row.get(7)?,
         input_tokens: row.get(8)?,
         output_tokens: row.get(9)?,
-        created_at: row.get(10)?,
+        cache_read_tokens: row.get(10)?,
+        cache_write_tokens: row.get(11)?,
+        reasoning_tokens: row.get(12)?,
+        context_usage: row
+            .get::<_, Option<String>>(13)?
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(13, Type::Text, Box::new(e)))?,
+        reasoning_effort: row
+            .get::<_, Option<String>>(14)?
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(14, Type::Text, Box::new(e)))?,
+        endpoint_id: row.get(15)?,
+        created_at: row.get(16)?,
     })
 }
 

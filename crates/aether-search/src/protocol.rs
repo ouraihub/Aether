@@ -144,7 +144,7 @@ pub(crate) async fn search(
             "zhipu" => client.post(target).headers(auth(runtime,"bearer")?).json(&json!({"search_query":query,"search_engine":"search_std","search_intent":false})),
             "tavily" => client.post(target).headers(auth(runtime,"bearer")?).json(&json!({"query":query,"max_results":count})),
             "searxng" => client.get(target).headers(auth(runtime,"basic")?).query(&[("q",query),("format","json"),("language","auto")]),
-            "exa" => client.post(target).headers(auth(runtime,"api")?).json(&json!({"query":query,"numResults":count,"contents":{"text":{"maxCharacters":1000}}})),
+            "exa" => client.post(target).headers(auth(runtime,"api")?).json(&json!({"query":query,"numResults":count,"contents":{"text":true}})),
             "exa-mcp" => { let mut h=auth(runtime,"api")?; h.insert(ACCEPT,HeaderValue::from_static("application/json, text/event-stream")); client.post(target).headers(h).json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"web_search_exa","arguments":{"query":query,"type":"auto","numResults":count,"livecrawl":"fallback"}}})) },
             "bocha" => client.post(target).headers(auth(runtime,"bearer")?).json(&json!({"query":query,"count":count,"exclude":"","summary":true})),
             "querit" => client.post(target).headers(auth(runtime,"bearer")?).json(&json!({"query":query,"count":count})),
@@ -216,7 +216,7 @@ fn collect(items: impl Iterator<Item = (String, String, String)>, limit: usize) 
             Some(SearchHit {
                 title: clip(if title.is_empty() { &url } else { &title }, 500),
                 url,
-                snippet: clip(&snippet, 1000),
+                snippet,
             })
         })
         .take(limit)
@@ -334,8 +334,10 @@ pub(crate) async fn fetch(
     policy: &net::AddressPolicy,
     runtime: &Runtime,
     url: &str,
+    prefs: &crate::SearchPreferences,
 ) -> Result<SearchPage, KitError> {
     let target = net::check_url(url, policy)?;
+    crate::check_blacklist(target.as_str(), prefs)?;
     tokio::time::timeout(Duration::from_secs(20), async {
         let client = net::client(policy.clone(), Duration::from_secs(10))?;
         let base = runtime.base.trim_end_matches('/');
@@ -356,6 +358,7 @@ pub(crate) async fn fetch(
                         .join(location)
                         .map_err(|_| KitError::bad_request("url", "invalid_redirect"))?;
                     current = net::check_url(next.as_str(), policy)?;
+                    crate::check_blacklist(current.as_str(), prefs)?;
                     continue;
                 }
                 let body = read_response(response, runtime).await?;

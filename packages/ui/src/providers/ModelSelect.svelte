@@ -9,11 +9,13 @@
     filter = {},
     onchange,
     placeholder,
+    disabled = false,
   }: {
     value: ModelRef | null
     filter?: ModelFilter
-    onchange: (value: ModelRef) => void
+    onchange: (value: ModelRef, option: ModelOption | null) => void
     placeholder?: string
+    disabled?: boolean
   } = $props()
 
   const { ports, i18n } = getKitContext()
@@ -22,7 +24,18 @@
 
   const key = (r: ModelRef) => `${r.endpointId}\n${r.modelId}`
   $effect(() => {
-    void ports.providers?.modelOptions(filter).then((list) => (options = list))
+    let alive = true
+    void ports.providers
+      ?.modelOptions(filter)
+      .then((list) => {
+        if (alive) options = list
+      })
+      .catch(() => {
+        if (alive) options = []
+      })
+    return () => {
+      alive = false
+    }
   })
   const current = $derived(value && options?.find((o) => key(o) === key(value)))
   const invalid = $derived(value !== null && options !== null && !current)
@@ -33,11 +46,11 @@
     type="single"
     value={value ? key(value) : ''}
     onValueChange={(next) => {
-      const option = options?.find((o) => key(o) === next)
-      if (option) onchange({ endpointId: option.endpointId, modelId: option.modelId })
+      const option = options?.find((o) => key(o) === next) ?? null
+      if (option) onchange({ endpointId: option.endpointId, modelId: option.modelId }, option)
     }}
   >
-    <Select.Trigger class="w-full" aria-invalid={invalid}>
+    <Select.Trigger class="w-full" {disabled} aria-invalid={invalid}>
       {current?.label ?? (invalid ? t('providers.model_invalid') : (placeholder ?? t('providers.model_placeholder')))}
     </Select.Trigger>
     <Select.Content>

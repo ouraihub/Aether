@@ -60,15 +60,23 @@
       models
         .filter((m) => checked[m.id])
         .map((m): Model => {
+          const existing = selected.find((item) => item.id === m.id)
           const modelType = types[m.id] ?? m.modelType
+          // Keep user-edited metadata (including reasoning/context) when a probe refreshes it.
           return {
+            ...(existing ?? m),
             id: m.id,
             modelType,
             typeSource:
-              selected.find((item) => item.id === m.id && item.modelType === modelType)?.typeSource ??
-              (modelType === m.modelType ? m.typeSource : 'user'),
-            contextWindow: m.contextWindow,
-            maxOutput: m.maxOutput,
+              existing?.modelType === modelType
+                ? existing.typeSource
+                : modelType === m.modelType
+                  ? m.typeSource
+                  : 'user',
+            contextWindow: existing ? existing.contextWindow : m.contextWindow,
+            maxOutput: existing ? existing.maxOutput : m.maxOutput,
+            reasoning: existing ? existing.reasoning : m.reasoning,
+            nativeWebSearch: modelType === 'chat' && (existing ? existing.nativeWebSearch : m.nativeWebSearch),
             canVision: m.canVision,
             supportsTools: m.supportsTools,
           }

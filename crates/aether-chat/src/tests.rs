@@ -184,9 +184,12 @@ fn input(protocol: Protocol, base_url: String) -> RunInput {
         protocol,
         api_key: Some(Zeroizing::new(KEY.to_owned())),
         model_id: Some("model-x".to_owned()),
+        endpoint_id: None,
         context_window: None,
         max_output: None,
         supports_tools: None,
+        reasoning: None,
+        native_web_search: false,
     };
     RunInput {
         run_id: "r1".to_owned(),
@@ -198,10 +201,60 @@ fn input(protocol: Protocol, base_url: String) -> RunInput {
             Message::Assistant {
                 text: "reply".to_owned(),
                 tool_calls: Vec::new(),
+                reasoning: Vec::new(),
             },
         ],
         input: "hi".to_owned(),
         tools: Vec::new(),
+        reasoning_effort: aether_support::ReasoningEffort::Default,
+        native_web_search: false,
+    }
+}
+
+#[tokio::test]
+async fn native_search_keeps_citations_and_does_not_execute_server_calls_locally() {
+    for protocol in [Protocol::AnthropicMessages, Protocol::OpenaiResponses] {
+        let body = if protocol == Protocol::AnthropicMessages {
+            concat!("data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srv\",\"name\":\"web_search\"}}\n\n",
+                    "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Answer\"}}\n\n",
+                    "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"citations_delta\",\"citation\":{\"url\":\"https://example.com/source\"}}}\n\n",
+                    "data: {\"type\":\"message_stop\"}\n\n")
+        } else {
+            concat!("data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"web_search_call\",\"id\":\"srv\"}}\n\n",
+                    "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Answer\"}\n\n",
+                    "data: {\"type\":\"response.output_text.annotation.added\",\"annotation\":{\"type\":\"url_citation\",\"url\":\"https://example.com/source\"}}\n\n",
+                    "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}\n\n")
+        }.to_owned();
+        let (base, seen) = upstream(Reply::Sse {
+            cut: body.len(),
+            body,
+        })
+        .await;
+        let mut req = input(protocol, base);
+        req.connection.native_web_search = true;
+        req.native_web_search = true;
+        let (summary, events) = run(&runner(5_000, 5_000), req, false).await;
+        assert_eq!(summary.status, EndStatus::Completed);
+        assert_eq!(
+            streamed(&events),
+            "Answer [source](<https://example.com/source>)"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, RunEvent::ToolCall { .. }))
+        );
+        let requests = seen.lock().await;
+        let encoded: serde_json::Value =
+            serde_json::from_str(requests[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(
+            encoded["tools"][0]["type"],
+            if protocol == Protocol::AnthropicMessages {
+                "web_search_20250305"
+            } else {
+                "web_search"
+            }
+        );
     }
 }
 
@@ -294,11 +347,14 @@ async fn streams_text_and_usage_for_every_protocol() {
             let expected = Usage {
                 input_tokens: Some(i),
                 output_tokens: Some(o),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                reasoning_tokens: None,
             };
             assert_eq!(summary.usage, expected, "{protocol:?} {name}");
             assert!(matches!(
                 events[events.len() - 2],
-                RunEvent::Usage { input_tokens, output_tokens } if input_tokens == Some(i) && output_tokens == Some(o)
+                RunEvent::Usage { input_tokens, output_tokens, .. } if input_tokens == Some(i) && output_tokens == Some(o)
             ));
 
             let request = seen.lock().await[0].clone();
@@ -330,7 +386,11 @@ async fn streams_text_and_usage_for_every_protocol() {
                 request.contains(system) && request.contains(r#""stream":true"#),
                 "{request}"
             );
-            assert!(request.contains(r#"{"content":"earlier","role":"user"},{"content":"reply","role":"assistant"},{"content":"hi","role":"user"}"#), "{request}");
+            if protocol == Protocol::AnthropicMessages {
+                assert!(request.contains(r#"{"content":[{"text":"reply","type":"text"}],"role":"assistant"},{"content":"hi","role":"user"}"#), "{request}");
+            } else {
+                assert!(request.contains(r#"{"content":"earlier","role":"user"},{"content":"reply","role":"assistant"},{"content":"hi","role":"user"}"#), "{request}");
+            }
             if protocol == Protocol::AnthropicMessages {
                 assert!(lower.contains("anthropic-version: 2023-06-01"));
             }

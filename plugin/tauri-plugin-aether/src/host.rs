@@ -62,8 +62,9 @@ mod chat_contract {
     use ts_rs::TS;
 
     pub use aether_chat::{Approval, ToolCall, ToolSource, ToolSpec};
+    use aether_providers::KitError;
     pub use aether_providers::ModelRef;
-    use aether_support::KitError;
+    pub use aether_support::{ContextUsage, ReasoningEffort, TokenUsage};
 
     pub use aether_support::SkillRef;
     // SkillRef comes from aether-support so `chat` without the `skills` feature still accepts
@@ -105,6 +106,10 @@ mod chat_contract {
         pub regenerate: bool,
         /// UI language, e.g. `zh-CN`; selects fixed prompt texts.
         pub language: String,
+        /// Requested reasoning effort; omitted uses the endpoint default.
+        #[serde(default)]
+        #[ts(optional)]
+        pub reasoning_effort: Option<ReasoningEffort>,
     }
 
     /// Reference to host data; `kind` and `id` are defined by the app.

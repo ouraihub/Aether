@@ -28,6 +28,7 @@ pub(crate) struct Request<'a> {
     pub(crate) turn: &'a [Message],
     pub(crate) max_output: u32,
     pub(crate) tools: &'a [ToolSpec],
+    pub(crate) native_web_search: bool,
 }
 
 impl Request<'_> {
@@ -78,12 +79,18 @@ impl Request<'_> {
                 body
             }
         };
-        if !self.tools.is_empty() {
-            body["tools"] = self
-                .tools
-                .iter()
-                .map(|tool| tool_json(protocol, tool))
-                .collect();
+        let mut tools: Vec<Value> = self
+            .tools
+            .iter()
+            .map(|tool| tool_json(protocol, tool))
+            .collect();
+        if self.native_web_search && protocol == Protocol::AnthropicMessages {
+            tools.push(json!({"type":"web_search_20250305","name":"web_search","max_uses":5}));
+        } else if self.native_web_search && protocol == Protocol::OpenaiResponses {
+            tools.push(json!({"type":"web_search"}));
+        }
+        if !tools.is_empty() {
+            body["tools"] = tools.into();
         }
         builder.json(&body)
     }
@@ -107,19 +114,28 @@ fn anthropic_messages(history: &[Message], out: &mut Vec<Value>) {
     for group in history.chunk_by(|a, b| is_tool(a) && is_tool(b)) {
         match group {
             [Message::User(text), ..] => push_user(out, text),
-            [Message::Assistant { text, tool_calls }, ..] => {
+            [
+                Message::Assistant {
+                    text,
+                    tool_calls,
+                    reasoning,
+                },
+                ..,
+            ] => {
                 calls = tool_calls;
-                let content = if tool_calls.is_empty() {
-                    json!(text)
-                } else {
-                    let text = (!text.is_empty()).then(|| json!({ "type": "text", "text": text }));
-                    text.into_iter()
-                        .chain(tool_calls.iter().map(|c| {
-                            json!({ "type": "tool_use", "id": c.id, "name": c.name, "input": c.args })
-                        }))
-                        .collect()
-                };
-                out.push(json!({ "role": "assistant", "content": content }));
+                let mut content = Vec::new();
+                for block in reasoning {
+                    if block.protocol == Protocol::AnthropicMessages {
+                        content.push(block.value.clone());
+                    }
+                }
+                if !text.is_empty() {
+                    content.push(json!({ "type": "text", "text": text }));
+                }
+                content.extend(tool_calls.iter().map(
+                    |c| json!({ "type": "tool_use", "id": c.id, "name": c.name, "input": c.args }),
+                ));
+                out.push(json!({ "role": "assistant", "content": if content.is_empty() { json!(text) } else { json!(content) } }));
             }
             results => {
                 let mut blocks: Vec<(usize, Value)> = results
@@ -160,29 +176,37 @@ fn openai_message(protocol: Protocol, message: &Message, out: &mut Vec<Value>) {
     let responses = protocol == Protocol::OpenaiResponses;
     match message {
         Message::User(text) => out.push(json!({ "role": "user", "content": text })),
-        Message::Assistant { text, tool_calls } if responses => {
+        Message::Assistant {
+            text,
+            tool_calls,
+            reasoning,
+        } if responses => {
+            for block in reasoning {
+                if block.protocol == Protocol::OpenaiResponses {
+                    out.push(block.value.clone());
+                }
+            }
             if !text.is_empty() || tool_calls.is_empty() {
                 out.push(json!({ "role": "assistant", "content": text }));
             }
-            out.extend(tool_calls.iter().map(|c| {
-                json!({
-                    "type": "function_call", "call_id": c.id, "name": c.name,
-                    "arguments": c.args.to_string(),
-                })
-            }));
+            out.extend(tool_calls.iter().map(|c| json!({ "type": "function_call", "call_id": c.id, "name": c.name, "arguments": c.args.to_string() })));
         }
-        Message::Assistant { text, tool_calls } => {
+        Message::Assistant {
+            text,
+            tool_calls,
+            reasoning,
+        } => {
             let mut message = json!({ "role": "assistant", "content": text });
-            if !tool_calls.is_empty() {
-                message["tool_calls"] = tool_calls
+            if !reasoning.is_empty() {
+                message["reasoning_content"] = reasoning
                     .iter()
-                    .map(|c| {
-                        json!({
-                            "id": c.id, "type": "function",
-                            "function": { "name": c.name, "arguments": c.args.to_string() },
-                        })
-                    })
-                    .collect();
+                    .filter(|b| b.protocol == Protocol::OpenaiChat)
+                    .filter_map(|b| b.value.as_str())
+                    .collect::<String>()
+                    .into();
+            }
+            if !tool_calls.is_empty() {
+                message["tool_calls"] = tool_calls.iter().map(|c| json!({ "id": c.id, "type": "function", "function": { "name": c.name, "arguments": c.args.to_string() } })).collect();
             }
             out.push(message);
         }
@@ -335,6 +359,13 @@ impl Decoder {
                     let block = &v["content_block"];
                     self.start(&v["index"], &block["id"], &block["name"]);
                 }
+                "content_block_start"
+                    if v["content_block"]["type"] == "web_search_tool_result"
+                        && v["content_block"]["content"]["type"]
+                            == "web_search_tool_result_error" =>
+                {
+                    return Decoded::Error("native web search failed".to_owned());
+                }
                 "content_block_delta" if v["delta"]["type"] == "input_json_delta" => {
                     self.append(&v["index"], &v["delta"]["partial_json"]);
                 }
@@ -343,6 +374,9 @@ impl Decoder {
                 }
                 "content_block_delta" if v["delta"]["type"] == "text_delta" => {
                     return text(&v["delta"]["text"]);
+                }
+                "content_block_delta" if v["delta"]["type"] == "citations_delta" => {
+                    return citation(&v["delta"]["citation"]);
                 }
                 "message_delta" => {
                     usage.output_tokens =
@@ -379,6 +413,7 @@ impl Decoder {
                     self.start(&item["id"], &item["call_id"], &item["name"]);
                 }
                 "response.function_call_arguments.delta" => self.append(&v["item_id"], &v["delta"]),
+                "response.output_text.annotation.added" => return citation(&v["annotation"]),
                 "response.completed" | "response.incomplete" => {
                     usage.input_tokens = tokens(&v["response"]["usage"]["input_tokens"]);
                     usage.output_tokens = tokens(&v["response"]["usage"]["output_tokens"]);
@@ -409,6 +444,22 @@ fn error(value: &Value) -> Decoded {
             .unwrap_or("upstream error")
             .to_owned(),
     )
+}
+
+fn citation(value: &Value) -> Decoded {
+    let Some(url) = value["url"].as_str() else {
+        return Decoded::Skip;
+    };
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return Decoded::Skip;
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Decoded::Skip;
+    }
+    Decoded::Text(format!(
+        " [source](<{}>)",
+        parsed.as_str().replace('<', "%3C").replace('>', "%3E")
+    ))
 }
 
 fn tokens(value: &Value) -> Option<u32> {

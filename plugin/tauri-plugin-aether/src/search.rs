@@ -1,6 +1,7 @@
 //! `search_*` commands and cancellation jobs.
 use aether_search::{
-    CheckResult, SearchCap, SearchPage, SearchResult, SearchSave, SearchSettings, Store,
+    CheckResult, SearchCap, SearchPage, SearchPreferences, SearchResult, SearchSave,
+    SearchSettings, Store,
 };
 use aether_support::KitError;
 use std::{collections::HashMap, sync::Arc};
@@ -61,10 +62,9 @@ pub(crate) async fn search_set_default<R: Runtime>(
     app: AppHandle<R>,
     capability: SearchCap,
     provider: String,
-    max_results: Option<u8>,
 ) -> Result<SearchSettings, KitError> {
     let s = app.state::<Search>().store.clone();
-    tauri::async_runtime::spawn_blocking(move || s.set_default(capability, &provider, max_results))
+    tauri::async_runtime::spawn_blocking(move || s.set_default(capability, &provider))
         .await
         .map_err(KitError::internal)?
 }
@@ -73,10 +73,47 @@ pub(crate) async fn search_reveal<R: Runtime>(
     app: AppHandle<R>,
     capability: SearchCap,
     provider: String,
-    _current_password: Option<String>,
+    key_id: String,
 ) -> Result<String, KitError> {
     let s = app.state::<Search>().store.clone();
-    tauri::async_runtime::spawn_blocking(move || s.reveal(capability, &provider))
+    tauri::async_runtime::spawn_blocking(move || s.reveal(capability, &provider, &key_id))
+        .await
+        .map_err(KitError::internal)?
+}
+#[tauri::command]
+pub(crate) async fn search_save_preferences<R: Runtime>(
+    app: AppHandle<R>,
+    input: SearchPreferences,
+) -> Result<SearchPreferences, KitError> {
+    let s = app.state::<Search>().store.clone();
+    tauri::async_runtime::spawn_blocking(move || s.save_preferences(input))
+        .await
+        .map_err(KitError::internal)?
+}
+#[tauri::command]
+pub(crate) async fn search_save_key<R: Runtime>(
+    app: AppHandle<R>,
+    capability: SearchCap,
+    provider: String,
+    value: String,
+    key_id: Option<String>,
+) -> Result<SearchSettings, KitError> {
+    let s = app.state::<Search>().store.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        s.save_key(capability, &provider, &value, key_id.as_deref())
+    })
+    .await
+    .map_err(KitError::internal)?
+}
+#[tauri::command]
+pub(crate) async fn search_remove_key<R: Runtime>(
+    app: AppHandle<R>,
+    capability: SearchCap,
+    provider: String,
+    key_id: String,
+) -> Result<SearchSettings, KitError> {
+    let s = app.state::<Search>().store.clone();
+    tauri::async_runtime::spawn_blocking(move || s.remove_key(capability, &provider, &key_id))
         .await
         .map_err(KitError::internal)?
 }

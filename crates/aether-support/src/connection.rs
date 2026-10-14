@@ -12,31 +12,37 @@ use zeroize::Zeroizing;
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
 pub enum Protocol {
-    /// Anthropic Messages API (`/v1/messages`).
+    /// Anthropic Messages wire format.
     AnthropicMessages,
-    /// OpenAI Chat Completions (`/v1/chat/completions`).
+    /// OpenAI Chat Completions wire format.
     OpenaiChat,
-    /// OpenAI Responses (`/v1/responses`).
+    /// OpenAI Responses wire format.
     OpenaiResponses,
 }
 
 /// Everything needed to call one model. Lives only in the backend: it is not
 /// `Serialize`, and `Debug` never prints the key.
 pub struct Connection {
-    /// Endpoint base URL as configured (normalised by providers).
+    /// Canonical provider API base URL.
     pub base_url: String,
     /// Wire protocol.
     pub protocol: Protocol,
-    /// Plaintext key, wiped on drop. `None` when no key is stored.
+    /// Backend-only clear credential.
     pub api_key: Option<Zeroizing<String>>,
-    /// Model id; `None` for endpoint-level use such as probing.
+    /// Selected model identifier.
     pub model_id: Option<String>,
-    /// Context window in tokens, when known.
+    /// Selected endpoint identifier.
+    pub endpoint_id: Option<String>,
+    /// Declared context window.
     pub context_window: Option<u32>,
-    /// Maximum output tokens, when known.
+    /// Declared output limit.
     pub max_output: Option<u32>,
-    /// Whether the model accepts tool definitions; `None` = unknown.
+    /// Declared local tool support.
     pub supports_tools: Option<bool>,
+    /// Declared reasoning controls.
+    pub reasoning: Option<crate::ReasoningConfig>,
+    /// User-declared support for protocol-native web search.
+    pub native_web_search: bool,
 }
 
 impl fmt::Debug for Connection {
@@ -46,9 +52,11 @@ impl fmt::Debug for Connection {
             .field("protocol", &self.protocol)
             .field("api_key", &self.api_key.as_ref().map(|_| "***"))
             .field("model_id", &self.model_id)
+            .field("endpoint_id", &self.endpoint_id)
             .field("context_window", &self.context_window)
             .field("max_output", &self.max_output)
             .field("supports_tools", &self.supports_tools)
+            .field("reasoning", &self.reasoning)
             .finish()
     }
 }
@@ -56,7 +64,6 @@ impl fmt::Debug for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn debug_never_prints_the_key() {
         let connection = Connection {
@@ -64,9 +71,12 @@ mod tests {
             protocol: Protocol::OpenaiChat,
             api_key: Some(Zeroizing::new("sk-live-0123456789abcdefghij".to_owned())),
             model_id: Some("gpt-x".to_owned()),
+            endpoint_id: Some("e1".to_owned()),
             context_window: None,
             max_output: None,
             supports_tools: Some(true),
+            reasoning: None,
+            native_web_search: false,
         };
         let printed = format!("{connection:?}");
         assert!(

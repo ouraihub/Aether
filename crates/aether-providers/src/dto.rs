@@ -44,20 +44,55 @@ pub enum TypeSource {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export)]
 pub struct Model {
-    /// Upstream model id.
+    /// Upstream model identifier.
     pub id: String,
-    /// Model type.
+    /// Intended model capability.
     pub model_type: ModelType,
-    /// Origin of `model_type`.
+    /// Origin of the capability declaration.
     pub type_source: TypeSource,
-    /// Context window in tokens, when known.
+    /// Configured context window in tokens.
     pub context_window: Option<u32>,
-    /// Maximum output tokens, when known.
+    /// Configured maximum output tokens.
     pub max_output: Option<u32>,
-    /// Whether the model accepts images.
+    /// Image input support.
     pub can_vision: bool,
-    /// Whether the model accepts tools; `None` = unknown.
+    /// Client-side tool support, unknown when absent.
     pub supports_tools: Option<bool>,
+    /// User-declared reasoning parameters.
+    #[serde(default)]
+    pub reasoning: Option<aether_support::ReasoningConfig>,
+    /// User-declared support for protocol-native web search.
+    #[serde(default)]
+    pub native_web_search: bool,
+}
+
+/// Model fields in a save request. `reasoning` is tri-state: omitted keeps the
+/// stored value, `null` clears it, and an object replaces it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
+pub struct ModelSave {
+    /// Upstream model identifier.
+    pub id: String,
+    /// Intended model capability.
+    pub model_type: ModelType,
+    /// Origin of the capability declaration.
+    pub type_source: TypeSource,
+    /// Configured context window in tokens.
+    pub context_window: Option<u32>,
+    /// Configured maximum output tokens.
+    pub max_output: Option<u32>,
+    /// Image input support.
+    pub can_vision: bool,
+    /// Client-side tool support, unknown when absent.
+    pub supports_tools: Option<bool>,
+    /// Omit to keep, null to clear, object to replace reasoning settings.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub reasoning: Option<Option<aether_support::ReasoningConfig>>,
+    /// User-declared support for protocol-native web search.
+    #[serde(default)]
+    pub native_web_search: bool,
 }
 
 /// A stored endpoint as shown to the UI: the key only as `hasKey` / masked value.
@@ -118,7 +153,7 @@ pub struct EndpointSave {
     #[ts(optional)]
     pub api_key: Option<String>,
     /// Selected models in display order.
-    pub models: Vec<Model>,
+    pub models: Vec<ModelSave>,
 }
 
 /// A whole-provider save: endpoints missing from `endpoints` are deleted.
@@ -162,6 +197,10 @@ pub struct ModelOption {
     pub model_type: ModelType,
     /// Whether the model accepts tools; `None` = unknown.
     pub supports_tools: Option<bool>,
+    /// Configured reasoning capabilities.
+    pub reasoning: Option<aether_support::ReasoningConfig>,
+    /// User-declared support for protocol-native web search.
+    pub native_web_search: bool,
 }
 
 /// Narrows [`crate::Store::model_options`]; `None` fields match everything.

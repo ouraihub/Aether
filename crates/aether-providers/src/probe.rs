@@ -203,6 +203,8 @@ fn probed(id: String) -> ProbedModel {
             max_output: inferred.max_output,
             can_vision: inferred.can_vision,
             supports_tools: inferred.supports_tools,
+            reasoning: None,
+            native_web_search: false,
         },
         group: inferred.group,
     }

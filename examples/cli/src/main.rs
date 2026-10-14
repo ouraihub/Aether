@@ -12,7 +12,8 @@ use aether_chat::{
 };
 use aether_observability::LogConfig;
 use aether_providers::{
-    EndpointSave, Model, ModelRef, ModelType, Protocol, ProviderSave, Store, TypeSource,
+    EndpointSave, ModelRef, ModelSave, ModelType, Protocol, ProviderSave, ReasoningEffort, Store,
+    TypeSource,
 };
 
 /// The only tool: read-only, so `Auto`. Its answer is not guessable, which proves the model
@@ -99,7 +100,7 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
             protocol,
             // Absent keeps the stored key, so it only has to be passed once.
             api_key: std::env::var("AETHER_API_KEY").ok(),
-            models: vec![Model {
+            models: vec![ModelSave {
                 id: model_id.clone(),
                 model_type: ModelType::Chat,
                 type_source: TypeSource::User,
@@ -107,6 +108,8 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
                 max_output: None,
                 can_vision: false,
                 supports_tools: Some(with_tool),
+                reasoning: None,
+                native_web_search: false,
             }],
         }],
     })?;
@@ -141,6 +144,8 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
         history: Vec::new(),
         input: message,
         tools,
+        reasoning_effort: ReasoningEffort::Default,
+        native_web_search: false,
     };
     let runner = Runner::new(AddressPolicy::default())?;
     let tokio = tokio::runtime::Runtime::new()?;

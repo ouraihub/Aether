@@ -4,10 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-use aether_support::{Connection, KitError};
-
 pub use aether_support::Approval;
-
+use aether_support::{Connection, KitError, ReasoningBlock, ReasoningEffort};
 /// Everything one run needs, assembled by the integration layer before the run starts.
 #[derive(Debug)]
 pub struct RunInput {
@@ -25,6 +23,10 @@ pub struct RunInput {
     pub tools: Vec<ToolSpec>,
     /// Limits.
     pub budget: Budget,
+    /// Requested reasoning effort.
+    pub reasoning_effort: ReasoningEffort,
+    /// Use the configured protocol's server-side search, never a local tool.
+    pub native_web_search: bool,
 }
 
 /// One part of the system prompt.
@@ -169,6 +171,9 @@ pub enum Message {
         text: String,
         /// Requested tool calls, in order.
         tool_calls: Vec<ToolCall>,
+        /// Provider-native reasoning blocks.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        reasoning: Vec<ReasoningBlock>,
     },
     /// Result of one tool call, as fed back to the model.
     Tool {
@@ -296,12 +301,28 @@ pub enum RunEvent {
         #[ts(optional, type = "unknown")]
         payload: Option<Value>,
     },
-    /// Token usage; `null` when the upstream does not report it.
+    /// Known provider usage; absent values are unknown, not zero.
     Usage {
-        /// Input tokens.
+        /// Total input tokens.
         input_tokens: Option<u32>,
-        /// Output tokens.
+        /// Total output tokens.
         output_tokens: Option<u32>,
+        /// Input cache reads.
+        cache_read_tokens: Option<u32>,
+        /// Input cache writes.
+        cache_write_tokens: Option<u32>,
+        /// Reasoning output tokens.
+        reasoning_tokens: Option<u32>,
+    },
+    /// Provider context usage for the current request.
+    Context {
+        /// Last request context report or estimate.
+        usage: aether_support::ContextUsage,
+    },
+    /// Provider reasoning text delta.
+    ReasoningDelta {
+        /// Displayable reasoning fragment.
+        text: String,
     },
     /// The single terminal event.
     End {
@@ -343,10 +364,13 @@ mod tests {
         let usage = RunEvent::Usage {
             input_tokens: Some(3),
             output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            reasoning_tokens: None,
         };
         assert_eq!(
             wire(&usage),
-            r#"{"kind":"usage","inputTokens":3,"outputTokens":null}"#
+            r#"{"kind":"usage","inputTokens":3,"outputTokens":null,"cacheReadTokens":null,"cacheWriteTokens":null,"reasoningTokens":null}"#,
         );
         let end = RunEvent::End {
             status: EndStatus::Failed,

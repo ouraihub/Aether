@@ -47,18 +47,20 @@ CREATE TABLE models (
 type Protocol = 'anthropic-messages' | 'openai-chat' | 'openai-responses'
 type ModelType = 'chat' | 'image' | 'video' | 'tts' | 'stt' | 'embedding' | 'rerank' | 'unknown'
 interface Model { id: string; modelType: ModelType; typeSource: 'inferred' | 'user'; contextWindow: number | null;
-  maxOutput: number | null; canVision: boolean; supportsTools: boolean | null }
+  maxOutput: number | null; canVision: boolean; supportsTools: boolean | null; reasoning: ReasoningConfig | null; nativeWebSearch: boolean }
 interface Endpoint { id: string; slug: string; baseUrl: string; protocol: Protocol; hasKey: boolean; keyMasked: string | null;
   keyReadable: boolean; probeUrl: string; models: Model[] }
 interface Provider { id: string; name: string; endpoints: Endpoint[] }
 interface EndpointSave { id?: string; slug: string; baseUrl: string; protocol: Protocol; apiKey?: string; models: Model[] }
 interface ProviderSave { id?: string; name: string; endpoints: EndpointSave[] }
 interface ModelRef { endpointId: string; modelId: string }
-interface ModelOption extends ModelRef { label: string /* "服务商 · 线路 · 模型" */; modelType: ModelType; supportsTools: boolean | null }
+interface ModelOption extends ModelRef { label: string /* "服务商 · 线路 · 模型" */; modelType: ModelType; supportsTools: boolean | null; reasoning: ReasoningConfig | null; nativeWebSearch: boolean }
 interface ProbeResult { probeUrl: string; models: (Model & { group: string | null })[]; error: ProbeError | null }
 interface ProbeError { kind: 'missing_key' | 'unauthorized' | 'not_found' | 'rate_limited' | 'status' | 'timeout' | 'connect' | 'blocked_address' | 'invalid_body';
   status: number | null; message: string | null /* 上游原文，已打码，≤300 字符 */; hint: string | null /* i18n key */ }
 ```
+
+nativeWebSearch默认false，用户显式声明；只允许chat模型与Messages/Responses协议，保存拒绝Chat Completions声明。搜索优先路由见17；不凭兼容端点模型名字猜测原生搜索。ModelSave的reasoning可省略/nullable，其他字段按生成DTO提交。新系统直接使用最终model表字段，不为新原生能力导入历史配置。
 
 - `keyMasked` 为首 4 尾 4 打码；`keyReadable=false` 表示密文存在但无法解密（换了 Windows 账户）。
 - 保存是**整服务商替换**：事务内按 `ProviderSave` 重写线路与模型，请求里没有的线路被删除。已有线路必须带回 `id`。

@@ -20,6 +20,8 @@ pub struct RunInput {
     pub input: String,                        // 本轮用户输入
     pub tools: Vec<ToolSpec>,                 // 本次运行的工具目录，运行开始后不变
     pub budget: Budget,
+    pub reasoning_effort: ReasoningEffort,
+    pub native_web_search: bool,              // 接入层按显式联网+偏好+模型能力决定；服务端工具不进本地执行器
 }
 pub enum SystemPart {
     Host(String),                                               // 宿主提示词

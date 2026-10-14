@@ -43,7 +43,10 @@ export function toSave(draft: ProviderDraft): ProviderSave {
       slug: e.slug.trim(),
       baseUrl: e.baseUrl.trim(),
       protocol: e.protocol,
-      models: e.models,
+      models: e.models.map((model) => ({
+        ...model,
+        nativeWebSearch: model.modelType === 'chat' && e.protocol !== 'openai-chat' && model.nativeWebSearch,
+      })),
     }
     if (e.saved) save.id = e.saved.id
     if (e.key !== null) save.apiKey = e.key
