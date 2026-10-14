@@ -44,15 +44,22 @@ jobs:
         run: pnpm run kit:dto-check
       - name: i18n contract check
         run: pnpm run kit:i18n
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - run: cargo test --workspace --all-features
+      - name: Rust formatting
+        shell: cmd
+        run: call scripts\cargo-msvc.bat fmt --all -- --check
+      - name: Rust clippy
+        shell: cmd
+        run: call scripts\cargo-msvc.bat clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Rust tests
+        shell: cmd
+        run: call scripts\cargo-msvc.bat test --workspace --all-features
       - name: Each plugin feature builds on its own
-        shell: bash
+        shell: pwsh
         run: |
-          for f in providers chat skills mcp-client mcp-server; do
-            cargo check -p tauri-plugin-aether --no-default-features --features "$f"
-          done
+          foreach ($feature in @('providers', 'chat', 'skills', 'mcp-client', 'mcp-server')) {
+            & cmd /d /c "scripts\cargo-msvc.bat check -p tauri-plugin-aether --no-default-features --features $feature"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
   # Decision D3: Windows first, macOS later. Keep the core crates compiling on macOS
   # from day one so platform-specific code stays behind cfg gates.
