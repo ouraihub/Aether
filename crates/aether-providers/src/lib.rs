@@ -14,6 +14,6 @@ pub use aether_support::{
     ReasoningConfig, ReasoningDialect, ReasoningEffort, TokenUsage,
 };
 pub use dto::*;
-pub use infer::{Inferred, infer};
+pub use infer::{Inferred, infer, infer_reasoning};
 pub use store::Store;
 pub use url::api_base;

@@ -13,11 +13,11 @@ use aether_support::{Connection, KitError, Protocol};
 use rusqlite::{Connection as Db, OptionalExtension, params};
 use zeroize::Zeroizing;
 
-use crate::api_base;
 use crate::dto::{
     Endpoint, EndpointSave, Model, ModelFilter, ModelOption, ModelRef, ModelType, Provider,
     ProviderSave, TypeSource,
 };
+use crate::{api_base, infer_reasoning};
 
 const MIGRATIONS: &[Migration] = &[
 Migration {
@@ -150,7 +150,7 @@ impl Store {
     pub fn model_options(&self, filter: ModelFilter) -> Result<Vec<ModelOption>, KitError> {
         let db = self.lock()?;
         let mut stmt = db.prepare_cached(
-            "SELECT p.name, e.slug, m.endpoint_id, m.model_id, m.model_type, m.supports_tools, m.reasoning, m.native_web_search
+            "SELECT p.name, e.slug, m.endpoint_id, m.model_id, m.model_type, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, e.protocol
              FROM models m JOIN endpoints e ON e.id = m.endpoint_id JOIN providers p ON p.id = e.provider_id
              ORDER BY p.position, p.id, e.position, m.position",
         )?;
@@ -162,9 +162,11 @@ impl Store {
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
-                    row.get::<_, Option<bool>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, bool>(7)?,
+                    row.get::<_, Option<u32>>(5)?,
+                    row.get::<_, Option<bool>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, bool>(8)?,
+                    row.get::<_, String>(9)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -175,17 +177,25 @@ impl Store {
             endpoint_id,
             model_id,
             model_type,
+            max_output,
             supports_tools,
             reasoning,
             native_web_search,
+            protocol,
         ) in rows
         {
             let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
+            let protocol = parse_protocol(&protocol)?;
             let reasoning = reasoning
                 .as_deref()
                 .map(serde_json::from_str)
                 .transpose()
-                .map_err(KitError::internal)?;
+                .map_err(KitError::internal)?
+                .or_else(|| {
+                    (model_type == ModelType::Chat)
+                        .then(|| infer_reasoning(&model_id, protocol, max_output))
+                        .flatten()
+                });
             if filter.model_type.is_some_and(|wanted| wanted != model_type)
                 || filter
                     .supports_tools
@@ -215,16 +225,17 @@ impl Store {
     pub fn resolve(&self, model: &ModelRef) -> Result<Connection, KitError> {
         let db = self.lock()?;
         let row = db.query_row(
-            "SELECT e.base_url, e.protocol, e.key_ciphertext, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search
+            "SELECT e.base_url, e.protocol, e.key_ciphertext, m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search
              FROM models m JOIN endpoints e ON e.id = m.endpoint_id WHERE m.endpoint_id = ?1 AND m.model_id = ?2",
             params![model.endpoint_id, model.model_id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<Vec<u8>>>(2)?,
-                row.get::<_, Option<u32>>(3)?, row.get::<_, Option<u32>>(4)?, row.get::<_, Option<bool>>(5)?, row.get::<_, Option<String>>(6)?, row.get::<_, bool>(7)?)),
+                row.get::<_, String>(3)?, row.get::<_, Option<u32>>(4)?, row.get::<_, Option<u32>>(5)?, row.get::<_, Option<bool>>(6)?, row.get::<_, Option<String>>(7)?, row.get::<_, bool>(8)?)),
         ).optional()?;
         let (
             base_url,
             protocol,
             key,
+            model_type,
             context_window,
             max_output,
             supports_tools,
@@ -232,11 +243,17 @@ impl Store {
             native_web_search,
         ) = row.ok_or_else(|| KitError::not_found("model"))?;
         let protocol = parse_protocol(&protocol)?;
+        let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
         let reasoning = reasoning
             .as_deref()
             .map(serde_json::from_str)
             .transpose()
-            .map_err(KitError::internal)?;
+            .map_err(KitError::internal)?
+            .or_else(|| {
+                (model_type == ModelType::Chat)
+                    .then(|| infer_reasoning(&model.model_id, protocol, max_output))
+                    .flatten()
+            });
         Ok(Connection {
             base_url: api_base(&base_url),
             protocol,
@@ -497,15 +514,19 @@ fn write_endpoint(
 
 fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
     let mut models: HashMap<String, Vec<Model>> = HashMap::new();
-    let mut stmt = db.prepare_cached("SELECT endpoint_id, model_id, model_type, type_source, context_window, max_output, can_vision, supports_tools, reasoning, native_web_search FROM models ORDER BY endpoint_id, position")?;
+    let mut stmt = db.prepare_cached("SELECT m.endpoint_id, m.model_id, m.model_type, m.type_source, m.context_window, m.max_output, m.can_vision, m.supports_tools, m.reasoning, m.native_web_search, e.protocol FROM models m JOIN endpoints e ON e.id = m.endpoint_id ORDER BY m.endpoint_id, m.position")?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let model_type: String = row.get(2)?;
         let type_source: String = row.get(3)?;
         let reasoning: Option<String> = row.get(8)?;
+        let protocol = parse_protocol(&row.get::<_, String>(10)?)?;
+        let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
+        let max_output = row.get(5)?;
+        let model_id: String = row.get(1)?;
         models.entry(row.get(0)?).or_default().push(Model {
-            id: row.get(1)?,
-            model_type: ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?,
+            id: model_id.clone(),
+            model_type,
             type_source: TypeSource::parse(&type_source).ok_or_else(|| corrupt("type_source"))?,
             context_window: row.get(4)?,
             max_output: row.get(5)?,
@@ -515,7 +536,12 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
                 .as_deref()
                 .map(serde_json::from_str)
                 .transpose()
-                .map_err(KitError::internal)?,
+                .map_err(KitError::internal)?
+                .or_else(|| {
+                    (model_type == ModelType::Chat)
+                        .then(|| infer_reasoning(&model_id, protocol, max_output))
+                        .flatten()
+                }),
             native_web_search: row.get(9)?,
         });
     }
@@ -636,6 +662,78 @@ mod tests {
 
     fn fail_seal(_: &str) -> Result<Vec<u8>, KitError> {
         Err(KitError::unsupported("secret_store"))
+    }
+
+    #[test]
+    fn saved_null_reasoning_is_inferred_consistently_without_reconfiguration() {
+        let (dir, store) = store();
+        let mut ep = endpoint(
+            None,
+            "auto",
+            &["claude-opus-5-5", "claude-sonnet-5-5", "unknown"],
+        );
+        ep["protocol"] = json!("anthropic-messages");
+        let saved = store
+            .save(request(json!({"name":"Automatic","endpoints":[ep]})))
+            .unwrap();
+        let id = &saved[0].endpoints[0].id;
+        let reference = ModelRef {
+            endpoint_id: id.clone(),
+            model_id: "claude-sonnet-5-5".into(),
+        };
+        let expected =
+            infer_reasoning(&reference.model_id, Protocol::AnthropicMessages, None).unwrap();
+        assert_eq!(
+            saved[0].endpoints[0].models[1].reasoning.as_ref(),
+            Some(&expected)
+        );
+        assert_eq!(
+            store.resolve(&reference).unwrap().reasoning,
+            Some(expected.clone())
+        );
+        let options = store.model_options(ModelFilter::default()).unwrap();
+        assert!(
+            !options[0]
+                .reasoning
+                .as_ref()
+                .unwrap()
+                .efforts
+                .contains(&aether_support::ReasoningEffort::None)
+        );
+        assert_eq!(options[1].reasoning.as_ref(), Some(&expected));
+        assert!(options[2].reasoning.is_none());
+        assert!(
+            store
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT reasoning FROM models WHERE model_id='claude-sonnet-5-5'",
+                    [],
+                    |row| row.get::<_, Option<String>>(0)
+                )
+                .unwrap()
+                .is_none()
+        );
+        let override_json = r#"{"dialect":"anthropic-adaptive","efforts":["high"]}"#;
+        store
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE models SET reasoning=?1 WHERE model_id='claude-sonnet-5-5'",
+                [override_json],
+            )
+            .unwrap();
+        drop(store);
+        let restarted = Store::open(dir.path()).unwrap();
+        assert_eq!(
+            restarted
+                .resolve(&reference)
+                .unwrap()
+                .reasoning
+                .unwrap()
+                .efforts,
+            vec![aether_support::ReasoningEffort::High]
+        );
     }
 
     #[test]

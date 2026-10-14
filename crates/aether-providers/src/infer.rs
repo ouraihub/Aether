@@ -1,7 +1,7 @@
 //! Model metadata inferred from the id alone (docs/11 §6). Test data:
 //! `packages/ui/fixtures/model-classify.json`, shared with the TypeScript side.
 
-use crate::ModelType;
+use crate::{ModelType, Protocol, ReasoningConfig, ReasoningDialect, ReasoningEffort};
 
 /// What [`infer`] can tell from a model id.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,6 +93,152 @@ pub fn infer(model_id: &str) -> Inferred {
     }
 }
 
+/// Infers reasoning controls for supported model families and protocols.
+#[must_use]
+pub fn infer_reasoning(
+    model_id: &str,
+    protocol: Protocol,
+    max_output: Option<u32>,
+) -> Option<ReasoningConfig> {
+    let id = model_id.to_ascii_lowercase().replace('.', "-");
+    let name = id.rsplit('/').next().unwrap_or_default();
+    match protocol {
+        Protocol::AnthropicMessages => infer_anthropic_reasoning(name, max_output),
+        Protocol::OpenaiChat | Protocol::OpenaiResponses => infer_openai_reasoning(name),
+    }
+}
+
+fn infer_anthropic_reasoning(name: &str, max_output: Option<u32>) -> Option<ReasoningConfig> {
+    let adaptive = [
+        "claude-opus-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+        "claude-sonnet-4-7",
+        "claude-sonnet-4-8",
+        "claude-opus-5-5",
+        "claude-opus-5",
+        "claude-sonnet-5-5",
+        "claude-sonnet-5",
+        "claude-haiku-5-5",
+        "claude-haiku-5",
+    ];
+    if let Some(prefix) = adaptive.iter().find(|prefix| version_match(name, prefix)) {
+        let xhigh = prefix.ends_with("-5-5");
+        let no_none = *prefix == "claude-opus-5-5";
+        let mut efforts = Vec::with_capacity(if xhigh { 5 } else { 4 });
+        if !no_none {
+            efforts.push(ReasoningEffort::None);
+        }
+        efforts.extend([
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+        ]);
+        if xhigh {
+            efforts.push(ReasoningEffort::Xhigh);
+        }
+        efforts.push(ReasoningEffort::Max);
+        return Some(ReasoningConfig {
+            dialect: ReasoningDialect::AnthropicAdaptive,
+            efforts,
+            budget_tokens: None,
+        });
+    }
+
+    let budget = [
+        "claude-3-7-sonnet",
+        "claude-sonnet-4-5",
+        "claude-sonnet-4",
+        "claude-opus-4-5",
+        "claude-opus-4-1",
+        "claude-opus-4",
+        "claude-haiku-4-5",
+    ]
+    .iter()
+    .any(|prefix| version_match(name, prefix));
+    let budget_tokens = max_output.unwrap_or(8_193).saturating_sub(1).min(8_192);
+    budget
+        .then_some(ReasoningConfig {
+            dialect: ReasoningDialect::AnthropicBudget,
+            efforts: vec![
+                ReasoningEffort::None,
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+            ],
+            budget_tokens: (budget_tokens >= 1_024).then_some(budget_tokens),
+        })
+        .filter(|_| budget_tokens >= 1_024)
+}
+
+fn infer_openai_reasoning(name: &str) -> Option<ReasoningConfig> {
+    if (version_match(name, "o1") && !name.contains("-mini") && !name.contains("-preview"))
+        || version_match(name, "o3")
+        || version_match(name, "o4-mini")
+    {
+        return Some(openai_reasoning(vec![
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+        ]));
+    }
+    if name.contains("-chat") || name.contains("-pro") || name.contains("-codex") {
+        return None;
+    }
+    if version_match(name, "gpt-5") {
+        return Some(openai_reasoning(vec![
+            ReasoningEffort::Minimal,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+        ]));
+    }
+    if version_match(name, "gpt-5-1") {
+        return Some(openai_reasoning(vec![
+            ReasoningEffort::None,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+        ]));
+    }
+    if ["gpt-5-2", "gpt-5-3", "gpt-5-4", "gpt-5-5", "gpt-5-6"]
+        .iter()
+        .any(|prefix| version_match(name, prefix))
+    {
+        return Some(openai_reasoning(vec![
+            ReasoningEffort::None,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Xhigh,
+        ]));
+    }
+    None
+}
+
+fn version_match(name: &str, prefix: &str) -> bool {
+    let Some(rest) = name.strip_prefix(prefix) else {
+        return false;
+    };
+    if rest.is_empty() {
+        return true;
+    }
+    let Some(suffix) = rest.strip_prefix('-') else {
+        return false;
+    };
+    let first = suffix.split('-').next().unwrap_or_default();
+    !first.bytes().all(|byte| byte.is_ascii_digit()) || first.len() >= 4
+}
+
+fn openai_reasoning(efforts: Vec<ReasoningEffort>) -> ReasoningConfig {
+    ReasoningConfig {
+        dialect: ReasoningDialect::Openai,
+        efforts,
+        budget_tokens: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![expect(clippy::unwrap_used, reason = "a failed unwrap is a failed test")]
@@ -110,6 +256,41 @@ mod tests {
         can_vision: bool,
         supports_tools: Option<bool>,
         group: Option<String>,
+    }
+
+    #[test]
+    fn reasoning_inference_respects_protocol_versions_and_budget_limits() {
+        assert!(infer_reasoning("claude-sonnet-5-5", Protocol::OpenaiChat, None).is_none());
+        assert!(infer_reasoning("claude-3-5-sonnet", Protocol::AnthropicMessages, None).is_none());
+        assert!(infer_reasoning("claude-opus-4-9", Protocol::AnthropicMessages, None).is_none());
+        assert!(infer_reasoning("unknown", Protocol::OpenaiChat, None).is_none());
+        assert!(infer_reasoning("o1-mini", Protocol::OpenaiChat, None).is_none());
+        assert!(infer_reasoning("gpt-5-chat-latest", Protocol::OpenaiChat, None).is_none());
+        assert!(
+            !infer_reasoning("gpt-5.1", Protocol::OpenaiResponses, None)
+                .unwrap()
+                .efforts
+                .contains(&ReasoningEffort::Xhigh)
+        );
+        assert!(
+            infer_reasoning("gpt-5.2", Protocol::OpenaiResponses, None)
+                .unwrap()
+                .efforts
+                .contains(&ReasoningEffort::Xhigh)
+        );
+        assert_eq!(
+            infer_reasoning(
+                "vendor/claude-sonnet-4-5",
+                Protocol::AnthropicMessages,
+                Some(4096)
+            )
+            .unwrap()
+            .budget_tokens,
+            Some(4095)
+        );
+        assert!(
+            infer_reasoning("claude-sonnet-4-5", Protocol::AnthropicMessages, Some(1024)).is_none()
+        );
     }
 
     #[test]

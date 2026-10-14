@@ -14,7 +14,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     Model, ProbeError, ProbeErrorKind, ProbeResult, ProbeTarget, ProbedModel, Store, TypeSource,
-    api_base, infer,
+    api_base, infer, infer_reasoning,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -146,7 +146,7 @@ async fn fetch(
     };
     Ok(parse_ids(&body)
         .filter(|ids| !ids.is_empty())
-        .map(|ids| ids.into_iter().map(probed).collect())
+        .map(|ids| ids.into_iter().map(|id| probed(id, protocol)).collect())
         .ok_or_else(|| failure(ProbeErrorKind::InvalidBody)))
 }
 
@@ -192,8 +192,11 @@ fn parse_ids(body: &[u8]) -> Option<Vec<String>> {
     Some(ids)
 }
 
-fn probed(id: String) -> ProbedModel {
+fn probed(id: String, protocol: Protocol) -> ProbedModel {
     let inferred = infer(&id);
+    let reasoning = (inferred.model_type == crate::ModelType::Chat)
+        .then(|| infer_reasoning(&id, protocol, inferred.max_output))
+        .flatten();
     ProbedModel {
         model: Model {
             id,
@@ -203,7 +206,7 @@ fn probed(id: String) -> ProbedModel {
             max_output: inferred.max_output,
             can_vision: inferred.can_vision,
             supports_tools: inferred.supports_tools,
-            reasoning: None,
+            reasoning,
             native_web_search: false,
         },
         group: inferred.group,

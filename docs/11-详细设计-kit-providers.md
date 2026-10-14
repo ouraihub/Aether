@@ -8,6 +8,7 @@
 - 管：服务商 → 线路 → 已选模型的增删改查；凭据加密与三态更新；获取模型列表；按模型名推断能力元数据；把 `ModelRef` 解析成后端连接快照。
 - 不管：**角色与回落**（"对话用哪个模型""写作没配就用对话模型"是应用策略，由 `KitHost::select_model` 决定，应用自己存偏好）；发起对话；生成第三方 CLI 配置。
 - 协议：`anthropic-messages`、`openai-chat`、`openai-responses`。其他协议名（如某 CLI 的 `openai-completions`）是应用写配置时的映射，不进枚举。
+- 思考能力由 `infer_reasoning(model_id, protocol, max_output)` 在探测、列表、model_options、resolve一致推断；已有null自动生效、不写库迁移，非空手工声明优先。当前保守支持Claude预算/adaptive与OpenAI o系列/GPT5族，协议不兼容或未知模型保持未知；实际强度只在聊天时调整。Cherry的registry补能力是交互依据，不移植整套目录。
 - 不做：代理、自定义请求头、每线路超时、预置服务商、多密钥轮询、用量统计、无差别重试。
 
 ## 2. 数据模型（`providers.db`，migration 1）
