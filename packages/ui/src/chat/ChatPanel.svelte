@@ -10,6 +10,9 @@
   import ArrowDownIcon from '@lucide/svelte/icons/arrow-down'
   import ArrowUpIcon from '@lucide/svelte/icons/arrow-up'
   import SquareIcon from '@lucide/svelte/icons/square'
+  import GaugeIcon from '@lucide/svelte/icons/gauge'
+  import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
+  import { Popover } from 'bits-ui'
   import { Button } from '#lib/components/ui/button/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
   import { Textarea } from '#lib/components/ui/textarea/index.js'
@@ -17,7 +20,6 @@
   import * as Alert from '#lib/components/ui/alert/index.js'
   import * as Dialog from '#lib/components/ui/dialog/index.js'
   import * as Field from '#lib/components/ui/field/index.js'
-  import * as Select from '#lib/components/ui/select/index.js'
   import { getKitContext } from '../context'
   import {
     isKitClientError,
@@ -82,7 +84,14 @@
     modelOptions?.find((item) => item.endpointId === picked?.endpointId && item.modelId === picked?.modelId) ?? null,
   )
   let reasoningEffort = $state<ReasoningEffort>('default')
-  const allowedEfforts = $derived(capability?.reasoning?.efforts ?? [])
+  const allowedEfforts = $derived(REASONING_EFFORTS.filter((effort) => capability?.reasoning?.efforts.includes(effort)))
+  let reasoningOpen = $state(false)
+  const reasoningId = $props.id()
+  let reasoningTrigger = $state<HTMLButtonElement | null>(null)
+  const effortLabel = $derived(t(`chat.effort.${reasoningEffort}`))
+  const effortIndex = $derived(
+    reasoningEffort === 'default' ? Math.floor(allowedEfforts.length / 2) : allowedEfforts.indexOf(reasoningEffort),
+  )
   const noModels = $derived(modelOptions !== null && modelOptions.length === 0)
   const errorText = (error: unknown) => t(`errors.${isKitClientError(error) ? error.code : 'internal'}`)
   $effect(() => {
@@ -109,6 +118,10 @@
   $effect(() => {
     if (reasoningEffort !== 'default' && !allowedEfforts.includes(reasoningEffort)) reasoningEffort = 'default'
   })
+  function commitReasoning(event: Event) {
+    const effort = allowedEfforts[Number((event.currentTarget as HTMLInputElement).value)]
+    if (effort && !session?.running) reasoningEffort = effort
+  }
   function pickModel(next: ModelRef) {
     picked = next
     reasoningEffort = 'default'
@@ -468,7 +481,7 @@
   })
   function onkeydown(e: KeyboardEvent) {
     if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return
-    if (historyOpen || document.querySelector('[data-slot="select-content"], [role="dialog"]')) return
+    if (reasoningOpen || historyOpen || document.querySelector('[data-slot="select-content"], [role="dialog"]')) return
     if (onClose && !session?.running) onClose()
   }
   const canSend = $derived(
@@ -756,28 +769,95 @@
         </div>
         <div class="tool-group send-tools">
           {#if allowedEfforts.length > 0}
-            <div class="effort-control">
-              <Select.Root
-                type="single"
-                value={reasoningEffort}
-                onValueChange={(value) => (reasoningEffort = value as ReasoningEffort)}
+            <Popover.Root bind:open={reasoningOpen}>
+              <Popover.Trigger disabled={session.running}>
+                {#snippet child({ props })}
+                  <Button
+                    {...props}
+                    bind:ref={reasoningTrigger}
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`${t('chat.reasoningEffort')}: ${effortLabel}`}
+                  >
+                    <GaugeIcon data-icon="inline-start" />
+                    {effortLabel}
+                    <ChevronDownIcon data-icon="inline-end" />
+                  </Button>
+                {/snippet}
+              </Popover.Trigger>
+              <Popover.Content
+                class="reasoning-popover"
+                side="top"
+                align="end"
+                sideOffset={8}
+                collisionPadding={8}
+                trapFocus={false}
+                preventScroll={false}
+                aria-label={t('chat.reasoningEffort')}
+                onEscapeKeydown={(event) => {
+                  if (event.isComposing) event.preventDefault()
+                  event.stopPropagation()
+                }}
+                onCloseAutoFocus={(event) => {
+                  event.preventDefault()
+                  reasoningTrigger?.focus({ preventScroll: true })
+                }}
               >
-                <Select.Trigger size="sm" disabled={session.running} aria-label={t('chat.reasoningEffort')}
-                  >{t(`chat.effort.${reasoningEffort}`)}</Select.Trigger
-                >
-                <Select.Content
-                  ><Select.Group
-                    ><Select.Item
-                      value="default"
-                      label={t('chat.effort.default')}
-                    />{#each REASONING_EFFORTS.filter( (effort) => allowedEfforts.includes(effort) ) as effort (effort)}<Select.Item
-                        value={effort}
-                        label={t(`chat.effort.${effort}`)}
-                      />{/each}</Select.Group
-                  ></Select.Content
-                >
-              </Select.Root>
-            </div>
+                <div class="reasoning-heading">
+                  <p>{t('chat.reasoningStrength')}: <strong>{effortLabel}</strong></p>
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    disabled={session.running || reasoningEffort === 'default'}
+                    onclick={() => (reasoningEffort = 'default')}>{t('chat.resetReasoning')}</Button
+                  >
+                </div>
+                {#if allowedEfforts.length > 1}
+                  <div class="reasoning-scale" aria-hidden="true">
+                    <span>{t('chat.reasoningFaster')}</span><span>{t('chat.reasoningSmarter')}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max={allowedEfforts.length - 1}
+                    step="1"
+                    value={effortIndex}
+                    aria-label={t('chat.reasoningEffort')}
+                    aria-valuetext={effortLabel}
+                    disabled={session.running}
+                    oninput={commitReasoning}
+                    onpointerup={(event) => {
+                      if (event.button === 0) commitReasoning(event)
+                    }}
+                    onkeyup={(event) => {
+                      if (
+                        !event.isComposing &&
+                        ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)
+                      ) {
+                        commitReasoning(event)
+                      }
+                    }}
+                  />
+                {:else}
+                  <Field.FieldSet disabled={session.running}>
+                    <Field.FieldLegend class="sr-only">{t('chat.reasoningEffort')}</Field.FieldLegend>
+                    {#each ['default', ...allowedEfforts] as effort (effort)}
+                      <label class="reasoning-option">
+                        <input
+                          type="radio"
+                          name={reasoningId}
+                          value={effort}
+                          checked={reasoningEffort === effort}
+                          onchange={() => (reasoningEffort = effort as ReasoningEffort)}
+                        />
+                        {t(`chat.effort.${effort}`)}
+                      </label>
+                    {/each}
+                  </Field.FieldSet>
+                {/if}
+                {#if reasoningEffort === 'default'}<p class="reasoning-hint">{t('chat.reasoningDefaultHint')}</p>{/if}
+              </Popover.Content>
+            </Popover.Root>
           {/if}
           <UsageDetails
             context={currentContext}
@@ -1076,8 +1156,53 @@
   .send-tools {
     margin-left: auto;
   }
-  .effort-control {
-    min-width: 0;
+  :global(.reasoning-popover) {
+    box-sizing: border-box;
+    width: min(18rem, calc(100vw - 1rem));
+    max-height: calc(100dvh - 1rem);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--kit-radius, var(--radius));
+    background: var(--color-popover);
+    color: var(--color-popover-foreground);
+    box-shadow: 0 4px 12px color-mix(in oklch, var(--color-foreground) 12%, transparent);
+    font-size: var(--kit-font-size-sm, 0.8125rem);
+  }
+  .reasoning-heading,
+  .reasoning-scale {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .reasoning-heading p,
+  .reasoning-hint {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  .reasoning-scale,
+  .reasoning-hint {
+    color: var(--color-muted-foreground);
+  }
+  :global(.reasoning-popover input) {
+    accent-color: var(--color-primary);
+  }
+  :global(.reasoning-popover input[type='range']) {
+    width: 100%;
+    margin: 0;
+  }
+  :global(.reasoning-popover input:focus-visible) {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+  .reasoning-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
   .skills-control {
     min-width: 0;

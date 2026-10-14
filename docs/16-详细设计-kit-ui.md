@@ -116,6 +116,7 @@ interface ChatPanelProps {
 - 上下文标签移除仅代表本轮context=null；scope仍为会话归属。宿主必须继续校验会话和关联资源访问权限，不能以无payload免鉴权；若非空context仍需匹配scope。写作必填由宿主继续执行。
 - 实施证据：完整UI lint/格式/typecheck（0错误0警告）与11文件68项通过，i18n337键、DTO64文件、依赖13crate一致。真实Chromium→AutoNote HTTP端口→Hono/SQLite→HTTPS回环SSE验Enter/CtrlEnter、思考high出站参数、移除context且历史保留、重命名HTTP读回、Esc只关会话Dialog、长流向上阅读scrollTop保持0；320/375/414/768容器无横向溢出。独立styles.css入口与宿主Tailwind入口均读到有效正文背景／边框；静态运行期语义变量防止inline主题被裁剪。付费供应商与原生手机软键盘不在此回环证明中。
 - 用户复核后批准完整回复操作：展开按钮固定输入卡片右上角；回复左侧复制／更多／重答／换模型／翻译／删除／保存笔记，右侧用作上下文。候选共享questionId只显示一次问题，来源模型和选中态可读；selectTurn持久选择同会话路径，“分支”也选择同会话路径并清空草稿，fork仅“复制为新对话”。更多编辑CAS、Markdown下载均有真实行为；编辑／语言Dialog错误保草稿，当前选中及有后代回复不可删除。调用稳定turnId；运行中禁止结构变更；End后读回须先完成后端持久化。CH8附件／并发比较尚未授权。
+- 思考强度滑块已授权：Gauge／当前档位入口向上右对齐弹层，强度／恢复默认、更快—更智能、原生离散range；只遍历模型声明档位。default独立于显式档位，弹层打开和视觉中位不写medium；拖动／方向键／Home/End后才写合法值；none为显式关闭。无能力隐藏，单显式档位用默认＋选项，切模型恢复default，运行中禁用，Esc先关弹层回焦点。复用RunRequest.reasoningEffort，不引入serviceTier/FastMode、模型目录或偏好存储。
 - `SkillPicker`：输入框上方的技能选择（列表只含元数据）；显示所选正文合计 / 预算；`end` 或请求错误为 `skill_changed` 时提示"技能已更新，请重新确认"并打开预览。
 - 工具：`tool_call` 显示"正在调用 <name>"（MCP 标服务名）；`approval_required` 显示 `ApprovalCard`（工具名、来源、参数预览、"允许本次 / 拒绝"）；`tool_result` 折叠为一行，`unknown` 标"结果未知，可能已执行"，`denied` 标"已拒绝"。
 - `end`：`completed` + `exhausted` 时显示"已达到工具调用轮数上限"；`failed` 显示错误与"重试"；`cancelled` 显示"已停止"。

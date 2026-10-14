@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 
 use aether_support::net;
-use aether_support::{KitError, KitErrorCode};
+use aether_support::{KitError, KitErrorCode, ReasoningDialect, ReasoningEffort};
 
 use crate::run::Runner;
 use crate::types::{RunInput, SystemPart};
@@ -39,6 +39,26 @@ impl Runner {
 
 /// [`Runner::validate`] plus the assembled system text.
 pub(crate) fn prepare(input: &mut RunInput) -> Result<String, KitError> {
+    let connection = &input.connection;
+    if let Some(config) = connection.reasoning.as_ref()
+        && !config.validate(connection.protocol, connection.max_output)
+    {
+        return Err(KitError::bad_request("reasoning", "invalid"));
+    }
+    if input.reasoning_effort != ReasoningEffort::Default {
+        let Some(config) = connection.reasoning.as_ref() else {
+            return Err(KitError::needs_config("reasoning"));
+        };
+        if !config.allows(input.reasoning_effort) {
+            return Err(KitError::bad_request("reasoningEffort", "unsupported"));
+        }
+        if config.dialect == ReasoningDialect::AnthropicBudget
+            && input.reasoning_effort != ReasoningEffort::None
+            && input.budget.max_output <= 1024
+        {
+            return Err(KitError::bad_request("reasoningEffort", "invalid_budget"));
+        }
+    }
     let mut names = HashSet::new();
     if !input
         .tools
@@ -86,14 +106,6 @@ pub(crate) fn prepare(input: &mut RunInput) -> Result<String, KitError> {
     }
     if input.native_web_search && input.tools.iter().any(|tool| tool.name == "web_search") {
         return Err(KitError::bad_request("tools", "duplicate"));
-    }
-    if input.reasoning_effort != aether_support::ReasoningEffort::Default {
-        let Some(config) = input.connection.reasoning.as_ref() else {
-            return Err(KitError::needs_config("reasoning"));
-        };
-        if !config.allows(input.reasoning_effort) {
-            return Err(KitError::bad_request("reasoningEffort", "unsupported"));
-        }
     }
     if connection.supports_tools == Some(false) && !input.tools.is_empty() {
         tracing::info!(run_id = %input.run_id, count = input.tools.len(), "chat.run.tools_dropped");

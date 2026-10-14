@@ -1,9 +1,9 @@
 //! Run validation and system assembly (docs/12 §2.1, §2.2).
 
-use serde_json::{Value, json};
-
 use super::*;
 use crate::{Approval, ToolSource, ToolSpec};
+use aether_support::{ReasoningConfig, ReasoningDialect, ReasoningEffort};
+use serde_json::{Value, json};
 
 fn tool(name: &str) -> ToolSpec {
     ToolSpec {
@@ -91,6 +91,26 @@ async fn input_over_context_window_fails() {
     input.budget.max_output = 1_000;
     input.budget.context_window = 1_004;
     runner(5_000, 5_000).validate(&mut input).unwrap();
+}
+
+#[tokio::test]
+async fn illegal_reasoning_config_and_effort_fail_before_network() {
+    let mut invalid = local();
+    invalid.connection.reasoning = Some(ReasoningConfig {
+        dialect: ReasoningDialect::AnthropicBudget,
+        efforts: vec![ReasoningEffort::High],
+        budget_tokens: Some(3_000),
+    });
+    rejected(invalid, KitErrorCode::BadRequest, "invalid").await;
+
+    let mut unsupported = local();
+    unsupported.reasoning_effort = ReasoningEffort::Low;
+    unsupported.connection.reasoning = Some(ReasoningConfig {
+        dialect: ReasoningDialect::Openai,
+        efforts: vec![ReasoningEffort::High],
+        budget_tokens: None,
+    });
+    rejected(unsupported, KitErrorCode::BadRequest, "unsupported").await;
 }
 
 #[test]

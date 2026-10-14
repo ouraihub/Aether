@@ -692,19 +692,105 @@ describe('ChatPanel', () => {
           ]),
       },
     })
-    const effort = await screen.findByLabelText('Reasoning effort')
-    await fireEvent.keyDown(effort, { key: 'ArrowDown' })
-    expect(await screen.findByRole('option', { name: 'High' })).toBeTruthy()
-    expect(screen.queryByRole('option', { name: 'Medium' })).toBeNull()
-    await fireEvent.click(screen.getByRole('option', { name: 'Default' }))
+    const effort = await screen.findByRole('button', { name: 'Reasoning effort: Default' })
+    await fireEvent.click(effort)
+    expect(await screen.findByLabelText('High')).toBeTruthy()
+    expect(screen.queryByLabelText('Medium')).toBeNull()
+    expect(screen.queryByRole('slider')).toBeNull()
+    expect((screen.getByLabelText('Default') as HTMLInputElement).checked).toBe(true)
     await send('default request')
     expect(runs[0]?.request.reasoningEffort).toBe('default')
+    await waitFor(() => expect(effort.hasAttribute('disabled')).toBe(true))
+    expect((screen.getByLabelText('High') as HTMLInputElement).matches(':disabled')).toBe(true)
     runs[0]?.emit({ kind: 'end', status: 'completed' })
-    await fireEvent.keyDown(screen.getByLabelText('Reasoning effort'), { key: 'ArrowDown' })
-    await fireEvent.keyDown(screen.getByLabelText('Reasoning effort'), { key: 'End' })
-    await fireEvent.keyDown(screen.getByLabelText('Reasoning effort'), { key: 'Enter' })
+    await waitFor(() => expect(effort.hasAttribute('disabled')).toBe(false))
+    await fireEvent.click(screen.getByLabelText('High'))
     await send('explicit request')
     expect(runs[1]?.request.reasoningEffort).toBe('high')
+    runs[1]?.emit({ kind: 'end', status: 'completed' })
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Reset to default' }).hasAttribute('disabled')).toBe(false),
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Reset to default' }))
+    await send('reset request')
+    expect(runs[2]?.request.reasoningEffort).toBe('default')
+  })
+
+  it('maps sparse slider indices exactly, preserves default on open, and isolates Escape', async () => {
+    const onClose = vi.fn()
+    const { runs } = setup(false, null, {
+      props: { onClose },
+      providers: {
+        modelOptions: () =>
+          Promise.resolve([
+            {
+              ...model,
+              label: 'Sparse reasoner',
+              modelType: 'chat',
+              supportsTools: null,
+              reasoning: { dialect: 'openai', efforts: ['high', 'none', 'low'] },
+              nativeWebSearch: false,
+            },
+            {
+              endpointId: model.endpointId,
+              modelId: 'm2',
+              label: 'Other reasoner',
+              modelType: 'chat',
+              supportsTools: null,
+              reasoning: { dialect: 'openai', efforts: ['low', 'high'] },
+              nativeWebSearch: false,
+            },
+            {
+              endpointId: model.endpointId,
+              modelId: 'm3',
+              label: 'Without reasoning',
+              modelType: 'chat',
+              supportsTools: null,
+              reasoning: null,
+              nativeWebSearch: false,
+            },
+          ]),
+      },
+    })
+    const trigger = await screen.findByRole('button', { name: 'Reasoning effort: Default' })
+    await fireEvent.click(trigger)
+    let slider = (await screen.findByRole('slider', { name: 'Reasoning effort' })) as HTMLInputElement
+    expect(slider.value).toBe('1')
+    expect(slider.max).toBe('2')
+    expect(slider.getAttribute('aria-valuetext')).toBe('Default')
+    await fireEvent.keyDown(slider, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('slider')).toBeNull())
+    expect(onClose).not.toHaveBeenCalled()
+    await waitFor(() => expect(document.activeElement).toBe(trigger))
+    await send('opened default')
+    expect(runs[0]?.request.reasoningEffort).toBe('default')
+    runs[0]?.emit({ kind: 'end', status: 'completed' })
+    await waitFor(() => expect(trigger.hasAttribute('disabled')).toBe(false))
+    await fireEvent.click(trigger)
+    slider = (await screen.findByRole('slider', { name: 'Reasoning effort' })) as HTMLInputElement
+    for (const [index, effort] of ['none', 'low', 'high'].entries()) {
+      await fireEvent.input(slider, { target: { value: String(index) } })
+      await send(`effort ${effort}`)
+      expect(runs[index + 1]?.request.reasoningEffort).toBe(effort)
+      await waitFor(() => expect(slider.disabled).toBe(true))
+      runs[index + 1]?.emit({ kind: 'end', status: 'completed' })
+      await waitFor(() => expect(slider.disabled).toBe(false))
+    }
+    await fireEvent.keyDown(slider, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('slider')).toBeNull())
+    const models = screen.getByLabelText('Select a model')
+    await fireEvent.keyDown(models, { key: 'ArrowDown' })
+    await fireEvent.keyDown(models, { key: 'o' })
+    await fireEvent.keyDown(models, { key: 'Enter' })
+    expect(await screen.findByRole('button', { name: 'Reasoning effort: Default' })).toBeTruthy()
+    await send('changed model')
+    expect(runs[4]?.request.reasoningEffort).toBe('default')
+    runs[4]?.emit({ kind: 'end', status: 'completed' })
+    await waitFor(() => expect(models.hasAttribute('disabled')).toBe(false))
+    await fireEvent.keyDown(models, { key: 'ArrowDown' })
+    await fireEvent.keyDown(models, { key: 'End' })
+    await fireEvent.keyDown(models, { key: 'Enter' })
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Reasoning effort:/ })).toBeNull())
   })
 
   it('retries a failed history restore without losing the saved conversation or replacing its identity', async () => {

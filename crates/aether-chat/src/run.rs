@@ -327,6 +327,7 @@ impl Runner {
             max_output: input.budget.max_output,
             tools,
             native_web_search: input.native_web_search,
+            reasoning_effort: input.reasoning_effort,
         };
         let known: Vec<&str> = connection.api_key.iter().map(|key| key.as_str()).collect();
         let first_byte = async {

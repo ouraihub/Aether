@@ -1,6 +1,6 @@
 //! Request encoding and stream decoding of the three wire protocols (docs/12 §3).
 
-use aether_support::{Connection, Protocol};
+use aether_support::{Connection, Protocol, ReasoningEffort};
 use reqwest::RequestBuilder;
 use reqwest::header::ACCEPT;
 use serde_json::{Map, Value, json};
@@ -29,6 +29,7 @@ pub(crate) struct Request<'a> {
     pub(crate) max_output: u32,
     pub(crate) tools: &'a [ToolSpec],
     pub(crate) native_web_search: bool,
+    pub(crate) reasoning_effort: ReasoningEffort,
 }
 
 impl Request<'_> {
@@ -79,6 +80,42 @@ impl Request<'_> {
                 body
             }
         };
+        if self.reasoning_effort != ReasoningEffort::Default {
+            match protocol {
+                Protocol::OpenaiChat => {
+                    body["reasoning_effort"] = json!(self.reasoning_effort);
+                }
+                Protocol::OpenaiResponses => {
+                    body["reasoning"] =
+                        json!({ "effort": self.reasoning_effort, "summary": "auto" });
+                }
+                Protocol::AnthropicMessages => {
+                    if self.reasoning_effort == ReasoningEffort::None {
+                        body["thinking"] = json!({ "type": "disabled" });
+                    } else if let Some(cap) = self
+                        .connection
+                        .reasoning
+                        .as_ref()
+                        .and_then(|config| config.budget_tokens)
+                    {
+                        let tokens = match self.reasoning_effort {
+                            ReasoningEffort::Minimal => cap / 20,
+                            ReasoningEffort::Low => cap / 10,
+                            ReasoningEffort::Medium => cap / 2,
+                            ReasoningEffort::High => (cap / 5) * 4 + (cap % 5) * 4 / 5,
+                            ReasoningEffort::Xhigh => (cap / 10) * 9 + (cap % 10) * 9 / 10,
+                            ReasoningEffort::Max => cap,
+                            ReasoningEffort::Default | ReasoningEffort::None => 0,
+                        };
+                        let tokens = tokens.max(1024).min(self.max_output - 1);
+                        body["thinking"] = json!({ "type": "enabled", "budget_tokens": tokens });
+                    } else {
+                        body["thinking"] = json!({ "type": "adaptive" });
+                        body["output_config"] = json!({ "effort": self.reasoning_effort });
+                    }
+                }
+            }
+        }
         let mut tools: Vec<Value> = self
             .tools
             .iter()

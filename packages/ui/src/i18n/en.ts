@@ -67,6 +67,12 @@ export const en: Messages = {
   'chat.searchResults': '{count} results found',
   'chat.reasoning': 'Reasoning',
   'chat.reasoningEffort': 'Reasoning effort',
+  'chat.reasoningStrength': 'Strength',
+  'chat.reasoningFaster': 'Faster',
+  'chat.reasoningSmarter': 'Smarter',
+  'chat.resetReasoning': 'Reset to default',
+  'chat.reasoningDefaultHint':
+    'Default sends no reasoning control; the provider decides. Choose an effort to override it.',
   'chat.unknown': 'Unknown',
   'chat.contextUsage': 'Context usage',
   'chat.usage': 'Token usage',

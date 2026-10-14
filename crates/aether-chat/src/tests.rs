@@ -15,7 +15,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aether_support::net::AddressPolicy;
-use aether_support::{Connection, KitErrorCode, Protocol};
+use aether_support::{
+    Connection, KitErrorCode, Protocol, ReasoningConfig, ReasoningDialect, ReasoningEffort,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -255,6 +257,104 @@ async fn native_search_keeps_citations_and_does_not_execute_server_calls_locally
                 "web_search"
             }
         );
+    }
+}
+
+fn request_body(raw: &str) -> serde_json::Value {
+    serde_json::from_str(raw.split("\r\n\r\n").nth(1).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn reasoning_default_and_none_are_encoded_per_protocol() {
+    for protocol in PROTOCOLS {
+        let (base, seen) = upstream(sse(fixture(protocol, "text"))).await;
+        let (summary, _) = run(&runner(5_000, 5_000), input(protocol, base), false).await;
+        assert_eq!(summary.status, EndStatus::Completed);
+        let body = request_body(&seen.lock().await[0]);
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("reasoning").is_none());
+        assert!(body.get("thinking").is_none());
+
+        let (base, seen) = upstream(sse(fixture(protocol, "text"))).await;
+        let mut high = input(protocol, base);
+        high.reasoning_effort = ReasoningEffort::High;
+        high.connection.reasoning = Some(ReasoningConfig {
+            dialect: if protocol == Protocol::AnthropicMessages {
+                ReasoningDialect::AnthropicBudget
+            } else {
+                ReasoningDialect::Openai
+            },
+            efforts: vec![ReasoningEffort::High],
+            budget_tokens: (protocol == Protocol::AnthropicMessages).then_some(3_000),
+        });
+        let (summary, _) = run(&runner(5_000, 5_000), high, false).await;
+        assert_eq!(summary.status, EndStatus::Completed);
+        let encoded = request_body(&seen.lock().await[0]);
+        match protocol {
+            Protocol::AnthropicMessages => assert_eq!(
+                encoded["thinking"],
+                serde_json::json!({"type":"enabled","budget_tokens":2400})
+            ),
+            Protocol::OpenaiChat => assert_eq!(encoded["reasoning_effort"], "high"),
+            Protocol::OpenaiResponses => assert_eq!(encoded["reasoning"]["effort"], "high"),
+        }
+
+        let (base, seen) = upstream(sse(fixture(protocol, "text"))).await;
+        let mut req = input(protocol, base);
+        req.reasoning_effort = ReasoningEffort::None;
+        req.connection.reasoning = Some(ReasoningConfig {
+            dialect: if protocol == Protocol::AnthropicMessages {
+                ReasoningDialect::AnthropicBudget
+            } else {
+                ReasoningDialect::Openai
+            },
+            efforts: vec![ReasoningEffort::None, ReasoningEffort::High],
+            budget_tokens: (protocol == Protocol::AnthropicMessages).then_some(3_000),
+        });
+        let (summary, _) = run(&runner(5_000, 5_000), req, false).await;
+        assert_eq!(summary.status, EndStatus::Completed);
+        let body = request_body(&seen.lock().await[0]);
+        match protocol {
+            Protocol::AnthropicMessages => {
+                assert_eq!(body["thinking"], serde_json::json!({"type":"disabled"}))
+            }
+            Protocol::OpenaiChat => assert_eq!(body["reasoning_effort"], "none"),
+            Protocol::OpenaiResponses => assert_eq!(
+                body["reasoning"],
+                serde_json::json!({"effort":"none","summary":"auto"})
+            ),
+        }
+    }
+}
+
+#[tokio::test]
+async fn reasoning_budget_dialects_clamp_before_encoding() {
+    for dialect in [
+        ReasoningDialect::AnthropicBudget,
+        ReasoningDialect::AnthropicAdaptive,
+    ] {
+        let (base, seen) = upstream(sse(fixture(Protocol::AnthropicMessages, "text"))).await;
+        let mut req = input(Protocol::AnthropicMessages, base);
+        req.budget.max_output = 2_000;
+        req.reasoning_effort = ReasoningEffort::High;
+        req.connection.reasoning = Some(ReasoningConfig {
+            dialect,
+            efforts: vec![ReasoningEffort::High],
+            budget_tokens: (dialect == ReasoningDialect::AnthropicBudget).then_some(3_000),
+        });
+        let (summary, _) = run(&runner(5_000, 5_000), req, false).await;
+        assert_eq!(summary.status, EndStatus::Completed);
+        let body = request_body(&seen.lock().await[0]);
+        if dialect == ReasoningDialect::AnthropicBudget {
+            assert_eq!(
+                body["thinking"],
+                serde_json::json!({"type":"enabled","budget_tokens":1_999})
+            );
+            assert!(body.get("output_config").is_none());
+        } else {
+            assert_eq!(body["thinking"], serde_json::json!({"type":"adaptive"}));
+            assert_eq!(body["output_config"]["effort"], "high");
+        }
     }
 }
 
