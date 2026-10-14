@@ -102,7 +102,7 @@ describe('SkillPicker in ChatPanel', () => {
           }),
         )
       }
-      return Promise.resolve({ runId: 'r2', conversationId: null })
+      return Promise.resolve({ runId: 'r2', conversationId: null, turnId: null })
     })
     const get = vi.fn(() => Promise.resolve({ ...meta(2), body: 'edited body', license: null, extra: {} }))
     mount({ chat: { run }, skills: { list: () => Promise.resolve([meta(2)]), get } }, [{ id: 's1', revision: 1 }])

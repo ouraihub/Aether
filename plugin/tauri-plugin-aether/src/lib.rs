@@ -214,6 +214,14 @@ impl Builder {
                 chat::chat_delete,
                 #[cfg(feature = "chat")]
                 chat::chat_rename,
+                #[cfg(feature = "chat")]
+                chat::chat_edit_turn,
+                #[cfg(feature = "chat")]
+                chat::chat_remove_turn,
+                #[cfg(feature = "chat")]
+                chat::chat_fork,
+                #[cfg(feature = "chat")]
+                chat::chat_select_turn,
                 #[cfg(feature = "mcp-client")]
                 mcp_client::mcp_client_list,
                 #[cfg(feature = "mcp-client")]

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import type { ComponentProps } from 'svelte'
 import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from '../i18n'
@@ -20,8 +20,14 @@ import Harness from './Harness.test.svelte'
 
 const model = { endpointId: 'e1', modelId: 'm1' }
 
+function required<T>(value: T | null | undefined): T {
+  if (value == null) throw new Error('Expected chat fixture or control is missing')
+  return value
+}
+
 interface Run {
   request: RunRequest
+  turnId: string
   emit: (event: RunEvent) => void
   signal: AbortSignal | undefined
 }
@@ -40,6 +46,10 @@ function setup(
   extra: Extra = {},
 ) {
   const runs: Run[] = []
+  const stored: Conversation = {
+    summary: { id: 'c1', title: 'Test', scope: null, selectedTurnId: null, createdAt: 0, updatedAt: 0 },
+    turns: [],
+  }
   const approve = vi.fn<(runId: string, callId: string, allow: boolean) => Promise<void>>(() => Promise.resolve())
   const ports = createFakePorts({
     providers: {
@@ -59,15 +69,68 @@ function setup(
     ...(extra.search ? { search: extra.search } : {}),
     chat: {
       run: (request, emit, options) => {
-        runs.push({ request, emit, signal: options?.signal })
-        options?.signal?.addEventListener('abort', () => emit({ kind: 'end', status: 'cancelled' }))
-        return Promise.resolve({ runId: `r${runs.length}`, conversationId: withHistory ? 'c1' : null })
+        const id = crypto.randomUUID()
+        const source = stored.turns.find((turn) => turn.id === (request.retryTurnId ?? request.translateTurnId))
+        const turn: Conversation['turns'][number] = {
+          id,
+          parentId: request.retryTurnId
+            ? (source?.parentId ?? null)
+            : (request.translateTurnId ?? request.replyToId ?? stored.summary.selectedTurnId),
+          questionId: request.retryTurnId ? (source?.questionId ?? id) : id,
+          supersedesId: request.retryTurnId ?? null,
+          kind: request.translateTurnId ? 'translation' : 'reply',
+          input: source?.input ?? request.input,
+          text: '',
+          status: 'running',
+          errorCode: null,
+          endpointId: request.model?.endpointId ?? null,
+          modelId: request.model?.modelId ?? null,
+          reasoningEffort: request.reasoningEffort ?? 'default',
+          reasoningText: null,
+        }
+        stored.turns.push(turn)
+        const wrapped = (event: RunEvent) => {
+          if (event.kind === 'text_delta') turn.text += event.text
+          if (event.kind === 'reasoning_delta') turn.reasoningText = (turn.reasoningText ?? '') + event.text
+          if (event.kind === 'usage')
+            turn.usage = {
+              inputTokens: event.inputTokens,
+              outputTokens: event.outputTokens,
+              cacheReadTokens: event.cacheReadTokens,
+              cacheWriteTokens: event.cacheWriteTokens,
+              reasoningTokens: event.reasoningTokens,
+            }
+          if (event.kind === 'context') turn.contextUsage = event.usage
+          if (event.kind === 'end') {
+            turn.status = event.status
+            turn.errorCode = event.error?.code ?? null
+            if (event.status === 'completed' && !request.retryTurnId) stored.summary.selectedTurnId = id
+          }
+          emit(event)
+        }
+        runs.push({ request, turnId: id, emit: wrapped, signal: options?.signal })
+        options?.signal?.addEventListener('abort', () => wrapped({ kind: 'end', status: 'cancelled' }))
+        return Promise.resolve({
+          runId: `r${runs.length}`,
+          conversationId: withHistory ? (request.conversationId ?? 'c1') : null,
+          turnId: withHistory ? id : null,
+        })
       },
       approve,
       ...extra.chat,
     },
   })
-  if (ports.chat?.history) Object.assign(ports.chat.history, extra.history)
+  if (ports.chat?.history)
+    Object.assign(
+      ports.chat.history,
+      {
+        get: (id: string) =>
+          id === stored.summary.id
+            ? Promise.resolve(structuredClone(stored))
+            : Promise.reject(new KitClientError({ code: 'not_found', message: 'conversation not found' })),
+      },
+      extra.history,
+    )
   if (!withHistory && ports.chat) delete ports.chat.history
   const notify = { toast: vi.fn(), confirm: vi.fn(() => Promise.resolve(true)) }
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -100,12 +163,19 @@ describe('ChatPanel', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
     const second = runs[1]
-    expect(second?.request).toMatchObject({ regenerate: true, conversationId: 'c1' })
+    expect(second?.request).toMatchObject({
+      regenerate: false,
+      retryTurnId: runs[0]?.turnId,
+      conversationId: 'c1',
+      model,
+    })
     second?.emit({ kind: 'text_delta', text: 'Again' })
     second?.emit({ kind: 'end', status: 'completed' })
     await screen.findByText('Again')
-    await waitFor(() => expect(screen.queryByText('Stopped')).toBeNull())
-    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.getByText('Stopped')).toBeTruthy()
+    expect(screen.getByText('there')).toBeTruthy()
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+    expect(screen.getAllByText('hello')).toHaveLength(1)
   })
 
   it('without history sends fresh runs and hides the conversation list', async () => {
@@ -203,7 +273,7 @@ describe('ChatPanel', () => {
     await send('hi')
     runs[0]?.emit({ kind: 'end', status: 'failed', error: { code: 'upstream', message: 'x' } })
     await fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
-    expect(runs[1]?.request).toMatchObject({ regenerate: true, conversationId: 'c1' })
+    expect(runs[1]?.request).toMatchObject({ regenerate: false, retryTurnId: runs[0]?.turnId, conversationId: 'c1' })
   })
 
   it('deletes the current conversation after confirming, then starts a new one', async () => {
@@ -224,6 +294,11 @@ describe('ChatPanel', () => {
   it('restores the given conversation and continues it', async () => {
     const turn: Conversation['turns'][number] = {
       id: 't1',
+      parentId: null,
+      questionId: 't1',
+      supersedesId: null,
+      kind: 'reply',
+      endpointId: null,
       status: 'completed',
       input: 'earlier',
       text: 'answer',
@@ -232,7 +307,14 @@ describe('ChatPanel', () => {
       reasoningEffort: 'default',
       reasoningText: null,
     }
-    const summary: Conversation['summary'] = { id: 'c9', title: 'Old', scope: null, createdAt: 0, updatedAt: 0 }
+    const summary: Conversation['summary'] = {
+      id: 'c9',
+      title: 'Old',
+      scope: null,
+      selectedTurnId: 't1',
+      createdAt: 0,
+      updatedAt: 0,
+    }
     const get = vi.fn<ChatHistoryPort['get']>(() => Promise.resolve({ summary, turns: [turn] }))
     const onConversationChange = vi.fn()
     const { runs } = setup(true, null, { history: { get }, props: { conversationId: 'c9', onConversationChange } })
@@ -326,7 +408,7 @@ describe('ChatPanel', () => {
     await waitFor(() => expect(screen.getByRole('meter').getAttribute('value')).toBe('24'))
     const inputRow = screen.getByRole('row', { name: 'Input 200 320' })
     expect(inputRow).toBeTruthy()
-    await fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+    await fireEvent.click(required(screen.getAllByRole('button', { name: 'Regenerate' }).at(-1)))
     await waitFor(() => expect(screen.queryByRole('meter')).toBeNull())
     expect(screen.queryByRole('meter')).toBeNull()
   })
@@ -337,10 +419,14 @@ describe('ChatPanel', () => {
       history: {
         get: () =>
           Promise.resolve({
-            summary: { id: 'saved', title: 'Saved', scope: null, createdAt: 0, updatedAt: 0 },
+            summary: { id: 'saved', title: 'Saved', scope: null, selectedTurnId: 't', createdAt: 0, updatedAt: 0 },
             turns: [
               {
                 id: 't',
+                parentId: null,
+                questionId: 't',
+                supersedesId: null,
+                kind: 'reply',
                 status: 'completed',
                 input: 'question',
                 text: 'answer',
@@ -441,7 +527,7 @@ describe('ChatPanel', () => {
       requests.push(request)
       return requests.length === 1
         ? Promise.reject(new KitClientError({ code: 'network', message: 'offline' }))
-        : Promise.resolve({ runId: 'r2', conversationId: null })
+        : Promise.resolve({ runId: 'r2', conversationId: null, turnId: null })
     })
     setup(false, { kind: 'note', id: 'n1', label: 'Draft' }, { chat: { run } })
     await fireEvent.click(screen.getByRole('button', { name: 'Do not send Draft with the next message' }))
@@ -501,7 +587,7 @@ describe('ChatPanel', () => {
     const remove = vi.fn<ChatHistoryPort['remove']>(() =>
       Promise.reject(new KitClientError({ code: 'network', message: 'offline' })),
     )
-    const summary = () => ({ id: 'c9', title: saved, scope: null, createdAt: 0, updatedAt: 0 })
+    const summary = () => ({ id: 'c9', title: saved, scope: null, selectedTurnId: 't', createdAt: 0, updatedAt: 0 })
     setup(true, null, {
       props: { conversationId: 'c9' },
       history: {
@@ -512,6 +598,11 @@ describe('ChatPanel', () => {
             turns: [
               {
                 id: 't',
+                parentId: null,
+                questionId: 't',
+                supersedesId: null,
+                kind: 'reply',
+                endpointId: null,
                 input: 'earlier',
                 text: 'answer',
                 status: 'completed',
@@ -553,7 +644,7 @@ describe('ChatPanel', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it('offers only one last-turn action and reports clipboard and insertion failures', async () => {
+  it('offers every eligible reply action and reports clipboard and insertion failures', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: () => Promise.reject(new Error('denied')) },
       configurable: true,
@@ -572,7 +663,7 @@ describe('ChatPanel', () => {
     runs[1]?.emit({ kind: 'text_delta', text: 'answer two' })
     runs[1]?.emit({ kind: 'end', status: 'completed' })
     await screen.findByText('answer two')
-    expect(screen.getAllByRole('button', { name: 'Regenerate' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Regenerate' })).toHaveLength(2)
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
     const copy = screen.getAllByRole('button', { name: 'Copy' })[1]
     if (!copy) throw new Error('Second reply is missing its Copy action')
@@ -622,10 +713,15 @@ describe('ChatPanel', () => {
       .fn<ChatHistoryPort['get']>()
       .mockRejectedValueOnce(new KitClientError({ code: 'network', message: 'offline' }))
       .mockResolvedValueOnce({
-        summary: { id: 'saved', title: 'Saved', scope: null, createdAt: 0, updatedAt: 0 },
+        summary: { id: 'saved', title: 'Saved', scope: null, selectedTurnId: 't', createdAt: 0, updatedAt: 0 },
         turns: [
           {
             id: 't',
+            parentId: null,
+            questionId: 't',
+            supersedesId: null,
+            kind: 'reply',
+            endpointId: null,
             input: 'saved question',
             text: 'saved answer',
             status: 'completed',
@@ -652,6 +748,9 @@ describe('ChatPanel', () => {
     runs[0]?.emit({ kind: 'end', status: 'completed' })
     await screen.findByText('reply')
     expect(screen.queryByRole('button', { name: 'Insert' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save as note' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Use as context' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Delete reply' })).toBeNull()
     expect(screen.queryByRole('combobox', { name: 'Reasoning effort' })).toBeNull()
   })
 
@@ -669,5 +768,374 @@ describe('ChatPanel', () => {
     expect(messages.querySelector('pre code')?.textContent).toContain('const safe = true')
     expect(messages.querySelectorAll('table tbody tr')).toHaveLength(1)
     expect(messages.querySelector('script, [onerror], a[href^="javascript:"]')).toBeNull()
+  })
+
+  function candidates(): Conversation {
+    const reply = (id: string, text: string): Conversation['turns'][number] => ({
+      id,
+      parentId: null,
+      questionId: 'q',
+      supersedesId: null,
+      kind: 'reply',
+      ...model,
+      input: 'Shared question',
+      text,
+      status: 'completed',
+      errorCode: null,
+      reasoningEffort: 'default',
+      reasoningText: null,
+    })
+    return {
+      summary: { id: 'saved', title: 'Candidates', scope: null, selectedTurnId: 'a', createdAt: 0, updatedAt: 0 },
+      turns: [reply('a', 'Original **reply**'), reply('b', 'Alternative reply')],
+    }
+  }
+
+  it('renders full same-question candidates once and selects context without forking', async () => {
+    const conversation = candidates()
+    const selectTurn = vi.fn<ChatHistoryPort['selectTurn']>((_id, turnId) =>
+      Promise.resolve({ ...conversation, summary: { ...conversation.summary, selectedTurnId: turnId } }),
+    )
+    const fork = vi.fn<ChatHistoryPort['fork']>(() => Promise.resolve(conversation))
+    const { runs } = setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation), selectTurn, fork },
+    })
+    await screen.findByText('Alternative reply')
+    expect(screen.getAllByText('Shared question')).toHaveLength(1)
+    expect(screen.getByText('reply', { selector: 'strong' })).toBeTruthy()
+    expect(screen.getAllByText('Local · main · m1')).toHaveLength(3)
+    const useContext = screen.getAllByRole('button', { name: 'Use as context' })
+    expect(useContext[0]?.hasAttribute('disabled')).toBe(true)
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Keep my draft' } })
+    await fireEvent.click(required(useContext[1]))
+    await waitFor(() => expect(selectTurn).toHaveBeenCalledWith('saved', 'b'))
+    expect(fork).not.toHaveBeenCalled()
+    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Keep my draft')
+    await send('Continue chosen reply')
+    expect(runs[0]?.request).toMatchObject({ conversationId: 'saved', replyToId: 'b' })
+  })
+
+  it('edits with compare-and-swap and retains both saved reply and local draft on conflict', async () => {
+    const conversation = candidates()
+    const editTurn = vi
+      .fn<ChatHistoryPort['editTurn']>()
+      .mockRejectedValueOnce(new KitClientError({ code: 'conflict', message: 'changed' }))
+      .mockImplementationOnce((_id, turnId, text) =>
+        Promise.resolve({
+          ...conversation,
+          turns: conversation.turns.map((turn) => (turn.id === turnId ? { ...turn, text } : turn)),
+        }),
+      )
+    setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation), editTurn },
+    })
+    await screen.findByText('Alternative reply')
+    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
+    await fireEvent.click(required(screen.getAllByText('Edit reply')[1]))
+    const editor = (await screen.findByRole('textbox', { name: 'Reply Markdown' })) as HTMLTextAreaElement
+    await fireEvent.input(editor, { target: { value: 'Edited local draft' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+    await screen.findByText('Conflicts with existing data')
+    expect(editor.value).toBe('Edited local draft')
+    expect(screen.getByText('Alternative reply')).toBeTruthy()
+    expect(editTurn).toHaveBeenLastCalledWith('saved', 'b', 'Edited local draft', 'Alternative reply')
+    await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+    await screen.findByText('Edited local draft')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('regenerates any source snapshot and switches model to another same-conversation candidate', async () => {
+    const conversation = candidates()
+    const secondModel = { endpointId: 'e2', modelId: 'm2' }
+    const { runs } = setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation) },
+      providers: {
+        modelOptions: () =>
+          Promise.resolve([
+            {
+              ...model,
+              label: 'First model',
+              modelType: 'chat',
+              supportsTools: null,
+              reasoning: null,
+              nativeWebSearch: false,
+            },
+            {
+              ...secondModel,
+              label: 'Second model',
+              modelType: 'chat',
+              supportsTools: null,
+              reasoning: null,
+              nativeWebSearch: false,
+            },
+          ]),
+      },
+    })
+    await screen.findByText('Alternative reply')
+    await fireEvent.click(required(screen.getAllByRole('button', { name: 'Regenerate' })[0]))
+    expect(runs[0]?.request).toMatchObject({ conversationId: 'saved', retryTurnId: 'a', model, regenerate: false })
+    expect(screen.getByText('reply', { selector: 'strong' })).toBeTruthy()
+    runs[0]?.emit({ kind: 'end', status: 'completed' })
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: 'Switch model' })[1]?.hasAttribute('disabled')).toBe(false),
+    )
+    await fireEvent.click(required(screen.getAllByRole('button', { name: 'Switch model' })[1]))
+    const dialog = await screen.findByRole('dialog')
+    const select = within(dialog).getByLabelText('Select a model')
+    await fireEvent.keyDown(select, { key: 'ArrowDown' })
+    await fireEvent.keyDown(select, { key: 'End' })
+    await fireEvent.keyDown(select, { key: 'Enter' })
+    await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+    expect(runs[1]?.request).toMatchObject({ conversationId: 'saved', retryTurnId: 'b', model: secondModel })
+  })
+
+  it('translates actual source text with source ID and chosen language while retaining the source', async () => {
+    const conversation = candidates()
+    const { runs } = setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation) },
+    })
+    await screen.findByText('Alternative reply')
+    await fireEvent.click(required(screen.getAllByRole('button', { name: 'Translate' })[1]))
+    await fireEvent.input(await screen.findByRole('textbox', { name: 'Target language' }), {
+      target: { value: 'French' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+    expect(runs[0]?.request).toMatchObject({
+      conversationId: 'saved',
+      translateTurnId: 'b',
+      targetLanguage: 'French',
+      model,
+      regenerate: false,
+    })
+    expect(runs[0]?.request.input).toContain('Alternative reply')
+    expect(runs[0]?.request.input).toContain('French')
+    expect(screen.getByText('Alternative reply')).toBeTruthy()
+  })
+
+  it('disables selected and ancestor deletion and confirms deletion of only the target candidate', async () => {
+    const conversation = candidates()
+    const removeTurn = vi.fn<ChatHistoryPort['removeTurn']>(() =>
+      Promise.resolve({ ...conversation, turns: [required(conversation.turns[0])] }),
+    )
+    const { notify } = setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation), removeTurn },
+    })
+    await screen.findByText('Alternative reply')
+    const buttons = screen.getAllByRole('button', { name: 'Delete reply' })
+    expect(buttons[0]?.hasAttribute('disabled')).toBe(true)
+    expect(buttons[0]?.getAttribute('title')).toContain('Choose another reply')
+    await fireEvent.click(required(buttons[1]))
+    await waitFor(() => expect(removeTurn).toHaveBeenCalledWith('saved', 'b'))
+    expect(notify.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        danger: true,
+        body: expect.stringContaining('question and other replies will remain'),
+      }),
+    )
+    expect(screen.getByText('Shared question')).toBeTruthy()
+    expect(screen.queryByText('Alternative reply')).toBeNull()
+  })
+
+  it('branches and copies via the selected ancestor chain and only shows save-note for a host callback', async () => {
+    const conversation = candidates()
+    const fork = vi.fn<ChatHistoryPort['fork']>(() =>
+      Promise.resolve({ ...conversation, summary: { ...conversation.summary, id: 'forked' } }),
+    )
+    const selectTurn = vi.fn<ChatHistoryPort['selectTurn']>((_id, turnId) =>
+      Promise.resolve({ ...conversation, summary: { ...conversation.summary, selectedTurnId: turnId } }),
+    )
+    const onSaveNote = vi.fn(() => Promise.reject(new Error('disk full')))
+    const onConversationChange = vi.fn()
+    const { notify } = setup(true, null, {
+      props: { conversationId: 'saved', onSaveNote, onConversationChange },
+      history: { get: () => Promise.resolve(conversation), fork, selectTurn },
+    })
+    const card = required((await screen.findByText('Alternative reply')).closest('li'))
+    const saveNote = within(card)
+      .getAllByRole('button', { name: 'Save as note' })
+      .find((button) => !button.closest('.more-actions'))
+    await fireEvent.click(required(saveNote))
+    await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Could not save the note'))
+    expect(onSaveNote).toHaveBeenCalledWith('Alternative reply')
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Discard for branch' } })
+    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
+    await fireEvent.click(required(screen.getAllByText('Branch from this reply')[1]))
+    await waitFor(() => expect(selectTurn).toHaveBeenCalledWith('saved', 'b'))
+    expect(fork).not.toHaveBeenCalled()
+    expect(onConversationChange).not.toHaveBeenCalled()
+    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('')
+    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[0]))
+    await fireEvent.click(required(screen.getAllByText('Copy as new conversation')[0]))
+    await waitFor(() => expect(fork).toHaveBeenLastCalledWith('saved', 'a'))
+    await waitFor(() => expect(onConversationChange).toHaveBeenCalledWith('forked'))
+  })
+
+  it('downloads real Markdown blobs and reports download failures', async () => {
+    const conversation = candidates()
+    const createObjectURL = vi.fn<(blob: Blob) => string>(() => 'blob:markdown')
+    const revokeObjectURL = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const { notify } = setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation) },
+    })
+    await screen.findByText('Alternative reply')
+    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
+    await fireEvent.click(required(screen.getAllByText('Download Markdown')[1]))
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
+    const blob = createObjectURL.mock.calls[0]?.[0] as Blob | undefined
+    expect(blob?.type).toBe('text/markdown;charset=utf-8')
+    const fileReader = new FileReader()
+    const markdown = new Promise<string>((resolve, reject) => {
+      fileReader.onload = () => resolve(String(fileReader.result))
+      fileReader.onerror = () => reject(fileReader.error)
+    })
+    fileReader.readAsText(required(blob))
+    expect(await markdown).toBe('Alternative reply')
+    expect(click).toHaveBeenCalledOnce()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:markdown')
+    createObjectURL.mockImplementationOnce(() => {
+      throw new Error('unavailable')
+    })
+    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
+    await fireEvent.click(required(screen.getAllByText('Download Markdown')[1]))
+    expect(notify.toast).toHaveBeenCalledWith('error', 'Could not download Markdown')
+    click.mockRestore()
+  })
+
+  it('shows an unavailable source model instead of silently using the composer model', async () => {
+    const conversation = candidates()
+    required(conversation.turns[1]).endpointId = 'removed-endpoint'
+    required(conversation.turns[1]).modelId = 'removed-model'
+    const { runs } = setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation) },
+    })
+    await screen.findByText('Alternative reply')
+    await fireEvent.click(required(screen.getAllByRole('button', { name: 'Regenerate' })[1]))
+    await screen.findByRole('dialog')
+    expect(
+      screen.getByText('The source model is unavailable. Choose a model to generate another candidate.'),
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'OK' }).hasAttribute('disabled')).toBe(true)
+    expect(runs).toHaveLength(0)
+    expect(screen.getByText('Alternative reply')).toBeTruthy()
+  })
+
+  it('disables editing and deletion on reply ancestors even when not selected', async () => {
+    const conversation = candidates()
+    conversation.summary.selectedTurnId = 'b'
+    required(conversation.turns[1]).parentId = 'a'
+    setup(true, null, { props: { conversationId: 'saved' }, history: { get: () => Promise.resolve(conversation) } })
+    await screen.findByText('Alternative reply')
+    const deletion = required(screen.getAllByRole('button', { name: 'Delete reply' })[0])
+    expect(deletion.hasAttribute('disabled')).toBe(true)
+    expect(deletion.getAttribute('title')).toContain('descendants')
+    expect((screen.getAllByText('Edit reply')[0] as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('keeps reply dialogs keyboard-dismissable without closing the host and disables mutations while running', async () => {
+    const conversation = candidates()
+    const onClose = vi.fn()
+    const { runs } = setup(true, null, {
+      props: { conversationId: 'saved', onClose },
+      history: { get: () => Promise.resolve(conversation) },
+    })
+    await screen.findByText('Alternative reply')
+    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
+    await fireEvent.click(required(screen.getAllByText('Edit reply')[1]))
+    const editor = await screen.findByRole('textbox', { name: 'Reply Markdown' })
+    await fireEvent.keyDown(editor, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(onClose).not.toHaveBeenCalled()
+    await fireEvent.click(required(screen.getAllByRole('button', { name: 'Regenerate' })[0]))
+    expect(runs[0]?.request.retryTurnId).toBe('a')
+    for (const label of ['Switch model', 'Translate', 'Delete reply', 'Use as context']) {
+      expect(screen.getAllByRole('button', { name: label }).every((button) => button.hasAttribute('disabled'))).toBe(
+        true,
+      )
+    }
+  })
+
+  it('retains translation language and original candidates when acceptance fails', async () => {
+    const conversation = candidates()
+    const run = vi.fn<ChatPort['run']>(() =>
+      Promise.reject(new KitClientError({ code: 'network', message: 'offline' })),
+    )
+    setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation) },
+      chat: { run },
+    })
+    await screen.findByText('Alternative reply')
+    await fireEvent.click(required(screen.getAllByRole('button', { name: 'Translate' })[1]))
+    const language = (await screen.findByRole('textbox', { name: 'Target language' })) as HTMLInputElement
+    await fireEvent.input(language, { target: { value: '日本語' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+    await waitFor(() => expect(screen.getByRole('dialog').textContent).toContain('Network connection failed'))
+    expect(language.value).toBe('日本語')
+    expect(screen.getByText('Alternative reply')).toBeTruthy()
+    expect(screen.getByText('reply', { selector: 'strong' })).toBeTruthy()
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+  })
+
+  it('keeps branch drafts and selection unchanged when context persistence rejects', async () => {
+    const conversation = candidates()
+    const selectTurn = vi.fn<ChatHistoryPort['selectTurn']>(() =>
+      Promise.reject(new KitClientError({ code: 'network', message: 'offline' })),
+    )
+    const { notify } = setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation), selectTurn },
+    })
+    await screen.findByText('Alternative reply')
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Keep on failure' } })
+    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
+    await fireEvent.click(required(screen.getAllByText('Branch from this reply')[1]))
+    await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Network connection failed'))
+    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Keep on failure')
+    expect(screen.getAllByRole('button', { name: 'Use as context' })[0]?.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('awaits native Markdown export and reports host failure without using a browser download', async () => {
+    const conversation = candidates()
+    const onExportMarkdown = vi.fn(() => Promise.reject(new Error('disk full')))
+    const { notify } = setup(true, null, {
+      props: { conversationId: 'saved', onExportMarkdown },
+      history: { get: () => Promise.resolve(conversation) },
+    })
+    await screen.findByText('Alternative reply')
+    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
+    await fireEvent.click(required(screen.getAllByText('Download Markdown')[1]))
+    await waitFor(() => expect(onExportMarkdown).toHaveBeenCalledWith('Alternative reply'))
+    await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Could not download Markdown'))
+    expect(screen.getByText('Alternative reply')).toBeTruthy()
+  })
+
+  it('explains removal of the question when deleting its only unselected reply', async () => {
+    const conversation = candidates()
+    required(conversation.turns[1]).questionId = 'another-question'
+    required(conversation.turns[1]).input = 'Only question'
+    const removeTurn = vi.fn<ChatHistoryPort['removeTurn']>(() =>
+      Promise.resolve({ ...conversation, turns: [required(conversation.turns[0])] }),
+    )
+    const { notify } = setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation), removeTurn },
+    })
+    await screen.findByText('Only question')
+    await fireEvent.click(required(screen.getAllByRole('button', { name: 'Delete reply' })[1]))
+    await waitFor(() => expect(removeTurn).toHaveBeenCalledWith('saved', 'b'))
+    expect(notify.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.stringContaining('Both the question and reply will disappear') }),
+    )
+    expect(screen.queryByText('Only question')).toBeNull()
   })
 })

@@ -101,6 +101,8 @@ interface ChatPanelProps {
   skills?: SkillRef[]                               // 受控：当前选中的技能
   onSkillsChange?: (refs: SkillRef[]) => void       // 应用决定是否记住
   onInsert?: (markdown: string) => void             // 有它才显示"插入"；运行中禁用
+  onSaveNote?: (markdown: string) => Promise<void> | void // 宿主真实创建笔记，无回调不显示
+  onExportMarkdown?: (markdown: string) => Promise<void> | void // 桌面宿主原生保存，无回调用Web Blob下载
   onToolPayload?: (tool: string, payload: unknown) => void
   onOpenSettings?: () => void                       // 没有任何对话模型时显示"打开设置"
   conversationId?: string | null                    // 挂载时恢复的会话；已不存在（not_found）则新对话
@@ -113,6 +115,7 @@ interface ChatPanelProps {
 - 2026-10-14批准的Voynote参考改造：紧凑两行顶部，一体输入卡片（Enter换行、Ctrl/Cmd+Enter发送、IME期间不发送、展开保留草稿），AI回复卡片与框架独立正文排版；末轮重新生成／重试在回复内。消息区单独滚动，向上阅读暂停跟随。历史／新建／删除／重命名复用现有端口；加载失败与无模型分开。首批不新增消息树／附件DTO或无后端按钮。输入未接纳失败可恢复，终态保留部分输出。通用局部CSS在完整框架入口与宿主Tailwind入口均有效，不覆盖宿主主题。
 - 上下文标签移除仅代表本轮context=null；scope仍为会话归属。宿主必须继续校验会话和关联资源访问权限，不能以无payload免鉴权；若非空context仍需匹配scope。写作必填由宿主继续执行。
 - 实施证据：完整UI lint/格式/typecheck（0错误0警告）与11文件68项通过，i18n337键、DTO64文件、依赖13crate一致。真实Chromium→AutoNote HTTP端口→Hono/SQLite→HTTPS回环SSE验Enter/CtrlEnter、思考high出站参数、移除context且历史保留、重命名HTTP读回、Esc只关会话Dialog、长流向上阅读scrollTop保持0；320/375/414/768容器无横向溢出。独立styles.css入口与宿主Tailwind入口均读到有效正文背景／边框；静态运行期语义变量防止inline主题被裁剪。付费供应商与原生手机软键盘不在此回环证明中。
+- 用户复核后批准完整回复操作：展开按钮固定输入卡片右上角；回复左侧复制／更多／重答／换模型／翻译／删除／保存笔记，右侧用作上下文。候选共享questionId只显示一次问题，来源模型和选中态可读；selectTurn持久选择同会话路径，“分支”也选择同会话路径并清空草稿，fork仅“复制为新对话”。更多编辑CAS、Markdown下载均有真实行为；编辑／语言Dialog错误保草稿，当前选中及有后代回复不可删除。调用稳定turnId；运行中禁止结构变更；End后读回须先完成后端持久化。CH8附件／并发比较尚未授权。
 - `SkillPicker`：输入框上方的技能选择（列表只含元数据）；显示所选正文合计 / 预算；`end` 或请求错误为 `skill_changed` 时提示"技能已更新，请重新确认"并打开预览。
 - 工具：`tool_call` 显示"正在调用 <name>"（MCP 标服务名）；`approval_required` 显示 `ApprovalCard`（工具名、来源、参数预览、"允许本次 / 拒绝"）；`tool_result` 折叠为一行，`unknown` 标"结果未知，可能已执行"，`denied` 标"已拒绝"。
 - `end`：`completed` + `exhausted` 时显示"已达到工具调用轮数上限"；`failed` 显示错误与"重试"；`cancelled` 显示"已停止"。

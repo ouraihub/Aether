@@ -16,7 +16,7 @@ pub use aether_support::net::AddressPolicy;
 pub use run::{RunSummary, Runner, Usage};
 pub use store::{
     Conversation, ConversationStore, ConversationSummary, SqliteStore, Turn, TurnHandle,
-    TurnRecord, TurnStatus, trim_history,
+    TurnRecord, TurnStatus, history_path, translation_input, trim_history,
 };
 pub use tools::{Approver, BoxFuture, ToolExecutor};
 pub use types::*;

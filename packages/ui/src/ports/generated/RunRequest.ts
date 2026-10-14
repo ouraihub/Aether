@@ -41,9 +41,25 @@ scope?: string | null,
  */
 webSearch?: boolean, 
 /**
- * Re-run the last turn with the same input.
+ * Retry the selected reply, preserving the source candidate.
  */
 regenerate: boolean, 
+/**
+ * Selected reply whose ancestry supplies the next input's context.
+ */
+replyToId?: string | null, 
+/**
+ * Reply to generate another candidate for.
+ */
+retryTurnId?: string | null, 
+/**
+ * Reply to translate with the normal model runner.
+ */
+translateTurnId?: string | null, 
+/**
+ * Requested translation language.
+ */
+targetLanguage?: string | null, 
 /**
  * UI language, e.g. `zh-CN`; selects fixed prompt texts.
  */

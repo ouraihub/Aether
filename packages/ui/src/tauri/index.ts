@@ -122,6 +122,11 @@ export function createTauriPorts(options: TauriPortsOptions = {}): KitPorts & { 
           await call('chat_delete', { id })
         },
         rename: (id, title) => call('chat_rename', { id, title }),
+        editTurn: (conversationId, turnId, text, expectedText) =>
+          call('chat_edit_turn', { conversationId, turnId, text, expectedText }),
+        removeTurn: (conversationId, turnId) => call('chat_remove_turn', { conversationId, turnId }),
+        fork: (conversationId, turnId) => call('chat_fork', { conversationId, turnId }),
+        selectTurn: (conversationId, turnId) => call('chat_select_turn', { conversationId, turnId }),
       }
     }
   }

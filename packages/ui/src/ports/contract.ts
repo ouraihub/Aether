@@ -59,6 +59,10 @@ export interface ChatHistoryPort {
   get(id: string): Promise<Conversation>
   remove(id: string): Promise<void>
   rename(id: string, title: string): Promise<ConversationSummary>
+  editTurn(conversationId: string, turnId: string, text: string, expectedText: string): Promise<Conversation>
+  removeTurn(conversationId: string, turnId: string): Promise<Conversation>
+  fork(conversationId: string, turnId: string): Promise<Conversation>
+  selectTurn(conversationId: string, turnId: string): Promise<Conversation>
 }
 
 export interface ChatPort {

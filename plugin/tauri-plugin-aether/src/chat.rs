@@ -40,16 +40,20 @@ impl Default for ChatConfig {
 }
 
 /// Commands that exist only with a conversation store (`aether:chat-history`).
-pub(crate) const HISTORY_COMMANDS: [&str; 4] = [
+pub(crate) const HISTORY_COMMANDS: [&str; 8] = [
     "chat_conversations",
     "chat_conversation",
     "chat_delete",
     "chat_rename",
+    "chat_edit_turn",
+    "chat_remove_turn",
+    "chat_fork",
+    "chat_select_turn",
 ];
 
 const MAX_INPUT_CHARS: usize = 100_000;
 const MAX_SKILLS: usize = 20;
-const MAX_ID: usize = 64;
+const MAX_ID: usize = 128;
 const MAX_SCOPE: usize = 200;
 const MAX_TITLE: usize = 200;
 const LIST_LIMIT: usize = 200;
@@ -147,19 +151,52 @@ fn check_len(field: &str, value: &str, limit: usize) -> Result<(), KitError> {
 
 pub(crate) fn check_request(req: &RunRequest, has_store: bool) -> Result<(), KitError> {
     check_len("input", &req.input, MAX_INPUT_CHARS)?;
-    check_len(
-        "conversationId",
-        req.conversation_id.as_deref().unwrap_or(""),
-        MAX_ID,
-    )?;
+    for (field, value) in [
+        ("conversationId", req.conversation_id.as_deref()),
+        ("replyToId", req.reply_to_id.as_deref()),
+        ("retryTurnId", req.retry_turn_id.as_deref()),
+        ("translateTurnId", req.translate_turn_id.as_deref()),
+    ] {
+        check_len(field, value.unwrap_or(""), 128)?;
+    }
     check_len("scope", req.scope.as_deref().unwrap_or(""), MAX_SCOPE)?;
     if req.skills.len() > MAX_SKILLS {
         return Err(KitError::bad_request("skills", "too_many").with_limit(MAX_SKILLS as u64));
     }
+    let retry = req.retry_turn_id.is_some() || req.regenerate;
+    let translate = req.translate_turn_id.is_some();
+    if retry && translate {
+        return Err(KitError::bad_request("action", "multiple"));
+    }
     if req.regenerate && !(has_store && req.conversation_id.is_some()) {
         return Err(KitError::bad_request("regenerate", "no_conversation"));
     }
-    if !req.regenerate && req.input.trim().is_empty() {
+    if (retry || translate || req.reply_to_id.is_some())
+        && !(has_store && req.conversation_id.is_some())
+    {
+        return Err(KitError::bad_request("conversationId", "required"));
+    }
+    if (req.retry_turn_id.is_some() || req.translate_turn_id.is_some())
+        && (req.regenerate || req.web_search == Some(true))
+    {
+        return Err(KitError::bad_request("action", "conflict"));
+    }
+    if req.target_language.is_some() && !translate {
+        return Err(KitError::bad_request(
+            "targetLanguage",
+            "without_translation",
+        ));
+    }
+    if translate {
+        let language = req.target_language.as_deref().unwrap_or("").trim();
+        if language.is_empty() || language.chars().count() > 80 {
+            return Err(KitError::bad_request("targetLanguage", "invalid"));
+        }
+    }
+    if req.reply_to_id.is_some() && (retry || translate) {
+        return Err(KitError::bad_request("replyToId", "action_conflict"));
+    }
+    if !retry && !translate && req.input.trim().is_empty() {
         return Err(KitError::bad_request("input", "empty"));
     }
     Ok(())
@@ -175,32 +212,119 @@ pub(crate) fn assemble(
     req: &RunRequest,
     run_id: String,
 ) -> Result<RunInput, KitError> {
-    let model = host.select_model(req)?;
-    let connection = providers.resolve(&model)?;
+    let (turns, input, source_model) = match (store, &req.conversation_id) {
+        (Some(store), Some(id)) => {
+            let conversation = store.load(id)?;
+            if conversation
+                .turns
+                .iter()
+                .any(|turn| turn.status == aether_chat::TurnStatus::Running)
+            {
+                return Err(KitError::conflict("turn_running"));
+            }
+            let fallback = conversation
+                .turns
+                .iter()
+                .rev()
+                .find(|turn| turn.status == aether_chat::TurnStatus::Completed);
+            let source_id = req
+                .retry_turn_id
+                .as_deref()
+                .or(req.translate_turn_id.as_deref())
+                .or(req.reply_to_id.as_deref())
+                .or(conversation.summary.selected_turn_id.as_deref())
+                .or(fallback.map(|turn| turn.id.as_str()));
+            let source =
+                source_id.and_then(|sid| conversation.turns.iter().find(|turn| turn.id == sid));
+            if source_id.is_some() && source.is_none() || req.regenerate && source.is_none() {
+                return Err(KitError::not_found("turn"));
+            }
+            if source.is_some_and(|turn| turn.status != aether_chat::TurnStatus::Completed)
+                && req.retry_turn_id.is_none()
+                && req.translate_turn_id.is_none()
+                && !req.regenerate
+            {
+                return Err(KitError::conflict("turn_not_completed"));
+            }
+            let input = if let Some(source) = source {
+                if req.translate_turn_id.is_some() {
+                    aether_chat::translation_input(
+                        source,
+                        req.target_language.as_deref().unwrap_or(""),
+                    )?
+                } else if req.retry_turn_id.is_some() || req.regenerate {
+                    source.input.clone()
+                } else {
+                    req.input.clone()
+                }
+            } else {
+                req.input.clone()
+            };
+            let head = if req.retry_turn_id.is_some() || req.regenerate {
+                source.and_then(|turn| turn.parent_id.as_deref())
+            } else {
+                source.map(|turn| turn.id.as_str())
+            };
+            let source_model =
+                if req.retry_turn_id.is_some() || req.translate_turn_id.is_some() || req.regenerate
+                {
+                    source
+                        .and_then(|turn| turn.endpoint_id.as_ref().zip(turn.model_id.as_ref()))
+                        .map(|(endpoint_id, model_id)| aether_providers::ModelRef {
+                            endpoint_id: endpoint_id.clone(),
+                            model_id: model_id.clone(),
+                        })
+                } else {
+                    None
+                };
+            (
+                aether_chat::history_path(&conversation.turns, head)?,
+                input,
+                source_model,
+            )
+        }
+        _ => (Vec::new(), req.input.clone(), None),
+    };
+    check_len("input", &input, MAX_INPUT_CHARS)?;
+    let mut effective = req.clone();
+    if (req.retry_turn_id.is_some() || req.translate_turn_id.is_some() || req.regenerate)
+        && req.model.is_none()
+        && source_model.is_none()
+    {
+        return Err(KitError::needs_config("source_model_unavailable"));
+    }
+    if effective.model.is_none() {
+        effective.model = source_model;
+    }
+    effective.input.clone_from(&input);
+    let selected = host.select_model(&effective)?;
+    let model = if req.retry_turn_id.is_some() || req.translate_turn_id.is_some() || req.regenerate
+    {
+        effective.model.as_ref().unwrap_or(&selected)
+    } else {
+        &selected
+    };
+    let connection = providers.resolve(model).map_err(|error| {
+        if (req.retry_turn_id.is_some() || req.translate_turn_id.is_some() || req.regenerate)
+            && error.code() == aether_support::KitErrorCode::NotFound
+        {
+            KitError::needs_config("source_model_unavailable")
+        } else {
+            error
+        }
+    })?;
     let budget = budget.for_connection(&connection);
     let mut system = Vec::new();
-    if let Some(prompt) = host.system_prompt(req) {
+    if let Some(prompt) = host.system_prompt(&effective) {
         system.push(SystemPart::Host(prompt));
     }
     system.extend(skills);
-    if let Some(block) = host.context(req)? {
+    if let Some(block) = host.context(&effective)? {
         system.push(SystemPart::Context {
             source: block.source,
             text: block.text,
         });
     }
-    let (turns, input) = match (store, &req.conversation_id) {
-        (Some(store), Some(id)) => {
-            let mut turns = store.load(id)?.turns;
-            if req.regenerate {
-                let last = turns.pop().ok_or_else(|| KitError::not_found("turn"))?;
-                (turns, last.input)
-            } else {
-                (turns, req.input.clone())
-            }
-        }
-        _ => (Vec::new(), req.input.clone()),
-    };
     let used_chars = input.chars().count()
         + system
             .iter()
@@ -221,7 +345,11 @@ pub(crate) fn assemble(
         system,
         history: trim_history(&turns, room),
         input,
-        tools: host.tools(req).into_iter().map(|tool| tool.spec).collect(),
+        tools: host
+            .tools(&effective)
+            .into_iter()
+            .map(|tool| tool.spec)
+            .collect(),
         budget,
         reasoning_effort,
         native_web_search: false,
@@ -286,6 +414,28 @@ pub(crate) async fn chat_run<R: Runtime>(
     let skill_store: Option<Arc<SkillStore>> = None;
     let task_run_id = run_id.clone();
     let (mut input, request) = blocking(move || {
+        let mut request = request;
+        if let (Some(store), Some(id)) = (store.as_deref(), request.conversation_id.as_deref())
+            && request.reply_to_id.is_none()
+            && request.retry_turn_id.is_none()
+            && request.translate_turn_id.is_none()
+        {
+            let conversation = store.load(id)?;
+            let selected = conversation.summary.selected_turn_id.or_else(|| {
+                conversation
+                    .turns
+                    .iter()
+                    .rev()
+                    .find(|turn| turn.status == aether_chat::TurnStatus::Completed)
+                    .map(|turn| turn.id.clone())
+            });
+            if request.regenerate {
+                request.retry_turn_id = Some(selected.ok_or_else(|| KitError::not_found("turn"))?);
+                request.regenerate = false;
+            } else {
+                request.reply_to_id = selected;
+            }
+        }
         let skills = skill_parts(skill_store.as_deref(), &request.skills)?;
         let input = assemble(
             host.as_ref(),
@@ -327,24 +477,93 @@ pub(crate) async fn chat_run<R: Runtime>(
     };
     chat.runner.validate(&mut input)?;
 
-    // Only now touch the store, so a rejected request leaves no turn behind (docs/15 §4 step 8).
+    // Store metadata only after runner validation; rejected requests leave no row.
     let turn = match chat.store.clone() {
         Some(store) => {
             let conversation_id = request.conversation_id.clone();
             let scope = request.scope.clone();
-            let regenerate = request.regenerate;
-            let text = input.input.clone();
+            let input_text = input.input.clone();
+            let reply_to_id = request.reply_to_id.clone();
+            let retry_turn_id = request.retry_turn_id.clone();
+            let translation_id = request.translate_turn_id.clone();
+            let target_language = request.target_language.clone();
             Some(
-                blocking(move || match (regenerate, conversation_id) {
-                    (true, Some(id)) => store.regenerate(&id),
-                    (_, id) => store.begin_turn(id.as_deref(), scope.as_deref(), &text),
+                blocking(move || {
+                    store.begin_action(
+                        conversation_id.as_deref(),
+                        scope.as_deref(),
+                        &input_text,
+                        reply_to_id.as_deref(),
+                        retry_turn_id.as_deref(),
+                        translation_id.as_deref(),
+                        target_language.as_deref(),
+                    )
                 })
                 .await?,
             )
         }
         None => None,
     };
+    if request.purpose != "writing"
+        && let (Some(store), Some(handle)) = (chat.store.clone(), turn.as_ref())
+    {
+        input.input.clone_from(&handle.input);
+        let conversation_id = handle.conversation_id.clone();
+        let parent_id = handle.parent_id.clone();
+        let ancestry_store = store.clone();
+        let ancestry = blocking(move || {
+            let conversation = ancestry_store.load(&conversation_id)?;
+            aether_chat::history_path(&conversation.turns, parent_id.as_deref())
+        })
+        .await;
+        let ancestry = ancestry.and_then(|ancestry| {
+            check_len("input", &input.input, MAX_INPUT_CHARS)?;
+            chat.runner.validate(&mut input)?;
+            Ok(ancestry)
+        });
+        let ancestry = match ancestry {
+            Ok(ancestry) => ancestry,
+            Err(error) => {
+                let record = TurnRecord {
+                    status: aether_chat::EndStatus::Failed,
+                    messages: vec![],
+                    model_id: input.connection.model_id.clone(),
+                    skills: skill_refs.clone(),
+                    error_code: code_name(&error),
+                    input_tokens: None,
+                    output_tokens: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    reasoning_tokens: None,
+                    context_usage: None,
+                    reasoning_effort: Some(input.reasoning_effort),
+                    endpoint_id: input.connection.endpoint_id.clone(),
+                };
+                let failed_handle = handle.clone();
+                blocking(move || store.finish_turn(failed_handle, record)).await?;
+                return Err(error);
+            }
+        };
+        let used = input.input.chars().count()
+            + input
+                .system
+                .iter()
+                .map(|part| match part {
+                    SystemPart::Host(text) | SystemPart::Context { text, .. } => {
+                        text.chars().count()
+                    }
+                    SystemPart::Skill { body, .. } => body.chars().count(),
+                })
+                .sum::<usize>();
+        let room = input
+            .budget
+            .context_window
+            .saturating_sub(input.budget.max_output)
+            .saturating_sub(u32::try_from(used.div_ceil(3)).unwrap_or(u32::MAX));
+        input.history = trim_history(&ancestry, room);
+    }
     let conversation_id = turn.as_ref().map(|t| t.conversation_id.clone());
+    let accepted_turn_id = turn.as_ref().map(|t| t.turn_id.clone());
 
     chat.runs().insert(
         run_id.clone(),
@@ -408,11 +627,11 @@ pub(crate) async fn chat_run<R: Runtime>(
                     aether_chat::EndStatus::Failed
                 };
                 let code = code_name(&error);
-                let _ = on_event.send(RunEvent::End {
+                let mut end = RunEvent::End {
                     status,
                     error: (status == aether_chat::EndStatus::Failed).then_some(error),
                     exhausted: None,
-                });
+                };
                 if let (Some(store), Some(turn)) = (chat.store.clone(), turn) {
                     let record = TurnRecord {
                         status,
@@ -429,15 +648,15 @@ pub(crate) async fn chat_run<R: Runtime>(
                         reasoning_effort: Some(input.reasoning_effort),
                         endpoint_id: input.connection.endpoint_id.clone(),
                     };
-                    if let Err(error) = blocking(move || store.finish_turn(turn, record)).await {
-                        tracing::warn!(run_id = %task_run_id, code = ?error.code(), "chat.turn.finish_failed");
-                    }
+                    end = finish_event(store, turn, record, end).await;
                 }
+                let _ = on_event.send(end);
                 chat.runs().remove(&task_run_id);
                 return;
             }
         }
         let (mut rounds, mut tools, mut error_code) = (0_u8, 0_u32, None);
+        let mut end = None;
         let endpoint_id = input.connection.endpoint_id.clone();
         let reasoning_effort = input.reasoning_effort;
         let summary = chat
@@ -450,12 +669,16 @@ pub(crate) async fn chat_run<R: Runtime>(
                     RunEvent::SearchStart
                     | RunEvent::SearchResult { .. }
                     | RunEvent::TextDelta { .. }
-                    | RunEvent::ReasoningDelta { .. }
-                    | RunEvent::Context { .. }
                     | RunEvent::ApprovalRequired { .. }
                     | RunEvent::ToolResult { .. }
                     | RunEvent::Usage { .. }
+                    | RunEvent::Context { .. }
+                    | RunEvent::ReasoningDelta { .. }
                     | RunEvent::End { error: None, .. } => {}
+                }
+                if matches!(event, RunEvent::End { .. }) {
+                    end = Some(event);
+                    return;
                 }
                 // A failed send means the window or panel is gone: that is a cancel (docs/15 §7.2).
                 if on_event.send(event).is_err() {
@@ -479,9 +702,17 @@ pub(crate) async fn chat_run<R: Runtime>(
                 reasoning_effort: Some(reasoning_effort),
                 endpoint_id,
             };
-            if let Err(error) = blocking(move || store.finish_turn(turn, record)).await {
-                tracing::warn!(run_id = %task_run_id, code = ?error.code(), "chat.turn.finish_failed");
-            }
+            let event = end.take().unwrap_or_else(|| RunEvent::End {
+                status: aether_chat::EndStatus::Failed,
+                error: Some(KitError::internal(std::io::Error::other(
+                    "runner omitted End",
+                ))),
+                exhausted: None,
+            });
+            end = Some(finish_event(store, turn, record, event).await);
+        }
+        if let Some(end) = end {
+            let _ = on_event.send(end);
         }
         chat.runs().remove(&task_run_id);
         tracing::info!(
@@ -497,7 +728,28 @@ pub(crate) async fn chat_run<R: Runtime>(
     Ok(RunAccepted {
         run_id,
         conversation_id,
+        turn_id: accepted_turn_id,
     })
+}
+
+/// The UI's End handler may immediately read history, so persistence precedes End.
+pub(crate) async fn finish_event(
+    store: Arc<dyn ConversationStore>,
+    turn: aether_chat::TurnHandle,
+    record: TurnRecord,
+    end: RunEvent,
+) -> RunEvent {
+    match blocking(move || store.finish_turn(turn, record)).await {
+        Ok(()) => end,
+        Err(error) => {
+            tracing::warn!(code = ?error.code(), "chat.turn.finish_failed");
+            RunEvent::End {
+                status: aether_chat::EndStatus::Failed,
+                error: Some(error),
+                exhausted: None,
+            }
+        }
+    }
 }
 
 /// `snake_case` wire name of the error code, as stored in `turns.error_code`.
@@ -529,6 +781,7 @@ pub(crate) struct ConversationSummary {
     id: String,
     title: String,
     scope: Option<String>,
+    selected_turn_id: Option<String>,
     /// Unix milliseconds.
     #[ts(type = "number")]
     created_at: i64,
@@ -543,6 +796,7 @@ impl From<aether_chat::ConversationSummary> for ConversationSummary {
             id: s.id,
             title: s.title,
             scope: s.scope,
+            selected_turn_id: s.selected_turn_id,
             created_at: s.created_at,
             updated_at: s.updated_at,
         }
@@ -575,10 +829,16 @@ pub(crate) enum TurnStatus {
 #[ts(export)]
 pub(crate) struct Turn {
     id: String,
+    parent_id: Option<String>,
+    question_id: String,
+    supersedes_id: Option<String>,
+    #[ts(type = "'reply' | 'translation'")]
+    kind: String,
     status: TurnStatus,
     input: String,
     text: String,
     model_id: Option<String>,
+    endpoint_id: Option<String>,
     error_code: Option<String>,
     #[ts(optional = nullable)]
     usage: Option<aether_support::TokenUsage>,
@@ -606,13 +866,41 @@ impl From<aether_chat::Turn> for Turn {
                     };
                     text.push_str(body)
                 };
-                if !reasoning.is_empty() {
-                    reasoning_text.push_str("[reasoning]")
+                for block in reasoning {
+                    match block.protocol {
+                        aether_support::Protocol::OpenaiChat => {
+                            if let Some(text) = block.value.as_str() {
+                                reasoning_text.push_str(text);
+                            }
+                        }
+                        aether_support::Protocol::AnthropicMessages => {
+                            if block.value["type"] == "thinking"
+                                && let Some(text) = block.value["thinking"].as_str()
+                            {
+                                reasoning_text.push_str(text);
+                            }
+                        }
+                        aether_support::Protocol::OpenaiResponses => {
+                            if let Some(summary) = block.value["summary"].as_array() {
+                                for part in summary {
+                                    if part["type"] == "summary_text"
+                                        && let Some(text) = part["text"].as_str()
+                                    {
+                                        reasoning_text.push_str(text);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
         Self {
             id: t.id,
+            parent_id: t.parent_id,
+            question_id: t.question_id,
+            supersedes_id: t.supersedes_id,
+            kind: t.kind,
             status: match t.status {
                 aether_chat::TurnStatus::Running => TurnStatus::Running,
                 aether_chat::TurnStatus::Completed => TurnStatus::Completed,
@@ -622,6 +910,7 @@ impl From<aether_chat::Turn> for Turn {
             input: t.input,
             text,
             model_id: t.model_id,
+            endpoint_id: t.endpoint_id,
             error_code: t.error_code,
             usage: Some(aether_support::TokenUsage {
                 input_tokens: t.input_tokens,
@@ -693,4 +982,83 @@ pub(crate) async fn chat_rename<R: Runtime>(
     check_len("title", &title, MAX_TITLE)?;
     let store = app.state::<Chat>().store()?;
     blocking(move || store.rename(&id, &title).map(Into::into)).await
+}
+
+impl From<aether_chat::Conversation> for Conversation {
+    fn from(conversation: aether_chat::Conversation) -> Self {
+        Self {
+            summary: conversation.summary.into(),
+            turns: conversation.turns.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, fields(command = "chat_edit_turn"), err(level = "warn"))]
+pub(crate) async fn chat_edit_turn<R: Runtime>(
+    app: AppHandle<R>,
+    conversation_id: String,
+    turn_id: String,
+    text: String,
+    expected_text: String,
+) -> Result<Conversation, KitError> {
+    check_len("conversationId", &conversation_id, MAX_ID)?;
+    check_len("turnId", &turn_id, MAX_ID)?;
+    check_len("text", &text, 24_000)?;
+    let store = app.state::<Chat>().store()?;
+    blocking(move || {
+        store
+            .edit_turn(&conversation_id, &turn_id, &text, &expected_text)
+            .map(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, fields(command = "chat_remove_turn"), err(level = "warn"))]
+pub(crate) async fn chat_remove_turn<R: Runtime>(
+    app: AppHandle<R>,
+    conversation_id: String,
+    turn_id: String,
+) -> Result<Conversation, KitError> {
+    check_len("conversationId", &conversation_id, MAX_ID)?;
+    check_len("turnId", &turn_id, MAX_ID)?;
+    let store = app.state::<Chat>().store()?;
+    blocking(move || {
+        store
+            .remove_turn(&conversation_id, &turn_id)
+            .map(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, fields(command = "chat_fork"), err(level = "warn"))]
+pub(crate) async fn chat_fork<R: Runtime>(
+    app: AppHandle<R>,
+    conversation_id: String,
+    turn_id: String,
+) -> Result<Conversation, KitError> {
+    check_len("conversationId", &conversation_id, MAX_ID)?;
+    check_len("turnId", &turn_id, MAX_ID)?;
+    let store = app.state::<Chat>().store()?;
+    blocking(move || store.fork(&conversation_id, &turn_id).map(Into::into)).await
+}
+
+#[tauri::command]
+#[tracing::instrument(skip_all, fields(command = "chat_select_turn"), err(level = "warn"))]
+pub(crate) async fn chat_select_turn<R: Runtime>(
+    app: AppHandle<R>,
+    conversation_id: String,
+    turn_id: String,
+) -> Result<Conversation, KitError> {
+    check_len("conversationId", &conversation_id, MAX_ID)?;
+    check_len("turnId", &turn_id, MAX_ID)?;
+    let store = app.state::<Chat>().store()?;
+    blocking(move || {
+        store
+            .select_turn(&conversation_id, &turn_id)
+            .map(Into::into)
+    })
+    .await
 }

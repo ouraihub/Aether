@@ -102,8 +102,24 @@ mod chat_contract {
         #[serde(default)]
         #[ts(optional)]
         pub web_search: Option<bool>,
-        /// Re-run the last turn with the same input.
+        /// Retry the selected reply, preserving the source candidate.
         pub regenerate: bool,
+        /// Selected reply whose ancestry supplies the next input's context.
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        pub reply_to_id: Option<String>,
+        /// Reply to generate another candidate for.
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        pub retry_turn_id: Option<String>,
+        /// Reply to translate with the normal model runner.
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        pub translate_turn_id: Option<String>,
+        /// Requested translation language.
+        #[serde(default)]
+        #[ts(optional = nullable)]
+        pub target_language: Option<String>,
         /// UI language, e.g. `zh-CN`; selects fixed prompt texts.
         pub language: String,
         /// Requested reasoning effort; omitted uses the endpoint default.
@@ -132,6 +148,8 @@ mod chat_contract {
         pub run_id: String,
         /// Conversation the turn belongs to; `null` without a store.
         pub conversation_id: Option<String>,
+        /// Stable stored candidate id; `null` without a store.
+        pub turn_id: Option<String>,
     }
 
     /// `{ ok: true }` reply of commands that only acknowledge.

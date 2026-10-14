@@ -3,7 +3,7 @@
 /**
  * A row of the history list.
  */
-export type ConversationSummary = { id: string, title: string, scope: string | null, 
+export type ConversationSummary = { id: string, title: string, scope: string | null, selectedTurnId: string | null, 
 /**
  * Unix milliseconds.
  */

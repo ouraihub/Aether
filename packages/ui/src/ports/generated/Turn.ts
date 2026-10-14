@@ -7,4 +7,4 @@ import type { TurnStatus } from "./TurnStatus";
 /**
  * One turn as shown: user input and the assistant text it produced.
  */
-export type Turn = { id: string, status: TurnStatus, input: string, text: string, modelId: string | null, errorCode: string | null, usage?: TokenUsage | null, contextUsage?: ContextUsage | null, reasoningEffort?: ReasoningEffort | null, reasoningText: string | null, };
+export type Turn = { id: string, parentId: string | null, questionId: string, supersedesId: string | null, kind: 'reply' | 'translation', status: TurnStatus, input: string, text: string, modelId: string | null, endpointId: string | null, errorCode: string | null, usage?: TokenUsage | null, contextUsage?: ContextUsage | null, reasoningEffort?: ReasoningEffort | null, reasoningText: string | null, };

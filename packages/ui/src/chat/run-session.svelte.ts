@@ -1,4 +1,5 @@
 // One conversation in the panel: turns, the active run and its abort (docs/16 §4.2, §7 trap 4).
+import { SvelteMap } from 'svelte/reactivity'
 import { isKitClientError } from '../ports'
 import type {
   ChatPort,
@@ -6,6 +7,7 @@ import type {
   KitError,
   ModelRef,
   RunEvent,
+  RunRequest,
   SearchHit,
   SkillRef,
   ToolOutcome,
@@ -28,6 +30,14 @@ export interface ToolItem {
 import type { ContextUsage, TokenUsage, ReasoningEffort } from '../ports'
 
 export interface ChatTurn {
+  id: string
+  persisted: boolean
+  parentId: string | null
+  questionId: string
+  supersedesId: string | null
+  kind: 'reply' | 'translation'
+  endpointId: string | null
+  modelId: string | null
   input: string
   text: string
   reasoningText: string
@@ -62,6 +72,9 @@ export interface RunBase {
 export class RunSession {
   turns = $state<ChatTurn[]>([])
   conversationId = $state<string | null>(null)
+  selectedTurnId = $state<string | null>(null)
+  actionError = $state<string | null>(null)
+  historyRefreshError = $state<string | null>(null)
   running = $state(false)
   contextUsage = $state<ContextUsage | null>(null)
   search = $state<SearchState>({ status: 'idle', query: null, provider: null, hits: [], error: null })
@@ -95,16 +108,101 @@ export class RunSession {
     return total
   }
 
-  send(base: RunBase, input: string, webSearch = false) {
-    const search: SearchState = {
-      status: webSearch ? 'searching' : 'idle',
-      query: webSearch ? input : null,
-      provider: null,
-      hits: [],
-      error: null,
-    }
+  send(base: RunBase, input: string, webSearch = false): Promise<boolean> {
     if (this.running || input.trim() === '') return Promise.resolve(false)
+    return this.#append(base, input, this.selectedTurnId, null, 'reply', {}, webSearch)
+  }
+
+  retry(base: RunBase, turnId: string, model?: ModelRef | null): Promise<boolean> {
+    if (base.purpose !== 'chat') {
+      this.actionError = 'bad_request'
+      return Promise.resolve(false)
+    }
+    const source = this.#source(turnId)
+    if (!source) return Promise.resolve(false)
+    const snapshot = {
+      ...base,
+      reasoningEffort: source.reasoningEffort,
+      model:
+        model ??
+        (source.endpointId && source.modelId
+          ? { endpointId: source.endpointId, modelId: source.modelId }
+          : source.persisted
+            ? null
+            : base.model),
+    }
+    const storedSource = this.#stored && source.persisted
+    return this.#append(
+      snapshot,
+      source.input,
+      source.parentId,
+      this.#stored && !source.persisted ? null : source,
+      source.kind,
+      storedSource ? { retryTurnId: source.id } : {},
+    )
+  }
+
+  translate(base: RunBase, turnId: string, language: string): Promise<boolean> {
+    if (base.purpose !== 'chat') {
+      this.actionError = 'bad_request'
+      return Promise.resolve(false)
+    }
+    const source = this.#source(turnId)
+    if (!source) return Promise.resolve(false)
+    if (!language.trim() || language.trim().length > 80) {
+      this.actionError = 'bad_request'
+      return Promise.resolve(false)
+    }
+    const input = `Translate the following reply into ${language.trim()}. Return only the translation, preserving Markdown formatting.\n\n${source.text}`
+    const snapshot = {
+      ...base,
+      reasoningEffort: source.reasoningEffort,
+      model:
+        base.model ??
+        (source.endpointId && source.modelId ? { endpointId: source.endpointId, modelId: source.modelId } : null),
+    }
+    return this.#append(
+      snapshot,
+      input,
+      source.id,
+      null,
+      'translation',
+      this.#stored && source.persisted ? { translateTurnId: source.id, targetLanguage: language.trim() } : {},
+    )
+  }
+
+  get #stored() {
+    return this.#port.history !== undefined && this.conversationId !== null
+  }
+
+  #source(id: string) {
+    if (this.running) return null
+    const source = this.turns.find((turn) => turn.id === id)
+    if (!source) this.actionError = 'not_found'
+    return source ?? null
+  }
+
+  #append(
+    base: RunBase,
+    input: string,
+    parentId: string | null,
+    source: ChatTurn | null,
+    kind: ChatTurn['kind'],
+    action: Partial<RunRequest>,
+    webSearch = false,
+  ): Promise<boolean> {
+    const id = crypto.randomUUID()
+    this.actionError = null
+    this.historyRefreshError = null
     this.turns.push({
+      id,
+      persisted: false,
+      parentId,
+      questionId: source?.questionId ?? id,
+      supersedesId: source?.id ?? null,
+      kind,
+      endpointId: base.model?.endpointId ?? null,
+      modelId: base.model?.modelId ?? null,
       input,
       text: '',
       reasoningText: '',
@@ -115,27 +213,9 @@ export class RunSession {
       error: null,
       tools: [],
       exhausted: false,
-      search,
+      search: { status: 'idle', query: null, provider: null, hits: [], error: null },
     })
-    return this.#start(base, input, false, webSearch)
-  }
-
-  /** Reruns the last turn in place: stored (`regenerate`) with history, a fresh run without. */
-  regenerate(base: RunBase, webSearch = false) {
-    const last = this.turns.at(-1)
-    if (!last || this.running) return
-    Object.assign(last, {
-      text: '',
-      reasoningText: '',
-      reasoningEffort: base.reasoningEffort ?? 'default',
-      usage: null,
-      contextUsage: null,
-      status: 'running',
-      error: null,
-      tools: [],
-      exhausted: false,
-    })
-    void this.#start(base, last.input, this.conversationId !== null, webSearch)
+    return this.#start(base, input, action, webSearch)
   }
 
   /** Cancels the active run; its `end` arrives as `cancelled`. */
@@ -155,29 +235,64 @@ export class RunSession {
     })
   }
 
-  show(conversationId: string | null, turns: readonly Turn[] = []) {
+  show(conversationId: string | null, turns: readonly Turn[] = [], selectedTurnId?: string | null) {
+    const previous =
+      conversationId === this.conversationId ? new SvelteMap(this.turns.map((turn) => [turn.id, turn])) : null
     this.stop()
     this.#abort = null
+    this.#runId = null
     this.running = false
-    this.contextUsage = turns.at(-1)?.contextUsage ?? null
+    this.actionError = null
+    this.historyRefreshError = null
     this.conversationId = conversationId
+    this.selectedTurnId =
+      selectedTurnId === undefined
+        ? (turns.findLast((turn) => turn.status === 'completed')?.id ?? null)
+        : selectedTurnId
+    this.contextUsage = turns.find((turn) => turn.id === this.selectedTurnId)?.contextUsage ?? null
     this.search = { status: 'idle', query: null, provider: null, hits: [], error: null }
-    this.turns = turns.map((t) => ({
-      input: t.input,
-      text: t.text,
-      reasoningText: t.reasoningText ?? '',
-      reasoningEffort: t.reasoningEffort ?? 'default',
-      usage: t.usage ?? null,
-      contextUsage: t.contextUsage ?? null,
-      status: t.status,
-      error: t.errorCode,
+    this.turns = turns.map((turn) => {
+      const restored = this.#fromHistory(turn)
+      const current = previous?.get(turn.id)
+      if (
+        current &&
+        current.text === restored.text &&
+        current.reasoningText === restored.reasoningText &&
+        (current.contextUsage === null) === (restored.contextUsage === null)
+      ) {
+        restored.tools = current.tools
+        restored.search = current.search
+        restored.exhausted = current.exhausted
+      }
+      return restored
+    })
+  }
+
+  #fromHistory(turn: Turn): ChatTurn {
+    return {
+      id: turn.id,
+      persisted: true,
+      parentId: turn.parentId,
+      questionId: turn.questionId,
+      supersedesId: turn.supersedesId,
+      kind: turn.kind,
+      endpointId: turn.endpointId,
+      modelId: turn.modelId,
+      input: turn.input,
+      text: turn.text,
+      reasoningText: turn.reasoningText ?? '',
+      reasoningEffort: turn.reasoningEffort ?? 'default',
+      usage: turn.usage ?? null,
+      contextUsage: turn.contextUsage ?? null,
+      status: turn.status,
+      error: turn.errorCode,
       tools: [],
       exhausted: false,
       search: { status: 'idle', query: null, provider: null, hits: [], error: null },
-    }))
+    }
   }
 
-  #start(base: RunBase, input: string, regenerate: boolean, webSearch: boolean) {
+  async #start(base: RunBase, input: string, action: Partial<RunRequest>, webSearch: boolean): Promise<boolean> {
     // The proxied element, so streamed writes are reactive.
     const turn = this.turns[this.turns.length - 1]
     if (!turn) return Promise.resolve(false)
@@ -193,21 +308,59 @@ export class RunSession {
     }
     turn.search = this.search
     this.running = true
+    let accepted = false
+    let ended = false
+    let refreshing = false
+    const settle = async () => {
+      if (!accepted || !ended || refreshing || this.#abort !== abort) return
+      refreshing = true
+      try {
+        if (this.#port.history && this.conversationId) {
+          const conversation = await this.#port.history.get(this.conversationId)
+          if (this.#abort !== abort) return
+          const live = new SvelteMap(this.turns.map((item) => [item.id, item]))
+          this.turns = conversation.turns.map((stored) => {
+            const current = live.get(stored.id)
+            live.delete(stored.id)
+            return {
+              ...this.#fromHistory(stored),
+              tools: current?.tools ?? [],
+              search: current?.search ?? { status: 'idle', query: null, provider: null, hits: [], error: null },
+              exhausted: current?.exhausted ?? false,
+            }
+          })
+          this.turns.push(...live.values())
+          this.selectedTurnId = conversation.summary.selectedTurnId
+          this.contextUsage = this.turns.find((item) => item.id === this.selectedTurnId)?.contextUsage ?? null
+        }
+      } catch (error: unknown) {
+        if (this.#abort !== abort) return
+        this.historyRefreshError = error instanceof Error ? error.message : 'internal'
+      } finally {
+        if (this.#abort === abort) {
+          this.#abort = null
+          this.#runId = null
+          this.running = false
+        }
+      }
+    }
     const finish = (status: TurnStatus, error: string | null) => {
       if (this.#abort !== abort) return
+      ended = true
       turn.status = status
       turn.error = error
       if (status !== 'completed') {
         turn.contextUsage = null
         this.contextUsage = null
-      }
-      if (this.search.status === 'searching')
+      } else if (turn.supersedesId === null) this.selectedTurnId = turn.id
+      if (this.search.status === 'searching') {
         this.search = { ...this.search, status: status === 'failed' ? 'failed' : 'idle', error }
-      this.#abort = null
-      this.running = false
+        turn.search = this.search
+      }
+      void settle()
     }
     const onEvent = (event: RunEvent) => {
-      if (this.#abort !== abort) return
+      if (this.#abort !== abort || ended) return
       const tool = (callId: string) => turn.tools.find((x) => x.callId === callId)
       switch (event.kind) {
         case 'search_start':
@@ -279,37 +432,52 @@ export class RunSession {
           break
       }
     }
-    const request = {
+    const request: RunRequest = {
       purpose: base.purpose,
       model: base.model,
       skills: base.skills,
       context: base.context,
-      input: regenerate ? '' : input,
+      input,
       conversationId: this.conversationId,
       scope: base.scope,
-      regenerate,
+      regenerate: false,
       language: base.language,
       reasoningEffort: base.reasoningEffort ?? 'default',
+      ...(base.purpose === 'chat' && this.#stored && !action.retryTurnId && !action.translateTurnId
+        ? { replyToId: this.selectedTurnId }
+        : {}),
+      ...action,
       ...(base.purpose === 'chat' && webSearch ? { webSearch: true } : {}),
     }
     this.#runId = null
-    return this.#port.run(request, onEvent, { signal: abort.signal }).then(
-      (accepted) => {
-        if (this.#abort !== abort && this.#abort !== null) return true
-        if (!this.turns.includes(turn)) return true
-        this.#runId = accepted.runId
-        if (accepted.conversationId) this.conversationId = accepted.conversationId
-        return true
-      },
-      // Rejected before acceptance: no `end` will follow.
-      (error: unknown) => {
-        if (this.#abort !== abort) return true
-        const code = isKitClientError(error) ? error.code : 'internal'
-        if (isKitClientError(error)) this.#checkSkill(error)
-        finish(code === 'cancelled' ? 'cancelled' : 'failed', code === 'cancelled' ? null : code)
-        return code === 'cancelled'
-      },
-    )
+    try {
+      const result = await this.#port.run(request, onEvent, { signal: abort.signal })
+      if (this.#abort !== abort) return true
+      accepted = true
+      this.#runId = result.runId
+      if (result.conversationId) this.conversationId = result.conversationId
+      if (result.turnId) {
+        const temporaryId = turn.id
+        turn.id = result.turnId
+        turn.persisted = true
+        if (turn.questionId === temporaryId) turn.questionId = result.turnId
+        if (this.selectedTurnId === temporaryId) this.selectedTurnId = result.turnId
+      }
+      void settle()
+      return true
+    } catch (error: unknown) {
+      if (this.#abort !== abort) return true
+      const code = isKitClientError(error) ? error.code : 'internal'
+      if (isKitClientError(error)) this.#checkSkill(error)
+      finish(code === 'cancelled' ? 'cancelled' : 'failed', code === 'cancelled' ? null : code)
+      if ((turn.supersedesId !== null || turn.kind === 'translation') && code !== 'cancelled') this.actionError = code
+      if (turn.supersedesId !== null || turn.kind === 'translation')
+        this.turns = this.turns.filter((item) => item !== turn)
+      this.#abort = null
+      this.#runId = null
+      this.running = false
+      return code === 'cancelled'
+    }
   }
 
   #checkSkill(error: Pick<KitError, 'code' | 'details'> | null | undefined) {

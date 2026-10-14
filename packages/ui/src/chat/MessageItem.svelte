@@ -1,6 +1,5 @@
 <script lang="ts">
-  // One turn: user input, tool calls (with approval), assistant markdown (sanitized, set via
-  // attachment), copy / insert, terminal state with retry.
+  // Full reply candidate; the panel groups shared user input by questionId.
   import { Button } from '#lib/components/ui/button/index.js'
   import { getKitContext } from '../context'
   import { renderMarkdown } from '../markdown'
@@ -13,18 +12,54 @@
   import FileInputIcon from '@lucide/svelte/icons/file-input'
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
   import ToolCallItem from './ToolCallItem.svelte'
+  import MoreHorizontalIcon from '@lucide/svelte/icons/ellipsis'
+  import LanguagesIcon from '@lucide/svelte/icons/languages'
+  import TrashIcon from '@lucide/svelte/icons/trash-2'
+  import SaveIcon from '@lucide/svelte/icons/file-plus'
+  import AtSignIcon from '@lucide/svelte/icons/at-sign'
 
   let {
     turn,
     onApprove,
     onInsert,
     onRetry,
+    modelLabel,
+    chosen = false,
+    showInput = true,
+    busy = false,
+    editable = false,
+    deletable = false,
+    deleteReason,
+    onEdit,
+    onBranch,
+    onCopyConversation,
+    onSwitchModel,
+    onTranslate,
+    onDelete,
+    onUseContext,
+    onSaveNote,
+    onExportMarkdown,
   }: {
     turn: ChatTurn
     onApprove: (tool: ToolItem, allow: boolean) => void
     onInsert?: ((markdown: string) => void) | undefined
-    /** Only for the last turn while nothing runs. */
     onRetry?: (() => void) | undefined
+    modelLabel?: string
+    chosen?: boolean
+    showInput?: boolean
+    busy?: boolean
+    editable?: boolean
+    deletable?: boolean
+    deleteReason?: string | undefined
+    onEdit?: (() => void) | undefined
+    onBranch?: (() => void) | undefined
+    onCopyConversation?: (() => void) | undefined
+    onSwitchModel?: (() => void) | undefined
+    onTranslate?: (() => void) | undefined
+    onDelete?: (() => void) | undefined
+    onUseContext?: (() => void) | undefined
+    onSaveNote?: ((markdown: string) => Promise<void> | void) | undefined
+    onExportMarkdown?: ((markdown: string) => Promise<void> | void) | undefined
   } = $props()
   const { i18n, notify } = getKitContext()
   const { t } = i18n
@@ -65,11 +100,50 @@
     clearTimeout(copyTimer)
     copyTimer = setTimeout(() => (copied = false), 1500)
   }
+  function menuAction(event: MouseEvent, action: () => void) {
+    const details = event.currentTarget instanceof Element ? event.currentTarget.closest('details') : null
+    if (details) details.open = false
+    action()
+  }
+
+  async function saveNote() {
+    try {
+      await onSaveNote?.(turn.text)
+    } catch {
+      notify.toast('error', t('chat.saveNoteFailed'))
+    }
+  }
+  async function download() {
+    let url: string | null = null
+    try {
+      if (onExportMarkdown) {
+        await onExportMarkdown(turn.text)
+        return
+      }
+      url = URL.createObjectURL(new Blob([turn.text], { type: 'text/markdown;charset=utf-8' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `reply-${turn.id}.md`
+      document.body.append(link)
+      try {
+        link.click()
+      } finally {
+        link.remove()
+      }
+    } catch {
+      notify.toast('error', t('chat.exportFailed'))
+    } finally {
+      if (url) URL.revokeObjectURL(url)
+    }
+  }
 </script>
 
 <li class="message-turn flex min-w-0 flex-col gap-2">
-  <p class="user-message">{turn.input}</p>
-  <div class="assistant-message">
+  {#if showInput}<p class="user-message">{turn.input}</p>{/if}
+  <div class="assistant-message" class:chosen>
+    {#if modelLabel}<div class="reply-source">
+        <span>{modelLabel}</span>{#if chosen}<span>{t('chat.chosenReply')}</span>{/if}
+      </div>{/if}
     {#if turn.reasoningText}
       <details class="thinking text-muted-foreground text-kit-sm">
         <summary class="cursor-pointer">{t('chat.reasoning')}</summary>
@@ -89,7 +163,7 @@
         node.innerHTML = html
       }}
     ></div>
-    {#if turn.text !== '' || (onRetry && turn.status !== 'running')}
+    {#if turn.text !== '' || (onRetry && turn.status !== 'running') || onUseContext}
       <div class="message-actions">
         {#if turn.text !== ''}
           <Button
@@ -101,25 +175,108 @@
           >
             {#if copied}<CheckIcon />{:else}<CopyIcon />{/if}
           </Button>
-          {#if onInsert}
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              title={t('chat.insert')}
-              aria-label={t('chat.insert')}
-              disabled={turn.status === 'running'}
-              onclick={insert}
-            >
-              <FileInputIcon />
-            </Button>
-          {/if}
+        {/if}
+        {#if turn.text || onEdit || onBranch || onCopyConversation}
+          <details class="reply-more">
+            <summary aria-label={t('chat.more')} title={t('chat.more')}><MoreHorizontalIcon /></summary>
+            <div class="more-actions">
+              {#if onEdit}<Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('chat.editReply')}
+                  disabled={busy || !editable}
+                  onclick={(event) => menuAction(event, () => onEdit?.())}>{t('chat.editReply')}</Button
+                >{/if}
+              {#if onBranch}<Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('chat.branch')}
+                  disabled={busy}
+                  onclick={(event) => menuAction(event, () => onBranch?.())}>{t('chat.branch')}</Button
+                >{/if}
+              {#if onCopyConversation}<Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('chat.copyConversation')}
+                  disabled={busy}
+                  onclick={(event) => menuAction(event, () => onCopyConversation?.())}
+                  >{t('chat.copyConversation')}</Button
+                >{/if}
+              {#if onSaveNote}<Button
+                  variant="ghost"
+                  size="sm"
+                  title={t('chat.saveNote')}
+                  disabled={busy || turn.status === 'running' || !turn.text}
+                  onclick={(event) => menuAction(event, () => void saveNote())}>{t('chat.saveNote')}</Button
+                >{/if}
+              <Button
+                variant="ghost"
+                size="sm"
+                title={t('chat.exportMarkdown')}
+                disabled={!turn.text}
+                onclick={(event) => menuAction(event, () => void download())}>{t('chat.exportMarkdown')}</Button
+              >
+            </div>
+          </details>
         {/if}
         {#if onRetry && turn.status !== 'running'}
           {@const label = t(turn.status === 'failed' ? 'chat.retry' : 'chat.regenerate')}
-          <Button variant="ghost" size="icon-xs" title={label} aria-label={label} onclick={onRetry}
+          <Button variant="ghost" size="icon-xs" title={label} aria-label={label} disabled={busy} onclick={onRetry}
             ><RotateCcwIcon /></Button
           >
         {/if}
+        {#if onSwitchModel}<Button
+            variant="ghost"
+            size="icon-xs"
+            title={t('chat.switchModel')}
+            aria-label={t('chat.switchModel')}
+            disabled={busy}
+            onclick={onSwitchModel}><AtSignIcon /></Button
+          >{/if}
+        {#if onTranslate}<Button
+            variant="ghost"
+            size="icon-xs"
+            title={t('chat.translate')}
+            aria-label={t('chat.translate')}
+            disabled={busy || !turn.text}
+            onclick={onTranslate}><LanguagesIcon /></Button
+          >{/if}
+        {#if onDelete}<Button
+            variant="ghost"
+            size="icon-xs"
+            title={deleteReason ?? t('chat.deleteReply')}
+            aria-label={t('chat.deleteReply')}
+            disabled={busy || !deletable}
+            onclick={onDelete}><TrashIcon /></Button
+          >{/if}
+        {#if onSaveNote && turn.text}<Button
+            variant="ghost"
+            size="icon-xs"
+            title={t('chat.saveNote')}
+            aria-label={t('chat.saveNote')}
+            disabled={busy || turn.status === 'running'}
+            onclick={() => void saveNote()}><SaveIcon /></Button
+          >{/if}
+        {#if onInsert}
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            title={t('chat.insert')}
+            aria-label={t('chat.insert')}
+            disabled={busy || turn.status === 'running'}
+            onclick={insert}
+          >
+            <FileInputIcon />
+          </Button>
+        {/if}
+        {#if onUseContext}<Button
+            class="use-context"
+            variant={chosen ? 'secondary' : 'ghost'}
+            size="sm"
+            aria-pressed={chosen}
+            disabled={busy || turn.status !== 'completed' || chosen}
+            onclick={onUseContext}>{t('chat.useContext')}</Button
+          >{/if}
         <span class="text-muted-foreground text-kit-sm" role="status">{copied ? t('chat.copied') : ''}</span>
       </div>
     {/if}
@@ -180,6 +337,66 @@
     border-radius: var(--kit-radius);
     background: var(--color-muted);
     color: var(--color-foreground);
+  }
+  .assistant-message.chosen {
+    outline: 1px solid var(--color-primary);
+  }
+  .reply-source {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: var(--kit-text-sm);
+    color: var(--color-muted-foreground);
+    overflow-wrap: anywhere;
+  }
+  .reply-more {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .reply-more[open] {
+    flex-basis: 100%;
+    width: 100%;
+  }
+  .reply-more summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0.25rem;
+    border-radius: var(--kit-radius);
+    cursor: pointer;
+    list-style: none;
+  }
+  .reply-more summary:focus-visible {
+    outline: 2px solid var(--color-ring);
+  }
+  .reply-more summary :global(svg) {
+    width: 1rem;
+    height: 1rem;
+  }
+  .more-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .more-actions :global(button) {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    min-height: 2rem;
+    justify-content: flex-start;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+  }
+  .message-actions :global(.use-context) {
+    margin-left: auto;
   }
   .thinking {
     min-width: 0;

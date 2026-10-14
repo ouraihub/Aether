@@ -30,6 +30,10 @@ const FEATURES: &[(&str, &str, &[&str])] = &[
             "chat_conversation",
             "chat_delete",
             "chat_rename",
+            "chat_edit_turn",
+            "chat_remove_turn",
+            "chat_fork",
+            "chat_select_turn",
         ],
     ),
     (

@@ -335,3 +335,288 @@ async fn approval_times_out_as_denied_and_stops_on_cancel() {
     cancel.cancel();
     assert!(!waiting.await);
 }
+
+fn store_reply(
+    store: &aether_chat::SqliteStore,
+    turn: aether_chat::TurnHandle,
+    model: &crate::ModelRef,
+    text: &str,
+) {
+    use aether_chat::ConversationStore;
+    store
+        .finish_turn(
+            turn,
+            aether_chat::TurnRecord {
+                status: EndStatus::Completed,
+                messages: vec![aether_chat::Message::Assistant {
+                    text: text.into(),
+                    tool_calls: vec![],
+                    reasoning: vec![],
+                }],
+                model_id: Some(model.model_id.clone()),
+                endpoint_id: Some(model.endpoint_id.clone()),
+                skills: vec![],
+                error_code: None,
+                input_tokens: Some(10),
+                output_tokens: Some(4),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                reasoning_tokens: None,
+                context_usage: None,
+                reasoning_effort: None,
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn actions_validate_shape_language_and_store_requirements() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, request) = local_model(dir.path(), "http://localhost/v1", "hi");
+    let mut action = request;
+    action.input.clear();
+    action.conversation_id = Some("conversation".into());
+    action.retry_turn_id = Some("source".into());
+    super::chat::check_request(&action, true).unwrap();
+    assert!(super::chat::check_request(&action, false).is_err());
+    action.regenerate = true;
+    assert!(super::chat::check_request(&action, true).is_err());
+    action.regenerate = false;
+    action.translate_turn_id = Some("source".into());
+    action.target_language = Some("French".into());
+    assert!(super::chat::check_request(&action, true).is_err());
+    action.retry_turn_id = None;
+    super::chat::check_request(&action, true).unwrap();
+    action.target_language = Some(" ".into());
+    assert!(super::chat::check_request(&action, true).is_err());
+    action.target_language = Some("x".repeat(81));
+    assert!(super::chat::check_request(&action, true).is_err());
+}
+
+#[tokio::test]
+async fn retry_and_translation_use_source_ancestry_and_real_runner() {
+    use aether_chat::{ConversationStore, Message, SqliteStore, SystemPart};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(upstream(listener, vec![HELLO]));
+    let dir = tempfile::tempdir().unwrap();
+    let (providers, mut request) = local_model(dir.path(), &url, "q1");
+    let model = request.model.clone().unwrap();
+    let store = SqliteStore::open(dir.path()).unwrap();
+    let first = store.begin_turn(None, Some("note:1"), "q1").unwrap();
+    let conversation_id = first.conversation_id.clone();
+    let first_id = first.turn_id.clone();
+    store_reply(&store, first, &model, "original answer");
+    let candidate = store
+        .begin_action(
+            Some(&conversation_id),
+            None,
+            "ignored",
+            None,
+            Some(&first_id),
+            None,
+            None,
+        )
+        .unwrap();
+    let candidate_id = candidate.turn_id.clone();
+    store_reply(&store, candidate, &model, "alternative answer");
+    let second = store
+        .begin_turn(Some(&conversation_id), None, "q2")
+        .unwrap();
+    let second_id = second.turn_id.clone();
+    store_reply(&store, second, &model, "second answer");
+    request.conversation_id = Some(conversation_id.clone());
+    request.input = "q3".into();
+    let assemble = |request: &RunRequest| {
+        super::chat::assemble(
+            &Host,
+            &providers,
+            Some(&store),
+            vec![SystemPart::Host("safety rules".into())],
+            ChatConfig::default().budget,
+            request,
+            "r1".into(),
+        )
+    };
+    let normal = assemble(&request).unwrap();
+    assert!(normal.history.contains(&Message::User("q2".into())));
+    assert!(
+        !serde_json::to_string(&normal.history)
+            .unwrap()
+            .contains("alternative answer")
+    );
+    request.model = None;
+    request.retry_turn_id = Some(second_id);
+    let retry = assemble(&request).unwrap();
+    assert_eq!(retry.input, "q2");
+    assert_eq!(
+        retry.connection.endpoint_id.as_deref(),
+        Some(model.endpoint_id.as_str())
+    );
+    assert_eq!(retry.history.len(), 2);
+    assert!(retry.history.contains(&Message::User("q1".into())));
+    assert!(matches!(&retry.system[0], SystemPart::Host(text) if text == "safety rules"));
+    request.retry_turn_id = None;
+    request.regenerate = true;
+    let regenerated = assemble(&request).unwrap();
+    assert_eq!(regenerated.input, "q2");
+    assert_eq!(regenerated.history, retry.history);
+    request.regenerate = false;
+    request.retry_turn_id = None;
+    request.translate_turn_id = Some(candidate_id);
+    request.target_language = Some("French".into());
+    request.model = None;
+    let translation = assemble(&request).unwrap();
+    assert_eq!(
+        translation.connection.endpoint_id.as_deref(),
+        Some(model.endpoint_id.as_str())
+    );
+    assert_eq!(
+        translation.input,
+        "Translate the following reply into French. Return only the translation, preserving Markdown formatting.\n\nalternative answer"
+    );
+    assert_eq!(translation.history.len(), 2);
+    assert!(
+        !serde_json::to_string(&translation.history)
+            .unwrap()
+            .contains("second answer")
+    );
+    let summary = Runner::new(AddressPolicy::default())
+        .unwrap()
+        .run(
+            translation,
+            &HostTools::new(Arc::new(Host)),
+            &Approvals::new(Duration::from_secs(1)),
+            &CancellationToken::new(),
+            |_| {},
+        )
+        .await;
+    assert_eq!(summary.status, EndStatus::Completed);
+    let received = server.await.unwrap();
+    assert!(received[0].contains("Translate the following reply into French"));
+    assert!(received[0].contains("safety rules"));
+    request.translate_turn_id = Some("foreign".into());
+    assert_eq!(
+        assemble(&request).unwrap_err().code(),
+        KitErrorCode::NotFound
+    );
+    request.translate_turn_id = None;
+    request.target_language = None;
+    request.retry_turn_id = Some(first_id);
+    request.model = None;
+    let provider_id = providers.list().unwrap()[0].id.clone();
+    providers.delete(&provider_id).unwrap();
+    assert_eq!(
+        assemble(&request).unwrap_err().code(),
+        KitErrorCode::NeedsConfig
+    );
+    request.model =
+        Some(serde_json::from_value(json!({"endpointId": "missing", "modelId": "m"})).unwrap());
+    let running = store
+        .begin_turn(Some(&conversation_id), None, "running")
+        .unwrap();
+    assert_eq!(
+        assemble(&request).unwrap_err().details().reason(),
+        Some("turn_running")
+    );
+    store_reply(&store, running, request.model.as_ref().unwrap(), "done");
+}
+
+#[tokio::test]
+async fn end_is_returned_only_after_durable_finish_and_storage_failure_is_explicit() {
+    use aether_chat::{ConversationStore, Message, SqliteStore, TurnRecord, TurnStatus};
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(SqliteStore::open(dir.path()).unwrap());
+    let turn = store.begin_turn(None, None, "question").unwrap();
+    let id = turn.conversation_id.clone();
+    let record = TurnRecord {
+        status: EndStatus::Completed,
+        messages: vec![Message::Assistant {
+            text: "answer".into(),
+            tool_calls: vec![],
+            reasoning: vec![
+                aether_support::ReasoningBlock {
+                    protocol: aether_support::Protocol::AnthropicMessages,
+                    endpoint_id: Some("e1".into()),
+                    model_id: Some("m1".into()),
+                    value: json!({"type":"thinking","thinking":"visible thought", "signature":"private signature"}),
+                },
+                aether_support::ReasoningBlock {
+                    protocol: aether_support::Protocol::AnthropicMessages,
+                    endpoint_id: Some("e1".into()),
+                    model_id: Some("m1".into()),
+                    value: json!({"type":"redacted_thinking","data":"private data"}),
+                },
+                aether_support::ReasoningBlock {
+                    protocol: aether_support::Protocol::OpenaiResponses,
+                    endpoint_id: Some("e1".into()),
+                    model_id: Some("m1".into()),
+                    value: json!({"type":"reasoning","summary":[{"type":"summary_text","text":"visible summary"}],"encrypted_content":"private encrypted"}),
+                },
+                aether_support::ReasoningBlock {
+                    protocol: aether_support::Protocol::OpenaiChat,
+                    endpoint_id: Some("e1".into()),
+                    model_id: Some("m1".into()),
+                    value: json!("visible chat"),
+                },
+            ],
+        }],
+        model_id: Some("m1".into()),
+        endpoint_id: Some("e1".into()),
+        skills: vec![],
+        error_code: None,
+        input_tokens: Some(1),
+        output_tokens: Some(2),
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        reasoning_tokens: None,
+        context_usage: None,
+        reasoning_effort: None,
+    };
+    let end = || RunEvent::End {
+        status: EndStatus::Completed,
+        error: None,
+        exhausted: None,
+    };
+    let event = super::chat::finish_event(store.clone(), turn.clone(), record.clone(), end()).await;
+    assert!(matches!(
+        event,
+        RunEvent::End {
+            status: EndStatus::Completed,
+            ..
+        }
+    ));
+    assert_eq!(
+        store.load(&id).unwrap().turns[0].status,
+        TurnStatus::Completed
+    );
+    let wire =
+        serde_json::to_value(super::chat::Conversation::from(store.load(&id).unwrap())).unwrap();
+    assert_eq!(wire["summary"]["selectedTurnId"], turn.turn_id);
+    assert_eq!(wire["turns"][0]["questionId"], turn.turn_id);
+    assert!(wire["turns"][0]["parentId"].is_null());
+    assert!(wire["turns"][0]["supersedesId"].is_null());
+    assert_eq!(wire["turns"][0]["kind"], "reply");
+    assert_eq!(wire["turns"][0]["endpointId"], "e1");
+    assert_eq!(
+        wire["turns"][0]["reasoningText"],
+        "visible thoughtvisible summaryvisible chat"
+    );
+    assert!(!wire.to_string().contains("private"));
+    let accepted = serde_json::to_value(crate::RunAccepted {
+        run_id: "r1".into(),
+        conversation_id: Some(id.clone()),
+        turn_id: Some(turn.turn_id.clone()),
+    })
+    .unwrap();
+    assert_eq!(accepted["turnId"], turn.turn_id);
+    let failure = super::chat::finish_event(store, turn, record, end()).await;
+    assert!(matches!(
+        failure,
+        RunEvent::End {
+            status: EndStatus::Failed,
+            error: Some(_),
+            ..
+        }
+    ));
+}

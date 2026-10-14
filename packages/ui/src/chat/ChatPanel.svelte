@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
+  import { SvelteMap } from 'svelte/reactivity'
   import XIcon from '@lucide/svelte/icons/x'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import HistoryIcon from '@lucide/svelte/icons/history'
@@ -21,13 +22,14 @@
   import {
     isKitClientError,
     type ConversationSummary,
+    type Conversation,
     type ModelRef,
     type SkillRef,
     type ModelOption,
     type ReasoningEffort,
   } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
-  import { RunSession } from './run-session.svelte'
+  import { RunSession, type ChatTurn } from './run-session.svelte'
   import UsageDetails from './UsageDetails.svelte'
   import MessageItem from './MessageItem.svelte'
   import { REASONING_EFFORTS } from '../providers/reasoning'
@@ -42,6 +44,8 @@
     onSkillsChange,
     skillsBudget = 48_000,
     onInsert,
+    onSaveNote,
+    onExportMarkdown,
     onOpenSettings,
     conversationId = null,
     onConversationChange,
@@ -56,6 +60,8 @@
     onSkillsChange?: (refs: SkillRef[]) => void
     skillsBudget?: number
     onInsert?: (markdown: string) => void
+    onSaveNote?: (markdown: string) => Promise<void> | void
+    onExportMarkdown?: (markdown: string) => Promise<void> | void
     onOpenSettings?: () => void
     /** A failed restore stays visible until retried or explicitly replaced with a new conversation. */
     conversationId?: string | null
@@ -199,7 +205,7 @@
     historyBusy = true
     try {
       const conversation = await history.get(id)
-      session.show(id, conversation.turns)
+      session.show(id, conversation.turns, conversation.summary.selectedTurnId)
       shownSummary = conversation.summary
       restoreBlocked = false
       restored = true
@@ -266,6 +272,160 @@
       retryHistory = remove
     } finally {
       historyBusy = false
+    }
+  }
+
+  const groups = $derived.by(() => {
+    const grouped = new SvelteMap<string, ChatTurn[]>()
+    for (const turn of session?.turns ?? []) {
+      const replies = grouped.get(turn.questionId)
+      if (replies) replies.push(turn)
+      else grouped.set(turn.questionId, [turn])
+    }
+    return [...grouped.entries()]
+  })
+  const actionBusy = $derived(historyBusy || session?.running === true || restoreBlocked)
+  let replyDialog = $state<'edit' | 'model' | 'translate' | null>(null)
+  let replyOpen = $state(false)
+  let sourceReply = $state<ChatTurn | null>(null)
+  let editDraft = $state('')
+  let expectedText = ''
+  let targetLanguage = $state('')
+  let replyModel = $state<ModelRef | null>(null)
+  let replyError = $state<string | null>(null)
+  const validReplyModel = $derived(
+    modelOptions?.some(
+      (option) => option.endpointId === replyModel?.endpointId && option.modelId === replyModel?.modelId,
+    ) === true,
+  )
+  function sourceModel(turn: ChatTurn): ModelRef | null {
+    return turn.endpointId && turn.modelId ? { endpointId: turn.endpointId, modelId: turn.modelId } : null
+  }
+  function sourceLabel(turn: ChatTurn) {
+    return (
+      modelOptions?.find((option) => option.endpointId === turn.endpointId && option.modelId === turn.modelId)?.label ??
+      (turn.modelId ? `${turn.endpointId ?? t('chat.unknown')} · ${turn.modelId}` : t('chat.noSourceModel'))
+    )
+  }
+  function hasChildren(turn: ChatTurn) {
+    return session?.turns.some((child) => child.parentId === turn.id || child.supersedesId === turn.id) === true
+  }
+  function canEdit(turn: ChatTurn) {
+    return turn.status !== 'running' && !hasChildren(turn)
+  }
+  function canDelete(turn: ChatTurn) {
+    return canEdit(turn) && session?.selectedTurnId !== turn.id
+  }
+  function deletionReason(turn: ChatTurn) {
+    return session?.selectedTurnId === turn.id
+      ? t('chat.deleteSelectedDisabled')
+      : hasChildren(turn)
+        ? t('chat.deleteChildrenDisabled')
+        : undefined
+  }
+  function editReply(turn: ChatTurn) {
+    sourceReply = turn
+    editDraft = turn.text
+    expectedText = turn.text
+    replyError = null
+    replyDialog = 'edit'
+    replyOpen = true
+  }
+  function generationDialog(turn: ChatTurn, kind: 'model' | 'translate') {
+    sourceReply = turn
+    replyModel = sourceModel(turn)
+    targetLanguage = i18n.locale
+    replyError = null
+    replyDialog = kind
+    replyOpen = true
+  }
+  function showConversation(conversation: Conversation) {
+    session?.show(conversation.summary.id, conversation.turns, conversation.summary.selectedTurnId)
+    shownSummary = conversation.summary
+    follow = true
+  }
+  async function mutateReply(turn: ChatTurn, action: 'select' | 'remove' | 'branch' | 'copy') {
+    const id = session?.conversationId
+    if (!history || !session || !id || actionBusy) return
+    historyBusy = true
+    try {
+      if (action === 'remove') {
+        if (!canDelete(turn)) return
+        const siblings = session.turns.filter((candidate) => candidate.questionId === turn.questionId).length > 1
+        if (
+          !(await notify.confirm({
+            title: t('chat.deleteReplyTitle'),
+            body: t(siblings ? 'chat.deleteCandidateBody' : 'chat.deleteOnlyReplyBody'),
+            danger: true,
+          }))
+        )
+          return
+      }
+      const conversation =
+        action === 'select' || action === 'branch'
+          ? await history.selectTurn(id, turn.id)
+          : action === 'remove'
+            ? await history.removeTurn(id, turn.id)
+            : await history.fork(id, turn.id)
+      showConversation(conversation)
+      if (action === 'branch') {
+        draft = ''
+        draftRevision++
+        recovery = null
+      }
+      historyError = null
+      void refresh()
+    } catch (error) {
+      notify.toast('error', errorText(error))
+    } finally {
+      historyBusy = false
+    }
+  }
+  async function retryReply(turn: ChatTurn) {
+    if (!session || actionBusy) return
+    const source = sourceModel(turn)
+    if (history && turn.persisted) {
+      if (modelOptions === null || modelError) {
+        generationDialog(turn, 'model')
+        return
+      }
+      if (
+        !source ||
+        !modelOptions.some((option) => option.endpointId === source.endpointId && option.modelId === source.modelId)
+      ) {
+        generationDialog(turn, 'model')
+        replyError = t('chat.sourceModelUnavailable')
+        return
+      }
+    }
+    follow = true
+    await session.retry(base, turn.id)
+  }
+  async function submitReply() {
+    const turn = sourceReply
+    if (!session || !turn || actionBusy) return
+    replyError = null
+    if (replyDialog === 'edit') {
+      const id = session.conversationId
+      if (!history || !id || !editDraft.trim() || editDraft.length > 24_000 || !canEdit(turn)) return
+      historyBusy = true
+      try {
+        showConversation(await history.editTurn(id, turn.id, editDraft, expectedText))
+        replyOpen = false
+      } catch (error) {
+        replyError = errorText(error)
+      } finally {
+        historyBusy = false
+      }
+    } else {
+      if (!validReplyModel || !replyModel) return
+      if (replyDialog === 'translate' && (!targetLanguage.trim() || targetLanguage.trim().length > 80)) return
+      const accepted =
+        replyDialog === 'translate'
+          ? await session.translate({ ...base, model: replyModel }, turn.id, targetLanguage.trim())
+          : await session.retry(base, turn.id, replyModel)
+      if (accepted) replyOpen = false
+      else replyError = session.actionError ? t(`errors.${session.actionError}`) : t('errors.internal')
     }
   }
 
@@ -371,14 +531,6 @@
             }}><HistoryIcon /></Button
           >
         {/if}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          disabled={session.running || historyBusy}
-          aria-label={t('chat.newConversation')}
-          title={t('chat.newConversation')}
-          onclick={newConversation}><PlusIcon /></Button
-        >
         {#if onClose}<Button
             variant="ghost"
             size="icon-sm"
@@ -410,22 +562,64 @@
         >
       </Alert.Root>
     {/if}
+    {#if session.actionError}<p role="alert" class="text-destructive text-kit-sm">
+        {t(`errors.${session.actionError}`)}
+      </p>{/if}
+    {#if session.historyRefreshError}<p role="alert" class="text-destructive text-kit-sm">
+        {t('chat.replyRefreshFailed')}<Button
+          variant="outline"
+          size="sm"
+          disabled={actionBusy}
+          onclick={() => session.conversationId && void open(session.conversationId)}>{t('chat.retryHistory')}</Button
+        >
+      </p>{/if}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex (native scroll region needs keyboard focus for PageUp/PageDown) -->
     <div class="messages" bind:this={scroller} {onscroll} role="region" aria-label={t('chat.messages')} tabindex="0">
       {#if session.turns.length > 0}
         <ol class="turns">
-          {#each session.turns as turn, i (i)}
-            <MessageItem
-              {turn}
-              {onInsert}
-              onRetry={i === session.turns.length - 1 && !session.running && capability !== null && !restoreBlocked
-                ? () => {
-                    follow = true
-                    session.regenerate(base, webSearch)
-                  }
-                : undefined}
-              onApprove={(tool, allow) => session.approve(tool, allow)}
-            />
+          {#each groups as [questionId, replies] (questionId)}
+            {#each replies as turn, i (turn.id)}
+              <MessageItem
+                {turn}
+                {onInsert}
+                {onSaveNote}
+                {onExportMarkdown}
+                modelLabel={turn.kind === 'translation'
+                  ? `${t('chat.translationReply')} · ${sourceLabel(turn)}`
+                  : sourceLabel(turn)}
+                showInput={i === 0 && turn.kind !== 'translation'}
+                chosen={session.selectedTurnId === turn.id}
+                busy={actionBusy}
+                editable={canEdit(turn)}
+                deletable={canDelete(turn)}
+                deleteReason={deletionReason(turn)}
+                onRetry={purpose === 'chat' && !restoreBlocked && (turn.persisted || capability !== null)
+                  ? () => void retryReply(turn)
+                  : undefined}
+                onEdit={purpose === 'chat' && history && session.conversationId && turn.persisted
+                  ? () => editReply(turn)
+                  : undefined}
+                onBranch={purpose === 'chat' && history && session.conversationId && turn.persisted
+                  ? () => void mutateReply(turn, 'branch')
+                  : undefined}
+                onCopyConversation={purpose === 'chat' && history && session.conversationId && turn.persisted
+                  ? () => void mutateReply(turn, 'copy')
+                  : undefined}
+                onSwitchModel={purpose === 'chat' && history && session.conversationId && turn.persisted
+                  ? () => generationDialog(turn, 'model')
+                  : undefined}
+                onTranslate={purpose === 'chat' && history && session.conversationId && turn.persisted
+                  ? () => generationDialog(turn, 'translate')
+                  : undefined}
+                onDelete={purpose === 'chat' && history && session.conversationId && turn.persisted
+                  ? () => void mutateReply(turn, 'remove')
+                  : undefined}
+                onUseContext={purpose === 'chat' && history && session.conversationId && turn.persisted
+                  ? () => void mutateReply(turn, 'select')
+                  : undefined}
+                onApprove={(tool, allow) => session.approve(tool, allow)}
+              />
+            {/each}
           {/each}
         </ol>
       {/if}
@@ -467,6 +661,22 @@
         void send()
       }}
     >
+      <div class="expand-control">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t(expanded ? 'chat.collapseInput' : 'chat.expandInput')}
+          title={t(expanded ? 'chat.collapseInput' : 'chat.expandInput')}
+          aria-expanded={expanded}
+          onmousedown={(e) => e.preventDefault()}
+          onclick={() => {
+            expanded = !expanded
+          }}
+        >
+          {#if expanded}<MinimizeIcon />{:else}<MaximizeIcon />{/if}
+        </Button>
+      </div>
       {#if activeContext}
         <div class="context-chip">
           <span title={activeContext.label}>{activeContext.label}</span><Button
@@ -514,6 +724,15 @@
         </p>{/if}
       <div class="composer-tools">
         <div class="tool-group">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            disabled={session.running || historyBusy}
+            aria-label={t('chat.newConversation')}
+            title={t('chat.newConversation')}
+            onclick={newConversation}><PlusIcon /></Button
+          >
           {#if ports.search && purpose === 'chat'}<Button
               type="button"
               variant={webSearch ? 'secondary' : 'ghost'}
@@ -524,20 +743,6 @@
               title={`${t(webSearch ? 'chat.networkOn' : 'chat.networkOff')} · ${t('chat.networkPrivacy')}`}
               onclick={() => (webSearch = !webSearch)}><GlobeIcon /></Button
             >{/if}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t(expanded ? 'chat.collapseInput' : 'chat.expandInput')}
-            title={t(expanded ? 'chat.collapseInput' : 'chat.expandInput')}
-            aria-expanded={expanded}
-            onmousedown={(e) => e.preventDefault()}
-            onclick={() => {
-              expanded = !expanded
-            }}
-          >
-            {#if expanded}<MinimizeIcon />{:else}<MaximizeIcon />{/if}
-          </Button>
           {#if ports.skills}<div class="skills-control">
               <SkillPicker
                 port={ports.skills}
@@ -653,6 +858,81 @@
         </Dialog.Content>
       </Dialog.Root>
     {/if}
+    <Dialog.Root bind:open={replyOpen}>
+      <Dialog.Content class="reply-dialog" showCloseButton={false}>
+        <Dialog.Header>
+          <Dialog.Title
+            >{t(
+              replyDialog === 'edit'
+                ? 'chat.editReply'
+                : replyDialog === 'translate'
+                  ? 'chat.translate'
+                  : 'chat.switchModel',
+            )}</Dialog.Title
+          >
+          <Dialog.Description
+            >{t(replyDialog === 'edit' ? 'chat.editReplyHint' : 'chat.candidateHint')}</Dialog.Description
+          >
+        </Dialog.Header>
+        <form
+          onsubmit={(event) => {
+            event.preventDefault()
+            void submitReply()
+          }}
+        >
+          <Field.FieldGroup>
+            {#if replyDialog === 'edit'}
+              <Field.Field
+                ><Field.FieldLabel for="chat-reply-edit">{t('chat.replyText')}</Field.FieldLabel><Textarea
+                  id="chat-reply-edit"
+                  bind:value={editDraft}
+                  rows={8}
+                  maxlength={24_000}
+                  disabled={actionBusy}
+                /></Field.Field
+              >
+            {:else}
+              <Field.Field
+                ><Field.FieldLabel>{t('chat.replyModel')}</Field.FieldLabel><ModelSelect
+                  value={replyModel}
+                  options={modelOptions}
+                  disabled={actionBusy || modelError !== null}
+                  onchange={(value) => (replyModel = value)}
+                /></Field.Field
+              >
+              {#if noModels}<p role="status">{t('chat.noModels')}</p>{/if}
+              {#if modelError}<p role="alert">
+                  {modelError}<Button type="button" variant="outline" size="sm" onclick={() => modelReload++}
+                    >{t('chat.retryModels')}</Button
+                  >
+                </p>{/if}
+              {#if replyDialog === 'translate'}<Field.Field
+                  ><Field.FieldLabel for="chat-target-language">{t('chat.targetLanguage')}</Field.FieldLabel><Input
+                    id="chat-target-language"
+                    bind:value={targetLanguage}
+                    maxlength={80}
+                    disabled={actionBusy}
+                  /></Field.Field
+                >{/if}
+            {/if}
+            {#if replyError}<p role="alert" class="text-destructive">{replyError}</p>{/if}
+            <Dialog.Footer>
+              <Button type="button" variant="ghost" disabled={actionBusy} onclick={() => (replyOpen = false)}
+                >{t('common.cancel')}</Button
+              >
+              <Button
+                type="submit"
+                disabled={actionBusy ||
+                  (replyDialog === 'edit'
+                    ? !editDraft.trim() || editDraft.length > 24_000
+                    : !validReplyModel || (replyDialog === 'translate' && !targetLanguage.trim()))}
+                >{t('common.confirm')}</Button
+              >
+            </Dialog.Footer>
+          </Field.FieldGroup>
+        </form>
+      </Dialog.Content>
+    </Dialog.Root>
   </section>
 {/if}
 
@@ -728,6 +1008,7 @@
     justify-content: center;
   }
   .composer {
+    position: relative;
     flex: none;
     min-width: 0;
     display: flex;
@@ -737,12 +1018,18 @@
     border-radius: calc(var(--kit-radius, var(--radius)) * 1.5);
     padding: 0.5rem;
   }
+  .expand-control {
+    position: absolute;
+    top: 0.375rem;
+    right: 0.375rem;
+  }
   .composer :global(textarea) {
     min-height: 5rem;
     height: 5rem;
     max-height: 5rem;
     field-sizing: fixed;
     resize: none;
+    padding-right: 2.25rem;
     border: 0;
     box-shadow: none;
     border-radius: calc(var(--kit-radius, var(--radius)) * 0.5);
@@ -760,7 +1047,7 @@
     align-items: center;
     align-self: flex-start;
     gap: 0.25rem;
-    max-width: 100%;
+    max-width: calc(100% - 2rem);
     padding-left: 0.5rem;
     background: var(--color-muted);
     border-radius: var(--kit-radius, var(--radius));
@@ -833,5 +1120,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  :global(.reply-dialog) {
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+  }
+  :global(.reply-dialog form),
+  :global(.reply-dialog [data-slot='field-group']) {
+    min-width: 0;
+  }
+  :global(.reply-dialog textarea) {
+    max-height: 45dvh;
+    overflow-y: auto;
   }
 </style>

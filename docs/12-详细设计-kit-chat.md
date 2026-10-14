@@ -171,8 +171,10 @@ CREATE TABLE turns (
 - `begin_turn` 写 `status='running'`；`finish_turn` 一次写入消息与终态。崩溃后残留的 `running` 在下次 `open` 时改为 `failed{reason:"interrupted"}`。
 - 进入后续请求历史的只有 `completed` 轮；`failed`/`cancelled` 轮保留展示（含已输出的部分文本）。
 - 历史裁剪：从最早的轮开始丢，直到估算 token ≤ `context_window − max_output − system − 本轮输入`；最近一轮之前若一轮都放不下，就不带历史。
-- 重新生成：删除最后一轮的结果，以同一 `input` 再跑（不新增轮）。
+- 重新生成／换模型重答：同会话新增候选，questionId及parentId与来源相同，supersedesId指向来源，原结果保留；旧regenerate快捷调用选择当前回复，不能清空原轮。
 - 标题：首轮输入去换行后前 40 字符。
+- 完整回复操作升级（用户批准）：migration3新增parent_id/question_id/supersedes_id/kind及conversations.selected_turn_id，旧线性轮次按seq回填路径、question_id=id；保留消息和真实用量，升级备份。正常请求仅沿持久选中路径构建历史，不包含同轮其他候选；retry用来源input与parent路径，translation为来源子轮。公开history_path验证缺失／循环／外来节点。
+- edit_turn按expectedText做CAS，正文1–24000字符，运行中／有parent或supersedes后代拒绝；清除已不匹配的原生推理和工具结构，生成用量保留，contextUsage失效。remove_turn拒绝当前选择、运行及后代；只删除目标候选。select_turn保持conversationId；fork才复制祖先路径为新会话、新消息ID，保持scope、原会话不变。新增ConversationStore.begin_action及四种历史操作，所有实现迁移，不提供默认no-op。
 
 ## 7. API
 

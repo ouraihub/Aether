@@ -11,4 +11,8 @@ runId: string,
 /**
  * Conversation the turn belongs to; `null` without a store.
  */
-conversationId: string | null, };
+conversationId: string | null, 
+/**
+ * Stable stored candidate id; `null` without a store.
+ */
+turnId: string | null, };
