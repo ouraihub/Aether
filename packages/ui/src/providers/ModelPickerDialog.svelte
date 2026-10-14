@@ -64,7 +64,6 @@
           const modelType = types[m.id] ?? m.modelType
           // Keep user-edited metadata (including reasoning/context) when a probe refreshes it.
           return {
-            ...(existing ?? m),
             id: m.id,
             modelType,
             typeSource:
