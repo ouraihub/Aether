@@ -748,13 +748,17 @@
           >
           {#if ports.search && purpose === 'chat'}<Button
               type="button"
-              variant={webSearch ? 'secondary' : 'ghost'}
+              variant="ghost"
+              class="search-toggle"
               size="icon-sm"
               aria-label={t('chat.network')}
               aria-pressed={webSearch}
               disabled={session.running}
               title={`${t(webSearch ? 'chat.networkOn' : 'chat.networkOff')} · ${t('chat.networkPrivacy')}`}
-              onclick={() => (webSearch = !webSearch)}><GlobeIcon /></Button
+              onclick={() => (webSearch = !webSearch)}
+              ><GlobeIcon
+                >{#if !webSearch}<path d="m2 2 20 20" />{/if}</GlobeIcon
+              ></Button
             >{/if}
           {#if ports.skills}<div class="skills-control">
               <SkillPicker
@@ -1155,6 +1159,17 @@
   }
   .send-tools {
     margin-left: auto;
+  }
+  .chat-panel :global(button.search-toggle) {
+    color: var(--color-muted-foreground);
+  }
+  .chat-panel :global(button.search-toggle[aria-pressed='true']) {
+    color: var(--color-primary-foreground);
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+  }
+  .chat-panel :global(button.search-toggle[aria-pressed='true']:hover:not(:disabled)) {
+    background: color-mix(in oklch, var(--color-primary) 85%, var(--color-foreground));
   }
   :global(.reasoning-popover) {
     box-sizing: border-box;
