@@ -483,7 +483,13 @@
   })
   function onkeydown(e: KeyboardEvent) {
     if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return
-    if (reasoningOpen || historyOpen || document.querySelector('[data-slot="select-content"], [role="dialog"]')) return
+    // Popover content renders inline, so Escape inside it bubbles here; let the layer close itself.
+    if (
+      reasoningOpen ||
+      historyOpen ||
+      document.querySelector('[data-popover-content], [data-slot="select-content"], [role="dialog"]')
+    )
+      return
     if (onClose && !session?.running) onClose()
   }
   const canSend = $derived(

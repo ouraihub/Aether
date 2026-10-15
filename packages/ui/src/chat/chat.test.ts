@@ -789,9 +789,10 @@ describe('ChatPanel', () => {
 
   it('groups models by provider, searches, filters by capability and links to settings', async () => {
     const onOpenSettings = vi.fn()
+    const onClose = vi.fn()
     const base = { modelType: 'chat', supportsTools: null, reasoning: null, nativeWebSearch: false } as const
     setup(false, null, {
-      props: { onOpenSettings },
+      props: { onOpenSettings, onClose },
       providers: {
         modelOptions: () =>
           Promise.resolve([
@@ -814,7 +815,11 @@ describe('ChatPanel', () => {
     await waitFor(() =>
       expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('m2')]),
     )
-    await fireEvent.input(screen.getByPlaceholderText('Search models…'), { target: { value: '' } })
+    await fireEvent.keyDown(screen.getByPlaceholderText('Search models…'), { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('option')).toBeNull())
+    expect(onClose).not.toHaveBeenCalled()
+    await fireEvent.click(screen.getByLabelText('Select a model'))
+    await screen.findAllByRole('option')
     await fireEvent.click(screen.getByRole('button', { name: 'Tools' }))
     await waitFor(() =>
       expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('m1')]),
