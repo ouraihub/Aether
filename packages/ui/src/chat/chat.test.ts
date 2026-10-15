@@ -17,6 +17,7 @@ import {
 } from '../ports'
 import type ChatPanel from './ChatPanel.svelte'
 import Harness from './Harness.test.svelte'
+import { providersRevision } from '../providers/revision.svelte'
 
 const model = { endpointId: 'e1', modelId: 'm1' }
 
@@ -342,6 +343,29 @@ describe('ChatPanel', () => {
     setup(true, null, { props: { onConversationChange } })
     await send('hi')
     await waitFor(() => expect(onConversationChange).toHaveBeenCalledWith('c1'))
+  })
+
+  it('reloads model capabilities after providers settings change', async () => {
+    const option = {
+      ...model,
+      label: 'Local · main · m1',
+      modelType: 'chat',
+      supportsTools: null,
+      reasoning: null,
+      nativeWebSearch: false,
+    } as const
+    const modelOptions = vi
+      .fn<ProvidersPort['modelOptions']>()
+      .mockResolvedValueOnce([{ ...option, canVision: false }])
+      .mockResolvedValue([{ ...option, canVision: true }])
+    setup(false, null, { providers: { modelOptions } })
+    await fireEvent.click(await screen.findByLabelText('Select a model'))
+    expect(screen.queryByRole('button', { name: 'Vision' })).toBeNull()
+    await fireEvent.keyDown(screen.getByPlaceholderText('Search models…'), { key: 'Escape' })
+    providersRevision.value++
+    await waitFor(() => expect(modelOptions).toHaveBeenCalledTimes(2))
+    await fireEvent.click(await screen.findByLabelText('Select a model'))
+    expect(await screen.findByRole('button', { name: 'Vision' })).toBeTruthy()
   })
 
   it('without chat models offers to open settings', async () => {

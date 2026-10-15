@@ -13,6 +13,7 @@
   import { getKitContext } from '../context'
   import type { Snippet } from 'svelte'
   import type { ModelFilter, ModelOption, ModelRef } from '../ports'
+  import { providersRevision } from './revision.svelte'
 
   let {
     value,
@@ -75,6 +76,7 @@
   $effect(() => {
     if (suppliedOptions !== undefined) return
     void reload
+    void providersRevision.value
     loadedOptions = null
     failed = false
     let alive = true

@@ -31,6 +31,7 @@
     type ReasoningEffort,
   } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
+  import { providersRevision } from '../providers/revision.svelte'
   import { RunSession, type ChatTurn } from './run-session.svelte'
   import UsageDetails from './UsageDetails.svelte'
   import MessageItem from './MessageItem.svelte'
@@ -96,6 +97,7 @@
   const errorText = (error: unknown) => t(`errors.${isKitClientError(error) ? error.code : 'internal'}`)
   $effect(() => {
     void modelReload
+    void providersRevision.value
     let alive = true
     modelOptions = null
     modelError = null
