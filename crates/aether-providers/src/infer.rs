@@ -51,6 +51,10 @@ const FAMILIES: &[(&str, &str, Limits)] = &[
 /// OpenAI reasoning models `o<digit>…`; not a plain prefix (`omni-…` is not one).
 const O_SERIES: Limits = (200_000, 100_000, true);
 
+/// Image-input markers in a model name; they override a family's non-vision default
+/// (`qwen-vl-max`, `glm-4v-plus`, `llama-3.2-…-vision`).
+const VISION_MARKERS: &[&str] = &["vision", "-vl", "vl-", "4v"];
+
 /// Infers type, limits and group from `model_id` (case-insensitive; a vendor path
 /// such as `Qwen/…` is ignored for the family).
 // ponytail: static family table, wrong for new variants until the table is updated.
@@ -72,12 +76,13 @@ pub fn infer(model_id: &str) -> Inferred {
                 .then_some(("o", O_SERIES))
         });
     let group = family.map(|(group, _)| group.to_owned());
+    let marked = VISION_MARKERS.iter().any(|m| name.contains(m));
     match family {
         Some((_, (context, output, vision))) if model_type == ModelType::Chat => Inferred {
             model_type,
             context_window: Some(context),
             max_output: Some(output),
-            can_vision: vision,
+            can_vision: vision || marked,
             supports_tools: Some(true),
             group,
         },
@@ -86,7 +91,7 @@ pub fn infer(model_id: &str) -> Inferred {
             model_type,
             context_window: None,
             max_output: None,
-            can_vision: false,
+            can_vision: marked && model_type == ModelType::Chat,
             supports_tools: None,
             group,
         },

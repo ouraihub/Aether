@@ -62,6 +62,7 @@ function setup(
             supportsTools: null,
             reasoning: null,
             nativeWebSearch: false,
+            canVision: false,
           },
         ]),
       ...extra.providers,
@@ -688,6 +689,7 @@ describe('ChatPanel', () => {
               supportsTools: null,
               reasoning: { dialect: 'openai', efforts: ['high'] },
               nativeWebSearch: false,
+              canVision: false,
             },
           ]),
       },
@@ -730,6 +732,7 @@ describe('ChatPanel', () => {
               supportsTools: null,
               reasoning: { dialect: 'openai', efforts: ['high', 'none', 'low'] },
               nativeWebSearch: false,
+              canVision: false,
             },
             {
               endpointId: model.endpointId,
@@ -739,6 +742,7 @@ describe('ChatPanel', () => {
               supportsTools: null,
               reasoning: { dialect: 'openai', efforts: ['low', 'high'] },
               nativeWebSearch: false,
+              canVision: false,
             },
             {
               endpointId: model.endpointId,
@@ -748,6 +752,7 @@ describe('ChatPanel', () => {
               supportsTools: null,
               reasoning: null,
               nativeWebSearch: false,
+              canVision: false,
             },
           ]),
       },
@@ -790,7 +795,13 @@ describe('ChatPanel', () => {
   it('groups models by provider, searches, filters by capability and links to settings', async () => {
     const onOpenSettings = vi.fn()
     const onClose = vi.fn()
-    const base = { modelType: 'chat', supportsTools: null, reasoning: null, nativeWebSearch: false } as const
+    const base = {
+      modelType: 'chat',
+      supportsTools: null,
+      reasoning: null,
+      nativeWebSearch: false,
+      canVision: false,
+    } as const
     setup(false, null, {
       props: { onOpenSettings, onClose },
       providers: {
@@ -803,6 +814,7 @@ describe('ChatPanel', () => {
               modelId: 'm2',
               label: 'Cloud · x · m2',
               reasoning: { dialect: 'openai', efforts: ['low', 'high'] },
+              canVision: true,
             },
           ]),
       },
@@ -820,6 +832,11 @@ describe('ChatPanel', () => {
     expect(onClose).not.toHaveBeenCalled()
     await fireEvent.click(screen.getByLabelText('Select a model'))
     await screen.findAllByRole('option')
+    await fireEvent.click(screen.getByRole('button', { name: 'Vision' }))
+    await waitFor(() =>
+      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('m2')]),
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Vision' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Tools' }))
     await waitFor(() =>
       expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('m1')]),
@@ -995,6 +1012,7 @@ describe('ChatPanel', () => {
               supportsTools: null,
               reasoning: null,
               nativeWebSearch: false,
+              canVision: false,
             },
             {
               ...secondModel,
@@ -1003,6 +1021,7 @@ describe('ChatPanel', () => {
               supportsTools: null,
               reasoning: null,
               nativeWebSearch: false,
+              canVision: false,
             },
           ]),
       },

@@ -33,4 +33,8 @@ reasoning: ReasoningConfig | null,
 /**
  * User-declared support for protocol-native web search.
  */
-nativeWebSearch: boolean, };
+nativeWebSearch: boolean, 
+/**
+ * Image input support (inferred on fetch, user-editable in model settings).
+ */
+canVision: boolean, };

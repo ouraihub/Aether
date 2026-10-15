@@ -76,7 +76,7 @@
             maxOutput: existing ? existing.maxOutput : m.maxOutput,
             reasoning: existing ? existing.reasoning : m.reasoning,
             nativeWebSearch: modelType === 'chat' && (existing ? existing.nativeWebSearch : m.nativeWebSearch),
-            canVision: m.canVision,
+            canVision: existing ? existing.canVision : m.canVision,
             supportsTools: m.supportsTools,
           }
         }),

@@ -224,6 +224,7 @@ export const en: Messages = {
   'providers.model_search': 'Search models…',
   'providers.model_no_match': 'No matching models',
   'providers.model_configure': 'Configure models',
+  'providers.cap_vision': 'Vision',
   'providers.cap_reasoning': 'Reasoning',
   'providers.cap_tools': 'Tools',
   'providers.cap_web': 'Web search',

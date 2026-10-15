@@ -201,6 +201,8 @@ pub struct ModelOption {
     pub reasoning: Option<aether_support::ReasoningConfig>,
     /// User-declared support for protocol-native web search.
     pub native_web_search: bool,
+    /// Image input support (inferred on fetch, user-editable in model settings).
+    pub can_vision: bool,
 }
 
 /// Narrows [`crate::Store::model_options`]; `None` fields match everything.

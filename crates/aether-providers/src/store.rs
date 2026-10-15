@@ -150,7 +150,7 @@ impl Store {
     pub fn model_options(&self, filter: ModelFilter) -> Result<Vec<ModelOption>, KitError> {
         let db = self.lock()?;
         let mut stmt = db.prepare_cached(
-            "SELECT p.name, e.slug, m.endpoint_id, m.model_id, m.model_type, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, e.protocol
+            "SELECT p.name, e.slug, m.endpoint_id, m.model_id, m.model_type, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, e.protocol, m.can_vision
              FROM models m JOIN endpoints e ON e.id = m.endpoint_id JOIN providers p ON p.id = e.provider_id
              ORDER BY p.position, p.id, e.position, m.position",
         )?;
@@ -167,6 +167,7 @@ impl Store {
                     row.get::<_, Option<String>>(7)?,
                     row.get::<_, bool>(8)?,
                     row.get::<_, String>(9)?,
+                    row.get::<_, bool>(10)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -182,6 +183,7 @@ impl Store {
             reasoning,
             native_web_search,
             protocol,
+            can_vision,
         ) in rows
         {
             let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
@@ -211,6 +213,7 @@ impl Store {
                 supports_tools,
                 reasoning,
                 native_web_search,
+                can_vision,
             });
         }
         Ok(options)

@@ -48,6 +48,7 @@ function mount(options: FakePortsOptions, skills?: { id: string; revision: numbe
             supportsTools: null,
             reasoning: null,
             nativeWebSearch: false,
+            canVision: false,
           },
         ]),
     },

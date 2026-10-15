@@ -124,6 +124,15 @@
           </Select.Root>
         </Field.Field>
         {#if selectedModel.modelType === 'chat'}
+          <Field.Field
+            ><label class="flex items-center gap-2"
+              ><input
+                type="checkbox"
+                checked={selectedModel.canVision}
+                onchange={(event) => updateModel((model) => (model.canVision = event.currentTarget.checked))}
+              />{t('providers.vision')}</label
+            ></Field.Field
+          >
           {#if endpoint.protocol !== 'openai-chat'}
             <Field.Field
               ><label class="flex items-center gap-2"

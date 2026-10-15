@@ -214,6 +214,7 @@ export const zhCN: Messages = {
   'providers.model_search': '搜索模型…',
   'providers.model_no_match': '没有匹配的模型',
   'providers.model_configure': '配置模型',
+  'providers.cap_vision': '视觉',
   'providers.cap_reasoning': '推理',
   'providers.cap_tools': '工具',
   'providers.cap_web': '联网',

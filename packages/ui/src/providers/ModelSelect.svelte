@@ -2,6 +2,7 @@
   // Host-owned model setting (docs/16 §4.1): the value is stored by the app; a deleted model shows as invalid.
   // Cherry-style picker: search, capability filters, provider groups (label minus ` · modelId`).
   import { Command, Popover } from 'bits-ui'
+  import EyeIcon from '@lucide/svelte/icons/eye'
   import BrainIcon from '@lucide/svelte/icons/brain'
   import WrenchIcon from '@lucide/svelte/icons/wrench'
   import GlobeIcon from '@lucide/svelte/icons/globe'
@@ -49,8 +50,9 @@
   const key = (r: ModelRef) => `${r.endpointId}\n${r.modelId}`
   const group = (o: ModelOption) =>
     o.label.endsWith(` · ${o.modelId}`) ? o.label.slice(0, -(o.modelId.length + 3)) : o.label
-  type Cap = 'reasoning' | 'tools' | 'web'
+  type Cap = 'vision' | 'reasoning' | 'tools' | 'web'
   const CAPS = [
+    { cap: 'vision', icon: EyeIcon, has: (o: ModelOption) => o.canVision },
     { cap: 'reasoning', icon: BrainIcon, has: (o: ModelOption) => o.reasoning !== null },
     { cap: 'tools', icon: WrenchIcon, has: (o: ModelOption) => o.supportsTools === true },
     { cap: 'web', icon: GlobeIcon, has: (o: ModelOption) => o.nativeWebSearch },
@@ -321,6 +323,9 @@
   .model-footer :global(svg) {
     width: 0.875rem;
     height: 0.875rem;
+  }
+  .cap-vision {
+    --cap: oklch(0.62 0.15 155);
   }
   .cap-reasoning {
     --cap: oklch(0.6 0.16 290);
