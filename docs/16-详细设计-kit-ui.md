@@ -87,7 +87,7 @@ setKitContext(ctx)  // 宿主根组件调用一次；未自带通知实现的宿
 ### 4.1 providers
 
 - `ProvidersSettings`：左栏服务商（状态点：有密钥有模型=绿、缺密钥或密钥不可读=黄、无模型=灰）；右栏名称 + 线路卡（同时只展开一张）；地址下方 `→ GET <probeUrl>`；`SecretInput` 只显示打码值，有"替换""清除"两个显式操作；"获取模型"打开 `ModelPickerDialog`（按 group 分组、全选、改类型）；未保存改动提示条。**不含角色区。**
-- `ModelSelect`：`<ModelSelect value={ModelRef|null} filter={{ modelType: 'chat' }} onchange={...} placeholder? />`。应用用它做自己的"对话模型""写作模型"设置，值由应用保存；模型已被删除时显示"已失效，请重新选择"。
+- `ModelSelect`：`<ModelSelect value={ModelRef|null} filter={{ modelType: 'chat' }} onchange={...} placeholder? onOpenSettings? />`。应用用它做自己的"对话模型""写作模型"设置，值由应用保存；模型已被删除时显示"已失效，请重新选择"。外观对标 Cherry：触发器显示 `modelId | 服务商 · 线路`；弹层（bits-ui Popover + Command）含搜索框（匹配 modelId 与分组名）、能力筛选（推理/工具/联网，只列出现有模型具备的能力，多选取交集）、按 `label` 去掉 ` · modelId` 分组、行尾能力标签、当前模型左侧竖条；传了 `onOpenSettings` 时底部显示"配置模型"。视觉/音频/视频标签不做：`ModelOption` 未携带这些能力。
 - 获取模型失败：按 `ProbeError.kind` 翻译 + `hint` + 上游原文。
 
 ### 4.2 chat

@@ -559,6 +559,7 @@
           filter={{ modelType: 'chat' }}
           disabled={session.running || modelError !== null}
           onchange={pickModel}
+          {...onOpenSettings ? { onOpenSettings } : {}}
         />
       </div>
     </header>
@@ -1083,10 +1084,6 @@
     flex-shrink: 0;
   }
   .model-row {
-    min-width: 0;
-  }
-  .model-row :global([data-slot='select-trigger']) {
-    width: 100%;
     min-width: 0;
   }
   .messages {

@@ -779,17 +779,49 @@ describe('ChatPanel', () => {
     await fireEvent.keyDown(slider, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('slider')).toBeNull())
     const models = screen.getByLabelText('Select a model')
-    await fireEvent.keyDown(models, { key: 'ArrowDown' })
-    await fireEvent.keyDown(models, { key: 'o' })
-    await fireEvent.keyDown(models, { key: 'Enter' })
+    await fireEvent.click(models)
+    await fireEvent.click(await screen.findByRole('option', { name: /m2/ }))
     expect(await screen.findByRole('button', { name: 'Reasoning effort: Default' })).toBeTruthy()
     await send('changed model')
+    expect(runs[4]?.request).toMatchObject({ model: { endpointId: model.endpointId, modelId: 'm2' } })
     expect(runs[4]?.request.reasoningEffort).toBe('default')
-    runs[4]?.emit({ kind: 'end', status: 'completed' })
-    await waitFor(() => expect(models.hasAttribute('disabled')).toBe(false))
-    await fireEvent.keyDown(models, { key: 'ArrowDown' })
-    await fireEvent.keyDown(models, { key: 'End' })
-    await fireEvent.keyDown(models, { key: 'Enter' })
+  })
+
+  it('groups models by provider, searches, filters by capability and links to settings', async () => {
+    const onOpenSettings = vi.fn()
+    const base = { modelType: 'chat', supportsTools: null, reasoning: null, nativeWebSearch: false } as const
+    setup(false, null, {
+      props: { onOpenSettings },
+      providers: {
+        modelOptions: () =>
+          Promise.resolve([
+            { ...base, ...model, label: 'Local · main · m1', supportsTools: true },
+            {
+              ...base,
+              endpointId: 'e2',
+              modelId: 'm2',
+              label: 'Cloud · x · m2',
+              reasoning: { dialect: 'openai', efforts: ['low', 'high'] },
+            },
+          ]),
+      },
+    })
+    await fireEvent.click(await screen.findByLabelText('Select a model'))
+    expect(await screen.findByText('Local · main')).toBeTruthy()
+    expect(screen.getByText('Cloud · x')).toBeTruthy()
+    expect(screen.getAllByRole('option')).toHaveLength(2)
+    await fireEvent.input(screen.getByPlaceholderText('Search models…'), { target: { value: 'cloud' } })
+    await waitFor(() =>
+      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('m2')]),
+    )
+    await fireEvent.input(screen.getByPlaceholderText('Search models…'), { target: { value: '' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Tools' }))
+    await waitFor(() =>
+      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('m1')]),
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Configure models' }))
+    expect(onOpenSettings).toHaveBeenCalledOnce()
+    await waitFor(() => expect(screen.queryByRole('option')).toBeNull())
   })
 
   it('keeps reasoning discoverable without sending unsupported efforts', async () => {
@@ -900,7 +932,7 @@ describe('ChatPanel', () => {
     await screen.findByText('Alternative reply')
     expect(screen.getAllByText('Shared question')).toHaveLength(1)
     expect(screen.getByText('reply', { selector: 'strong' })).toBeTruthy()
-    expect(screen.getAllByText('Local · main · m1')).toHaveLength(3)
+    expect(screen.getAllByText('Local · main · m1')).toHaveLength(2)
     const useContext = screen.getAllByRole('button', { name: 'Use as context' })
     expect(useContext[0]?.hasAttribute('disabled')).toBe(true)
     await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Keep my draft' } })
@@ -980,10 +1012,8 @@ describe('ChatPanel', () => {
     )
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Switch model' })[1]))
     const dialog = await screen.findByRole('dialog')
-    const select = within(dialog).getByLabelText('Select a model')
-    await fireEvent.keyDown(select, { key: 'ArrowDown' })
-    await fireEvent.keyDown(select, { key: 'End' })
-    await fireEvent.keyDown(select, { key: 'Enter' })
+    await fireEvent.click(within(dialog).getByLabelText('Select a model'))
+    await fireEvent.click(await screen.findByRole('option', { name: /m2/ }))
     await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
     expect(runs[1]?.request).toMatchObject({ conversationId: 'saved', retryTurnId: 'b', model: secondModel })
   })

@@ -7,3 +7,5 @@ window.matchMedia = (query: string): MediaQueryList =>
     addListener: () => undefined,
     removeListener: () => undefined,
   })
+// jsdom lacks scrollIntoView; bits-ui Command scrolls the highlighted item into view.
+Element.prototype.scrollIntoView = () => undefined
