@@ -130,7 +130,16 @@
           </Button>
         {/snippet}
       </Popover.Trigger>
-      <Popover.Content class="model-popover" side="bottom" align="start" sideOffset={4} collisionPadding={8}>
+      <Popover.Content
+        class="model-popover"
+        side="bottom"
+        align="start"
+        sideOffset={4}
+        collisionPadding={8}
+        onEscapeKeydown={(event) => {
+          if (event.isComposing) event.preventDefault()
+        }}
+      >
         <Command.Root bind:value={highlighted} filter={match} label={t('providers.model_placeholder')}>
           <div class="model-search">
             <SearchIcon class="model-search-icon" />
@@ -150,7 +159,7 @@
               {/each}
             </div>
           {/if}
-          <Command.List class="model-list">
+          <Command.List class="model-list" aria-label={t('providers.model_placeholder')}>
             <Command.Empty class="model-empty">{t('providers.model_no_match')}</Command.Empty>
             {#each groups as [name, items] (name)}
               <Command.Group value={`group\n${name}`}>
