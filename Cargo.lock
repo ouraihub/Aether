@@ -14,6 +14,7 @@ version = "0.1.0"
 dependencies = [
  "aether-support",
  "async-trait",
+ "base64 0.22.1",
  "getrandom 0.4.3",
  "reqwest 0.12.28",
  "rusqlite",

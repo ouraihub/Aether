@@ -15,11 +15,12 @@ pub use tokio_util::sync::CancellationToken;
 pub use aether_support::net::AddressPolicy;
 pub use run::{RunSummary, Runner, Usage};
 pub use store::{
-    Conversation, ConversationStore, ConversationSummary, SqliteStore, Turn, TurnHandle,
+    Conversation, ConversationStore, ConversationSummary, SqliteStore, Turn, TurnHandle, TurnImage,
     TurnRecord, TurnStatus, history_path, translation_input, trim_history,
 };
 pub use tools::{Approver, BoxFuture, ToolExecutor};
 pub use types::*;
+pub use validate::check_images;
 
 #[cfg(test)]
 mod tests;

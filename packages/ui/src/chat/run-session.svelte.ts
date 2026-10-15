@@ -4,6 +4,8 @@ import { isKitClientError } from '../ports'
 import type {
   ChatPort,
   ContextRef,
+  ImagePart,
+  ImageRef,
   KitError,
   ModelRef,
   RunEvent,
@@ -39,6 +41,7 @@ export interface ChatTurn {
   endpointId: string | null
   modelId: string | null
   input: string
+  images: ImageRef[]
   text: string
   reasoningText: string
   reasoningEffort: ReasoningEffort
@@ -108,9 +111,9 @@ export class RunSession {
     return total
   }
 
-  send(base: RunBase, input: string, webSearch = false): Promise<boolean> {
+  send(base: RunBase, input: string, webSearch = false, images: ImagePart[] = []): Promise<boolean> {
     if (this.running || input.trim() === '') return Promise.resolve(false)
-    return this.#append(base, input, this.selectedTurnId, null, 'reply', {}, webSearch)
+    return this.#append(base, input, this.selectedTurnId, null, 'reply', images.length ? { images } : {}, webSearch)
   }
 
   retry(base: RunBase, turnId: string, model?: ModelRef | null): Promise<boolean> {
@@ -132,13 +135,17 @@ export class RunSession {
             : base.model),
     }
     const storedSource = this.#stored && source.persisted
+    // Without stored history the host cannot read the source images back, so resend the local data URLs.
+    const images = source.images.flatMap((image) =>
+      image.url?.startsWith('data:') ? [{ mime: image.mime, data: image.url.slice(image.url.indexOf(',') + 1) }] : [],
+    )
     return this.#append(
       snapshot,
       source.input,
       source.parentId,
       this.#stored && !source.persisted ? null : source,
       source.kind,
-      storedSource ? { retryTurnId: source.id } : {},
+      storedSource ? { retryTurnId: source.id } : images.length ? { images } : {},
     )
   }
 
@@ -204,6 +211,10 @@ export class RunSession {
       endpointId: base.model?.endpointId ?? null,
       modelId: base.model?.modelId ?? null,
       input,
+      images:
+        action.images?.map((image) => ({ mime: image.mime, url: `data:${image.mime};base64,${image.data}` })) ??
+        source?.images ??
+        [],
       text: '',
       reasoningText: '',
       reasoningEffort: base.reasoningEffort ?? 'default',
@@ -279,6 +290,7 @@ export class RunSession {
       endpointId: turn.endpointId,
       modelId: turn.modelId,
       input: turn.input,
+      images: turn.images,
       text: turn.text,
       reasoningText: turn.reasoningText ?? '',
       reasoningEffort: turn.reasoningEffort ?? 'default',

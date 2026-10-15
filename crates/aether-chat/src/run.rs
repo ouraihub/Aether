@@ -323,6 +323,7 @@ impl Runner {
             system: run.system,
             history: &input.history,
             input: &input.input,
+            images: &input.images,
             turn: messages,
             max_output: input.budget.max_output,
             tools,

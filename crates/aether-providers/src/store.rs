@@ -228,11 +228,11 @@ impl Store {
     pub fn resolve(&self, model: &ModelRef) -> Result<Connection, KitError> {
         let db = self.lock()?;
         let row = db.query_row(
-            "SELECT e.base_url, e.protocol, e.key_ciphertext, m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search
+            "SELECT e.base_url, e.protocol, e.key_ciphertext, m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, m.can_vision
              FROM models m JOIN endpoints e ON e.id = m.endpoint_id WHERE m.endpoint_id = ?1 AND m.model_id = ?2",
             params![model.endpoint_id, model.model_id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<Vec<u8>>>(2)?,
-                row.get::<_, String>(3)?, row.get::<_, Option<u32>>(4)?, row.get::<_, Option<u32>>(5)?, row.get::<_, Option<bool>>(6)?, row.get::<_, Option<String>>(7)?, row.get::<_, bool>(8)?)),
+                row.get::<_, String>(3)?, row.get::<_, Option<u32>>(4)?, row.get::<_, Option<u32>>(5)?, row.get::<_, Option<bool>>(6)?, row.get::<_, Option<String>>(7)?, row.get::<_, bool>(8)?, row.get::<_, bool>(9)?)),
         ).optional()?;
         let (
             base_url,
@@ -244,6 +244,7 @@ impl Store {
             supports_tools,
             reasoning,
             native_web_search,
+            can_vision,
         ) = row.ok_or_else(|| KitError::not_found("model"))?;
         let protocol = parse_protocol(&protocol)?;
         let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
@@ -268,6 +269,7 @@ impl Store {
             supports_tools,
             reasoning,
             native_web_search,
+            can_vision,
         })
     }
 
@@ -287,6 +289,7 @@ impl Store {
             supports_tools: None,
             reasoning: None,
             native_web_search: false,
+            can_vision: false,
         })
     }
 

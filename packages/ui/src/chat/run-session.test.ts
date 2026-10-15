@@ -34,6 +34,7 @@ function stored(overrides: Partial<Turn> = {}): Turn {
     errorCode: null,
     reasoningText: 'Original reasoning',
     reasoningEffort: 'default',
+    images: [],
     ...overrides,
   }
 }
@@ -409,5 +410,39 @@ describe('RunSession candidate replies', () => {
     expect(await session.translate(base, 'source', 'x'.repeat(81))).toBe(false)
     expect(session.turns).toHaveLength(1)
     expect(runs).toHaveLength(0)
+  })
+
+  it('shows sent images at once, omits them when empty and lets history replace them', async () => {
+    const { session, runs, get } = setup()
+    session.show('conversation', [stored()], 'source')
+    void session.send(base, 'Plain')
+    expect('images' in required(runs[0]).request).toBe(false)
+    required(runs[0]).accepted.reject(new KitClientError({ code: 'network', message: 'offline' }))
+    await vi.waitFor(() => expect(session.running).toBe(false))
+    const sent = session.send(base, 'Look', false, [{ mime: 'image/png', data: 'AAAA' }])
+    expect(required(runs[1]).request.images).toEqual([{ mime: 'image/png', data: 'AAAA' }])
+    expect(session.turns.at(-1)?.images).toEqual([{ mime: 'image/png', url: 'data:image/png;base64,AAAA' }])
+    const hosted = { mime: 'image/png', url: '/images/0' }
+    get.mockResolvedValue(conversation([stored(), stored({ id: 'candidate', images: [hosted] })]))
+    required(runs[1]).accepted.resolve(accepted)
+    await sent
+    required(runs[1]).emit({ kind: 'end', status: 'completed' })
+    await vi.waitFor(() => expect(session.turns.find((turn) => turn.id === 'candidate')?.images).toEqual([hosted]))
+  })
+
+  it('retries a stored source by id only and an unstored one by resending its images', async () => {
+    const { session, runs } = setup()
+    session.show('conversation', [stored({ images: [{ mime: 'image/png', url: '/images/0' }] })], 'source')
+    void session.retry(base, 'source')
+    expect(required(runs[0]).request).toMatchObject({ retryTurnId: 'source' })
+    expect('images' in required(runs[0]).request).toBe(false)
+    expect(session.turns[1]?.images).toEqual([{ mime: 'image/png', url: '/images/0' }])
+
+    const local = setup(false)
+    const sent = local.session.send(base, 'Look', false, [{ mime: 'image/gif', data: 'R0lG' }])
+    required(local.runs[0]).accepted.reject(new KitClientError({ code: 'upstream', message: 'Unavailable' }))
+    await sent
+    void local.session.retry(base, required(local.session.turns[0]).id)
+    expect(required(local.runs[1]).request.images).toEqual([{ mime: 'image/gif', data: 'R0lG' }])
   })
 })

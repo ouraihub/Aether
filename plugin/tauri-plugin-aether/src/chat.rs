@@ -95,6 +95,33 @@ impl Chat {
         })
     }
 
+    /// Clears image bytes older than [`aether_chat::IMAGE_TTL_DAYS`] now and hourly (docs/19 §5).
+    pub(crate) fn spawn_image_purge(&self) {
+        let Some(store) = self.store.clone() else {
+            return;
+        };
+        tauri::async_runtime::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                tick.tick().await;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+                let before = now - aether_chat::IMAGE_TTL_DAYS * 86_400_000;
+                let store = Arc::clone(&store);
+                match tauri::async_runtime::spawn_blocking(move || store.purge_images(before)).await
+                {
+                    Ok(Ok(0)) => {}
+                    Ok(Ok(cleared)) => tracing::info!(cleared, "chat.images.purged"),
+                    Ok(Err(error)) => {
+                        tracing::warn!(code = ?error.code(), "chat.images.purge_failed")
+                    }
+                    Err(_) => tracing::warn!("chat.images.purge_panicked"),
+                }
+            }
+        });
+    }
+
     pub(crate) fn has_history(&self) -> bool {
         self.store.is_some()
     }
@@ -176,6 +203,10 @@ pub(crate) fn check_request(req: &RunRequest, has_store: bool) -> Result<(), Kit
     {
         return Err(KitError::bad_request("conversationId", "required"));
     }
+    if !req.images.is_empty() && (retry || translate) {
+        return Err(KitError::bad_request("images", "action_conflict"));
+    }
+    aether_chat::check_images(&req.images)?;
     if (req.retry_turn_id.is_some() || req.translate_turn_id.is_some())
         && (req.regenerate || req.web_search == Some(true))
     {
@@ -212,7 +243,7 @@ pub(crate) fn assemble(
     req: &RunRequest,
     run_id: String,
 ) -> Result<RunInput, KitError> {
-    let (turns, input, source_model) = match (store, &req.conversation_id) {
+    let (turns, (input, images), source_model) = match (store, &req.conversation_id) {
         (Some(store), Some(id)) => {
             let conversation = store.load(id)?;
             if conversation
@@ -246,19 +277,23 @@ pub(crate) fn assemble(
             {
                 return Err(KitError::conflict("turn_not_completed"));
             }
+            // Retry reuses the source's stored images (expired ones are gone); translation has none.
             let input = if let Some(source) = source {
                 if req.translate_turn_id.is_some() {
-                    aether_chat::translation_input(
-                        source,
-                        req.target_language.as_deref().unwrap_or(""),
-                    )?
+                    (
+                        aether_chat::translation_input(
+                            source,
+                            req.target_language.as_deref().unwrap_or(""),
+                        )?,
+                        Vec::new(),
+                    )
                 } else if req.retry_turn_id.is_some() || req.regenerate {
-                    source.input.clone()
+                    (source.input.clone(), source.image_parts())
                 } else {
-                    req.input.clone()
+                    (req.input.clone(), req.images.clone())
                 }
             } else {
-                req.input.clone()
+                (req.input.clone(), req.images.clone())
             };
             let head = if req.retry_turn_id.is_some() || req.regenerate {
                 source.and_then(|turn| turn.parent_id.as_deref())
@@ -283,7 +318,7 @@ pub(crate) fn assemble(
                 source_model,
             )
         }
-        _ => (Vec::new(), req.input.clone(), None),
+        _ => (Vec::new(), (req.input.clone(), req.images.clone()), None),
     };
     check_len("input", &input, MAX_INPUT_CHARS)?;
     let mut effective = req.clone();
@@ -345,6 +380,7 @@ pub(crate) fn assemble(
         system,
         history: trim_history(&turns, room),
         input,
+        images,
         tools: host
             .tools(&effective)
             .into_iter()
@@ -413,7 +449,7 @@ pub(crate) async fn chat_run<R: Runtime>(
     #[cfg(not(feature = "skills"))]
     let skill_store: Option<Arc<SkillStore>> = None;
     let task_run_id = run_id.clone();
-    let (mut input, request) = blocking(move || {
+    let (mut input, mut request) = blocking(move || {
         let mut request = request;
         if let (Some(store), Some(id)) = (store.as_deref(), request.conversation_id.as_deref())
             && request.reply_to_id.is_none()
@@ -483,6 +519,8 @@ pub(crate) async fn chat_run<R: Runtime>(
             let conversation_id = request.conversation_id.clone();
             let scope = request.scope.clone();
             let input_text = input.input.clone();
+            // Only a normal reply stores the request's images; a retry copies its source's.
+            let images = std::mem::take(&mut request.images);
             let reply_to_id = request.reply_to_id.clone();
             let retry_turn_id = request.retry_turn_id.clone();
             let translation_id = request.translate_turn_id.clone();
@@ -493,6 +531,7 @@ pub(crate) async fn chat_run<R: Runtime>(
                         conversation_id.as_deref(),
                         scope.as_deref(),
                         &input_text,
+                        &images,
                         reply_to_id.as_deref(),
                         retry_turn_id.as_deref(),
                         translation_id.as_deref(),
@@ -613,8 +652,13 @@ pub(crate) async fn chat_run<R: Runtime>(
                     SystemPart::Skill { body, .. } => body.chars().count(),
                 }).sum::<usize>();
                 let room = input.budget.context_window.saturating_sub(input.budget.max_output).saturating_sub(u32::try_from(used.div_ceil(3)).unwrap_or(u32::MAX));
-                while serde_json::to_string(&input.history).map_err(KitError::internal)?.chars().count().div_ceil(3) > usize::try_from(room).unwrap_or(usize::MAX) {
-                    let end = input.history.iter().enumerate().skip(1).find_map(|(i, message)| matches!(message, Message::User(_)).then_some(i)).unwrap_or(input.history.len());
+                // Image bytes are not budgeted (docs/19 §4): subtract them from the JSON size.
+                let image_chars = |history: &[Message]| history.iter().map(|message| match message {
+                    Message::UserImages { images, .. } => images.iter().map(|image| image.data.len()).sum(),
+                    Message::User(_) | Message::Assistant { .. } | Message::Tool { .. } => 0,
+                }).sum::<usize>();
+                while (serde_json::to_string(&input.history).map_err(KitError::internal)?.chars().count() - image_chars(&input.history)).div_ceil(3) > usize::try_from(room).unwrap_or(usize::MAX) {
+                    let end = input.history.iter().enumerate().skip(1).find_map(|(i, message)| matches!(message, Message::User(_) | Message::UserImages { .. }).then_some(i)).unwrap_or(input.history.len());
                     if end == 0 { break; }
                     input.history.drain(..end);
                 }
@@ -847,6 +891,8 @@ pub(crate) struct Turn {
     #[ts(optional = nullable)]
     reasoning_effort: Option<aether_support::ReasoningEffort>,
     reasoning_text: Option<String>,
+    /// Images attached to the input; never base64 in history (docs/19 §2).
+    images: Vec<aether_chat::ImageRef>,
 }
 
 impl From<aether_chat::Turn> for Turn {
@@ -922,6 +968,16 @@ impl From<aether_chat::Turn> for Turn {
             context_usage: t.context_usage,
             reasoning_effort: t.reasoning_effort,
             reasoning_text: Some(reasoning_text),
+            images: t
+                .images
+                .into_iter()
+                .map(|image| aether_chat::ImageRef {
+                    url: image
+                        .data
+                        .map(|data| format!("data:{};base64,{data}", image.mime)),
+                    mime: image.mime,
+                })
+                .collect(),
         }
     }
 }

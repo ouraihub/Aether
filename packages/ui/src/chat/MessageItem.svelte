@@ -143,9 +143,37 @@
       if (url) URL.revokeObjectURL(url)
     }
   }
+  // Browsers refuse to navigate a new tab to a `data:` URL, and a strict CSP connect-src
+  // blocks fetch(data:); decode locally and hand it over as a blob.
+  function openImage(event: MouseEvent, url: string | null) {
+    if (!url?.startsWith('data:')) return
+    event.preventDefault()
+    const comma = url.indexOf(',')
+    const mime = url.slice(5, url.indexOf(';'))
+    const bytes = Uint8Array.from(atob(url.slice(comma + 1)), (c) => c.charCodeAt(0))
+    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }))
+    window.open(blobUrl, '_blank', 'noopener')
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000)
+  }
 </script>
 
 <li class="message-turn flex min-w-0 flex-col gap-2">
+  {#if showInput && turn.images.length > 0}
+    <ul class="user-images">
+      {#each turn.images as image, index (index)}
+        <li>
+          {#if image.url}<a
+              href={image.url}
+              target="_blank"
+              rel="noopener"
+              onclick={(event) => openImage(event, image.url)}
+              aria-label={t('chat.openImage', { index: index + 1 })}
+              title={t('chat.openImage', { index: index + 1 })}><img src={image.url} alt="" /></a
+            >{:else}<span class="image-expired">{t('chat.imageExpired')}</span>{/if}
+        </li>
+      {/each}
+    </ul>
+  {/if}
   {#if showInput}<p class="user-message">{turn.input}</p>{/if}
   <div class="assistant-message" class:chosen>
     {#if modelLabel}<div class="reply-source">
@@ -331,6 +359,41 @@
     min-width: 0;
     max-width: 100%;
     overflow-wrap: anywhere;
+  }
+  .user-images {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.375rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .user-images a,
+  .image-expired {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 5rem;
+    height: 5rem;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: var(--kit-radius, var(--radius));
+  }
+  .user-images a:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+  .user-images img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .image-expired {
+    padding: 0.25rem;
+    color: var(--color-muted-foreground);
+    font-size: var(--kit-font-size-sm, 0.8125rem);
+    text-align: center;
   }
   .user-message {
     align-self: flex-end;

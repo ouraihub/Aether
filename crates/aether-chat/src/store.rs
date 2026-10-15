@@ -11,7 +11,7 @@ use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, Type, ValueRef};
 use rusqlite::{OptionalExtension, Row, params};
 use serde::de::DeserializeOwned;
 
-use crate::types::{EndStatus, Message};
+use crate::types::{EndStatus, ImagePart, Message};
 
 const MIGRATIONS: &[Migration] = &[
     Migration {
@@ -25,6 +25,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 3,
         sql: "ALTER TABLE conversations ADD COLUMN selected_turn_id TEXT REFERENCES turns(id) ON DELETE SET NULL; ALTER TABLE turns ADD COLUMN parent_id TEXT REFERENCES turns(id); ALTER TABLE turns ADD COLUMN question_id TEXT NOT NULL DEFAULT ''; ALTER TABLE turns ADD COLUMN supersedes_id TEXT REFERENCES turns(id); ALTER TABLE turns ADD COLUMN kind TEXT NOT NULL DEFAULT 'reply' CHECK (kind IN ('reply','translation')); UPDATE turns SET question_id = id WHERE question_id = ''; UPDATE turns SET parent_id = (SELECT previous.id FROM turns previous WHERE previous.conversation_id = turns.conversation_id AND previous.seq < turns.seq ORDER BY previous.seq DESC LIMIT 1); UPDATE conversations SET selected_turn_id = (SELECT id FROM turns WHERE turns.conversation_id = conversations.id AND status = 'completed' ORDER BY seq DESC LIMIT 1);",
+    },
+    Migration {
+        version: 4,
+        sql: "CREATE TABLE turn_images (turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE, idx INTEGER NOT NULL, mime TEXT NOT NULL, data TEXT, created_at INTEGER NOT NULL, PRIMARY KEY(turn_id, idx));",
     },
 ];
 
@@ -45,9 +49,11 @@ pub trait ConversationStore: Send + Sync {
     /// # Errors
     /// `not_found{entity:"conversation"}`; `internal`.
     fn load(&self, id: &str) -> Result<Conversation, KitError>;
-    /// Reserves a normal reply, retry candidate or translation atomically.
+    /// Reserves a normal reply, retry candidate or translation atomically. `images` belong
+    /// to a normal reply only; a retry copies its source's images, a translation has none.
     /// # Errors
-    /// Invalid action fields, foreign/missing nodes, running conversation or storage failure.
+    /// Invalid action fields, `bad_request{images, action_conflict}` for images on a
+    /// retry/translation, foreign/missing nodes, running conversation or storage failure.
     #[allow(
         clippy::too_many_arguments,
         reason = "allocation-free borrowed action fields mirror the frozen host request"
@@ -57,12 +63,13 @@ pub trait ConversationStore: Send + Sync {
         conversation_id: Option<&str>,
         scope: Option<&str>,
         input: &str,
+        images: &[ImagePart],
         parent_id: Option<&str>,
         retry_id: Option<&str>,
         translation_id: Option<&str>,
         target_language: Option<&str>,
     ) -> Result<TurnHandle, KitError>;
-    /// Starts a normal reply from the selected completed context head.
+    /// Starts a text-only normal reply from the selected completed context head.
     /// # Errors
     /// Missing conversation, running conversation or storage failure.
     fn begin_turn(
@@ -109,6 +116,11 @@ pub trait ConversationStore: Send + Sync {
     /// # Errors
     /// Missing/noncompleted turn, running conversation or storage failure.
     fn select_turn(&self, conversation_id: &str, turn_id: &str) -> Result<Conversation, KitError>;
+    /// Clears the bytes of images created before `before_ms`, keeping their rows so they
+    /// show as expired; returns how many were cleared.
+    /// # Errors
+    /// `internal` on storage failure.
+    fn purge_images(&self, before_ms: i64) -> Result<usize, KitError>;
 }
 
 /// A row of the history list.
@@ -197,6 +209,33 @@ pub struct Turn {
     pub kind: String,
     /// Unix milliseconds.
     pub created_at: i64,
+    /// Input images in order; `data: None` once purged.
+    pub images: Vec<TurnImage>,
+}
+
+impl Turn {
+    /// Images whose bytes are still stored, in order; expired ones are skipped.
+    #[must_use]
+    pub fn image_parts(&self) -> Vec<ImagePart> {
+        self.images
+            .iter()
+            .filter_map(|image| {
+                Some(ImagePart {
+                    mime: image.mime.clone(),
+                    data: image.data.clone()?,
+                })
+            })
+            .collect()
+    }
+}
+
+/// A stored input image; `data` (base64) is `None` after [`ConversationStore::purge_images`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnImage {
+    /// MIME type.
+    pub mime: String,
+    /// Base64 bytes.
+    pub data: Option<String>,
 }
 
 /// A turn being run.
@@ -273,7 +312,14 @@ pub fn trim_history(turns: &[Turn], max_tokens: u32) -> Vec<Message> {
     kept.iter()
         .rev()
         .flat_map(|turn| {
-            iter::once(Message::User(turn.input.clone())).chain(turn.messages.iter().cloned())
+            let images = turn.image_parts();
+            let text = turn.input.clone();
+            let user = if images.is_empty() {
+                Message::User(text)
+            } else {
+                Message::UserImages { text, images }
+            };
+            iter::once(user).chain(turn.messages.iter().cloned())
         })
         .collect()
 }
@@ -316,7 +362,10 @@ pub fn translation_input(turn: &Turn, language: &str) -> Result<String, KitError
         .iter()
         .filter_map(|m| match m {
             Message::Assistant { text, .. } if !text.is_empty() => Some(text.as_str()),
-            Message::User(_) | Message::Assistant { .. } | Message::Tool { .. } => None,
+            Message::User(_)
+            | Message::UserImages { .. }
+            | Message::Assistant { .. }
+            | Message::Tool { .. } => None,
         })
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -337,7 +386,10 @@ fn translation_input_text(text: &str, language: &str) -> Result<String, KitError
 }
 fn message_chars(message: &Message) -> usize {
     match message {
-        Message::User(text) | Message::Tool { text, .. } => text.chars().count(),
+        // ponytail: images are not counted (docs/19 §4, no image budget).
+        Message::User(text) | Message::UserImages { text, .. } | Message::Tool { text, .. } => {
+            text.chars().count()
+        }
         Message::Assistant {
             text,
             tool_calls,
@@ -414,6 +466,7 @@ impl ConversationStore for SqliteStore {
         conversation_id: Option<&str>,
         scope: Option<&str>,
         input: &str,
+        images: &[ImagePart],
         parent_id: Option<&str>,
         retry_id: Option<&str>,
         translation_id: Option<&str>,
@@ -434,6 +487,9 @@ impl ConversationStore for SqliteStore {
         }
         if parent_id.is_some() && (retry_id.is_some() || translation_id.is_some()) {
             return Err(KitError::bad_request("replyToId", "action_conflict"));
+        }
+        if !images.is_empty() && (retry_id.is_some() || translation_id.is_some()) {
+            return Err(KitError::bad_request("images", "action_conflict"));
         }
         if translation_id.is_some() != target_language.is_some() {
             return Err(KitError::bad_request(
@@ -521,6 +577,13 @@ impl ConversationStore for SqliteStore {
             return Err(KitError::bad_request("input", "too_long"));
         }
         tx.execute("INSERT INTO turns (id,conversation_id,seq,status,input,parent_id,question_id,supersedes_id,kind,model_id,endpoint_id,created_at) SELECT ?1,?2,COALESCE(MAX(seq),0)+1,'running',?3,?4,?5,?6,?7,?8,?9,?10 FROM turns WHERE conversation_id=?2", params![turn_id,&cid,run_input,parent,question,supersedes,kind,source_model,source_endpoint,now])?;
+        if let Some(source) = &supersedes {
+            tx.execute("INSERT INTO turn_images (turn_id,idx,mime,data,created_at) SELECT ?1,idx,mime,data,created_at FROM turn_images WHERE turn_id=?2", params![turn_id, source])?;
+        }
+        for (idx, image) in images.iter().enumerate() {
+            let idx = i64::try_from(idx).map_err(KitError::internal)?;
+            tx.execute("INSERT INTO turn_images (turn_id,idx,mime,data,created_at) VALUES (?1,?2,?3,?4,?5)", params![turn_id, idx, image.mime, image.data, now])?;
+        }
         tx.execute(
             "UPDATE conversations SET updated_at=?1 WHERE id=?2",
             params![now, &cid],
@@ -543,7 +606,7 @@ impl ConversationStore for SqliteStore {
         scope: Option<&str>,
         input: &str,
     ) -> Result<TurnHandle, KitError> {
-        self.begin_action(conversation_id, scope, input, None, None, None, None)
+        self.begin_action(conversation_id, scope, input, &[], None, None, None, None)
     }
 
     fn regenerate(&self, conversation_id: &str) -> Result<TurnHandle, KitError> {
@@ -562,7 +625,16 @@ impl ConversationStore for SqliteStore {
                     .map(|t| t.id.clone())
             })
             .ok_or_else(|| KitError::not_found("turn"))?;
-        self.begin_action(Some(conversation_id), None, "", None, Some(&id), None, None)
+        self.begin_action(
+            Some(conversation_id),
+            None,
+            "",
+            &[],
+            None,
+            Some(&id),
+            None,
+            None,
+        )
     }
 
     fn finish_turn(&self, turn: TurnHandle, record: TurnRecord) -> Result<(), KitError> {
@@ -740,6 +812,7 @@ impl ConversationStore for SqliteStore {
         for (seq, t) in path.iter().enumerate() {
             let seq = i64::try_from(seq + 1).map_err(KitError::internal)?;
             tx.execute("INSERT INTO turns (id,conversation_id,seq,parent_id,question_id,supersedes_id,kind,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,created_at) SELECT ?1,?2,?3,?4,?5,?6,kind,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,created_at FROM turns WHERE id=?7 AND conversation_id=?8", params![ids[&t.id.as_str()],id,seq,t.parent_id.as_deref().and_then(|p| ids.get(p)),questions[&t.question_id.as_str()],t.supersedes_id.as_deref().and_then(|s| ids.get(s)),t.id,conversation_id])?;
+            tx.execute("INSERT INTO turn_images (turn_id,idx,mime,data,created_at) SELECT ?1,idx,mime,data,created_at FROM turn_images WHERE turn_id=?2", params![ids[&t.id.as_str()], t.id])?;
         }
         tx.execute(
             "UPDATE conversations SET selected_turn_id=?1 WHERE id=?2",
@@ -748,6 +821,14 @@ impl ConversationStore for SqliteStore {
         let result = load_conversation(&tx, &id)?;
         tx.commit()?;
         Ok(result)
+    }
+
+    fn purge_images(&self, before_ms: i64) -> Result<usize, KitError> {
+        let cleared = self.lock()?.execute(
+            "UPDATE turn_images SET data=NULL WHERE created_at<?1 AND data IS NOT NULL",
+            [before_ms],
+        )?;
+        Ok(cleared)
     }
 }
 
@@ -810,6 +891,7 @@ fn turn(row: &Row<'_>) -> rusqlite::Result<Turn> {
         supersedes_id: row.get(19)?,
         kind: row.get(20)?,
         created_at: row.get(21)?,
+        images: Vec::new(),
     })
 }
 
@@ -823,7 +905,18 @@ fn load_conversation(db: &rusqlite::Connection, id: &str) -> Result<Conversation
         .optional()?
         .ok_or_else(|| KitError::not_found("conversation"))?;
     let mut stmt = db.prepare("SELECT id,seq,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,conversation_id,parent_id,question_id,supersedes_id,kind,created_at FROM turns WHERE conversation_id=?1 ORDER BY seq")?;
-    let turns = stmt.query_map([id], turn)?.collect::<Result<_, _>>()?;
+    let mut turns: Vec<Turn> = stmt.query_map([id], turn)?.collect::<Result<_, _>>()?;
+    let mut stmt = db.prepare("SELECT i.turn_id,i.mime,i.data FROM turn_images i JOIN turns t ON t.id=i.turn_id WHERE t.conversation_id=?1 ORDER BY i.turn_id,i.idx")?;
+    let mut rows = stmt.query([id])?;
+    while let Some(row) = rows.next()? {
+        let turn_id: String = row.get(0)?;
+        if let Some(turn) = turns.iter_mut().find(|t| t.id == turn_id) {
+            turn.images.push(TurnImage {
+                mime: row.get(1)?,
+                data: row.get(2)?,
+            });
+        }
+    }
     Ok(Conversation { summary, turns })
 }
 
@@ -861,7 +954,10 @@ fn visible_text(turn: &Turn) -> String {
         .iter()
         .filter_map(|m| match m {
             Message::Assistant { text, .. } if !text.is_empty() => Some(text.as_str()),
-            Message::User(_) | Message::Assistant { .. } | Message::Tool { .. } => None,
+            Message::User(_)
+            | Message::UserImages { .. }
+            | Message::Assistant { .. }
+            | Message::Tool { .. } => None,
         })
         .collect::<Vec<_>>()
         .join("\n\n")

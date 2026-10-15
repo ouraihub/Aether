@@ -90,6 +90,10 @@ mod chat_contract {
         pub context: Option<ContextRef>,
         /// User input of this turn.
         pub input: String,
+        /// Images of this input (docs/19 §2); retry/regenerate reuse the source turn's.
+        #[serde(default)]
+        #[ts(as = "Option<Vec<aether_chat::ImagePart>>", optional)]
+        pub images: Vec<aether_chat::ImagePart>,
         /// Conversation to continue; absent = new conversation.
         #[serde(default)]
         #[ts(optional = nullable)]

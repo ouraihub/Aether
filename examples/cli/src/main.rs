@@ -143,6 +143,7 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
         system: Vec::new(),
         history: Vec::new(),
         input: message,
+        images: Vec::new(),
         tools,
         reasoning_effort: ReasoningEffort::Default,
         native_web_search: false,

@@ -21,6 +21,7 @@ const turn = (id: string, overrides: Partial<Turn> = {}): Turn => ({
   text: 'Original answer',
   errorCode: null,
   reasoningText: 'Thinking',
+  images: [],
   usage: { inputTokens: 100, outputTokens: 60, cacheReadTokens: 20, cacheWriteTokens: null, reasoningTokens: 4 },
   contextUsage: { tokens: 160, contextWindow: 1000, source: 'reported', ...model },
   ...overrides,
@@ -172,6 +173,30 @@ describe('createFakePorts', () => {
       kind: 'translation',
       questionId: accepted.turnId,
     })
+  })
+
+  it('stores request images as data URLs, reuses them on retry and never on translation', async () => {
+    const chat = required(createFakePorts().chat)
+    const images = [{ mime: 'image/png', data: 'AAAA' }]
+    const first = await chat.run({ ...request, images }, () => undefined)
+    const conversationId = required(first.conversationId)
+    const shown = [{ mime: 'image/png', url: 'data:image/png;base64,AAAA' }]
+    expect((await required(chat.history).get(conversationId)).turns[0]?.images).toEqual(shown)
+    const retried = await chat.run({ ...request, conversationId, retryTurnId: first.turnId }, () => undefined)
+    const translated = await chat.run(
+      { ...request, conversationId, translateTurnId: first.turnId, targetLanguage: 'French' },
+      () => undefined,
+    )
+    const turns = (await required(chat.history).get(conversationId)).turns
+    expect(turns.find((item) => item.id === retried.turnId)?.images).toEqual(shown)
+    expect(turns.find((item) => item.id === translated.turnId)?.images).toEqual([])
+    const conflict = await chat
+      .run({ ...request, conversationId, retryTurnId: first.turnId, images }, () => undefined)
+      .then(
+        () => null,
+        (error: unknown) => (isKitClientError(error) ? error.details : null),
+      )
+    expect(conflict).toMatchObject({ field: 'images', reason: 'action_conflict' })
   })
 
   it('selects within one conversation and normal continuation uses that parent', async () => {

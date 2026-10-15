@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import type { ComponentProps } from 'svelte'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createI18n } from '../i18n'
 import {
   createFakePorts,
@@ -82,6 +82,12 @@ function setup(
           supersedesId: request.retryTurnId ?? null,
           kind: request.translateTurnId ? 'translation' : 'reply',
           input: source?.input ?? request.input,
+          images: source
+            ? source.images
+            : (request.images ?? []).map((image) => ({
+                mime: image.mime,
+                url: `data:${image.mime};base64,${image.data}`,
+              })),
           text: '',
           status: 'running',
           errorCode: null,
@@ -308,6 +314,7 @@ describe('ChatPanel', () => {
       errorCode: null,
       reasoningEffort: 'default',
       reasoningText: null,
+      images: [],
     }
     const summary: Conversation['summary'] = {
       id: 'c9',
@@ -459,6 +466,7 @@ describe('ChatPanel', () => {
                 ...model,
                 reasoningEffort: 'high',
                 reasoningText: 'summary',
+                images: [],
                 usage: {
                   inputTokens: 12,
                   outputTokens: 3,
@@ -635,6 +643,7 @@ describe('ChatPanel', () => {
                 errorCode: null,
                 reasoningEffort: 'default',
                 reasoningText: null,
+                images: [],
               },
             ],
           }),
@@ -903,6 +912,7 @@ describe('ChatPanel', () => {
             errorCode: null,
             reasoningEffort: 'default',
             reasoningText: null,
+            images: [],
           },
         ],
       })
@@ -958,6 +968,7 @@ describe('ChatPanel', () => {
       errorCode: null,
       reasoningEffort: 'default',
       reasoningText: null,
+      images: [],
     })
     return {
       summary: { id: 'saved', title: 'Candidates', scope: null, selectedTurnId: 'a', createdAt: 0, updatedAt: 0 },
@@ -1306,5 +1317,158 @@ describe('ChatPanel', () => {
       expect.objectContaining({ body: expect.stringContaining('Both the question and reply will disappear') }),
     )
     expect(screen.queryByText('Only question')).toBeNull()
+  })
+})
+
+describe('ChatPanel images', () => {
+  const visionModel = { endpointId: 'e2', modelId: 'v1' }
+  const option = (ref: typeof model, label: string, canVision: boolean): ModelOption => ({
+    ...ref,
+    label,
+    modelType: 'chat',
+    supportsTools: null,
+    reasoning: null,
+    nativeWebSearch: false,
+    canVision,
+  })
+  const textOption = option(model, 'Text model', false)
+  const visionOption = option(visionModel, 'Vision model', true)
+  const png = (name = 'a.png', size = 3) => new File([new Uint8Array(size).fill(65)], name, { type: 'image/png' })
+  const revoke = vi.fn()
+  let created = 0
+  beforeEach(() => {
+    created = 0
+    revoke.mockClear()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => `blob:image-${++created}` })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revoke })
+  })
+  function visionSetup(extra: Extra = {}) {
+    return setup(true, null, {
+      ...extra,
+      props: { model: visionModel, ...extra.props },
+      providers: { modelOptions: () => Promise.resolve([textOption, visionOption]), ...extra.providers },
+    })
+  }
+  async function pick(files: File[]) {
+    const attach = screen.getByRole('button', { name: 'Attach images' })
+    await waitFor(() => expect(attach.hasAttribute('disabled')).toBe(false))
+    const input = required(document.querySelector<HTMLInputElement>('input[type=file]'))
+    expect(input.accept).toBe('image/png,image/jpeg,image/webp,image/gif')
+    await fireEvent.change(input, { target: { files } })
+  }
+
+  it('attaches, removes and sends images, then clears the tray and shows them on the turn', async () => {
+    const { runs } = visionSetup()
+    await pick([png('a.png'), png('b.png')])
+    await fireEvent.click(await screen.findByRole('button', { name: 'Remove image 2' }))
+    expect(revoke).toHaveBeenCalledWith('blob:image-2')
+    expect(screen.queryByRole('button', { name: 'Remove image 2' })).toBeNull()
+    await send('What is this?')
+    expect(runs[0]?.request.images).toEqual([{ mime: 'image/png', data: 'QUFB' }])
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove image 1' })).toBeNull())
+    const link = screen.getByRole('link', { name: 'Open image 1' })
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noopener')
+    expect(link.getAttribute('href')).toBe('data:image/png;base64,QUFB')
+    expect(revoke).toHaveBeenCalledWith('blob:image-1')
+  })
+
+  it('takes pasted images and leaves plain text paste alone', async () => {
+    const { runs } = visionSetup()
+    const input = screen.getByRole('textbox', { name: 'Message' })
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Attach images' }).hasAttribute('disabled')).toBe(false),
+    )
+    expect(await fireEvent.paste(input, { clipboardData: { files: [] } })).toBe(true)
+    expect(await fireEvent.paste(input, { clipboardData: { files: [png()] } })).toBe(false)
+    await screen.findByRole('button', { name: 'Remove image 1' })
+    await send('pasted')
+    expect(runs[0]?.request.images).toHaveLength(1)
+  })
+
+  it('accepts dropped images and rejects over-limit, wrong type and oversized files without queueing', async () => {
+    const { notify } = visionSetup()
+    await pick([png('1.png'), png('2.png'), png('3.png')])
+    await screen.findByRole('button', { name: 'Remove image 3' })
+    const form = required(screen.getByRole('textbox', { name: 'Message' }).closest('form'))
+    await fireEvent.drop(form, { dataTransfer: { files: [png('4.png'), png('5.png')], types: ['Files'] } })
+    await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Up to 4 images per message'))
+    await fireEvent.drop(form, { dataTransfer: { files: [new File(['x'], 'x.bmp', { type: 'image/bmp' })] } })
+    expect(notify.toast).toHaveBeenCalledWith('error', 'Only PNG, JPEG, WebP and GIF images are supported')
+    await fireEvent.drop(form, { dataTransfer: { files: [png('big.png', 4 * 1024 * 1024 + 1)] } })
+    expect(notify.toast).toHaveBeenCalledWith('error', 'Each image must be 4 MiB or smaller')
+    expect(screen.queryByRole('button', { name: 'Remove image 4' })).toBeNull()
+    await fireEvent.drop(form, { dataTransfer: { files: [png('4.png')] } })
+    await screen.findByRole('button', { name: 'Remove image 4' })
+  })
+
+  it('disables attach and send for a non-vision model until a vision model is picked', async () => {
+    const { notify } = visionSetup({ props: { model } })
+    const attach = screen.getByRole('button', { name: 'Attach images' })
+    await waitFor(() => expect(attach.getAttribute('title')).toBe('The current model does not support images'))
+    expect(attach.hasAttribute('disabled')).toBe(true)
+    await fireEvent.paste(screen.getByRole('textbox', { name: 'Message' }), { clipboardData: { files: [png()] } })
+    await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'The current model does not support images'))
+    expect(screen.queryByRole('button', { name: 'Remove image 1' })).toBeNull()
+    await fireEvent.click(screen.getByLabelText('Select a model'))
+    await fireEvent.click(await screen.findByRole('option', { name: /v1/ }))
+    await pick([png()])
+    await screen.findByRole('button', { name: 'Remove image 1' })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'hi' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false))
+    await fireEvent.click(screen.getByLabelText('Select a model'))
+    await fireEvent.click(await screen.findByRole('option', { name: /m1/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true))
+    expect(screen.getByRole('status', { name: '' }).textContent).toContain('does not support images')
+  })
+
+  it('restores images with the draft when the request is rejected before acceptance', async () => {
+    const run = vi
+      .fn<ChatPort['run']>()
+      .mockRejectedValueOnce(new KitClientError({ code: 'network', message: 'offline' }))
+    visionSetup({ chat: { run } })
+    await pick([png()])
+    await screen.findByRole('button', { name: 'Remove image 1' })
+    await send('keep my image')
+    expect(run.mock.calls[0]?.[0].images).toEqual([{ mime: 'image/png', data: 'QUFB' }])
+    await waitFor(() =>
+      expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('keep my image'),
+    )
+    expect(screen.getByRole('button', { name: 'Remove image 1' })).toBeTruthy()
+    expect(revoke).not.toHaveBeenCalled()
+  })
+
+  it('shows expired history images and lists only vision models for @ when the source has images', async () => {
+    const turn = (id: string): Conversation['turns'][number] => ({
+      id,
+      parentId: null,
+      questionId: 'q',
+      supersedesId: null,
+      kind: 'reply',
+      ...model,
+      input: 'Shared question',
+      text: `Reply ${id}`,
+      status: 'completed',
+      errorCode: null,
+      reasoningEffort: 'default',
+      reasoningText: null,
+      images: [
+        { mime: 'image/png', url: null },
+        { mime: 'image/png', url: '/img/1' },
+      ],
+    })
+    const conversation: Conversation = {
+      summary: { id: 'saved', title: 'Images', scope: null, selectedTurnId: 'a', createdAt: 0, updatedAt: 0 },
+      turns: [turn('a'), turn('b')],
+    }
+    visionSetup({ props: { conversationId: 'saved' }, history: { get: () => Promise.resolve(conversation) } })
+    expect(await screen.findByText('Image expired')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Open image 2' }).getAttribute('href')).toBe('/img/1')
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: 'Switch model' })[0]?.hasAttribute('disabled')).toBe(false),
+    )
+    await fireEvent.click(required(screen.getAllByRole('button', { name: 'Switch model' })[0]))
+    await screen.findByRole('option', { name: /v1/ })
+    expect(screen.queryByRole('option', { name: /m1/ })).toBeNull()
   })
 })

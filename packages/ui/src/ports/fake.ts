@@ -195,6 +195,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
           (request.targetLanguage != null && !translation)
         )
           throw clientError('bad_request', 'invalid graph request', { field: 'action' })
+        if (request.images?.length && (retry || translation))
+          throw clientError('bad_request', 'images on action', { field: 'images', reason: 'action_conflict' })
         if (request.purpose === 'writing' && (request.replyToId != null || action || request.targetLanguage != null))
           throw clientError('bad_request', 'writing graph fields', { field: 'action' })
         if ((retry || translation || request.replyToId != null) && (!request.conversationId || !ports.chat.history))
@@ -269,6 +271,14 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
           endpointId: model?.endpointId ?? null,
           modelId: model?.modelId ?? null,
           input,
+          images: translationSource
+            ? []
+            : retrySource
+              ? retrySource.images
+              : (request.images ?? []).map((image) => ({
+                  mime: image.mime,
+                  url: `data:${image.mime};base64,${image.data}`,
+                })),
           text: `Fake reply: ${input}`,
           status: 'running',
           errorCode: null,

@@ -43,6 +43,8 @@ pub struct Connection {
     pub reasoning: Option<crate::ReasoningConfig>,
     /// User-declared support for protocol-native web search.
     pub native_web_search: bool,
+    /// User-declared image input support (docs/19 §1).
+    pub can_vision: bool,
 }
 
 impl fmt::Debug for Connection {
@@ -57,6 +59,7 @@ impl fmt::Debug for Connection {
             .field("max_output", &self.max_output)
             .field("supports_tools", &self.supports_tools)
             .field("reasoning", &self.reasoning)
+            .field("can_vision", &self.can_vision)
             .finish()
     }
 }
@@ -77,6 +80,7 @@ mod tests {
             supports_tools: Some(true),
             reasoning: None,
             native_web_search: false,
+            can_vision: false,
         };
         let printed = format!("{connection:?}");
         assert!(

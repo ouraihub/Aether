@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick, untrack } from 'svelte'
+  import { onDestroy, tick, untrack } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
   import XIcon from '@lucide/svelte/icons/x'
   import PlusIcon from '@lucide/svelte/icons/plus'
@@ -12,6 +12,7 @@
   import SquareIcon from '@lucide/svelte/icons/square'
   import GaugeIcon from '@lucide/svelte/icons/gauge'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
+  import ImagePlusIcon from '@lucide/svelte/icons/image-plus'
   import { Popover } from 'bits-ui'
   import { Button } from '#lib/components/ui/button/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
@@ -28,6 +29,7 @@
     type ModelRef,
     type SkillRef,
     type ModelOption,
+    type ImagePart,
     type ReasoningEffort,
   } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
@@ -386,7 +388,7 @@
       if (action === 'branch') {
         draft = ''
         draftRevision++
-        recovery = null
+        discardRecovery()
       }
       historyError = null
       void refresh()
@@ -494,6 +496,14 @@
       return
     if (onClose && !session?.running) onClose()
   }
+  type Attached = ImagePart & { preview: string }
+  const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+  const MAX_IMAGES = 4
+  const MAX_IMAGE_BYTES = 4 * 1024 * 1024
+  let images = $state<Attached[]>([])
+  let reading = $state(0)
+  let fileInput = $state<HTMLInputElement | null>(null)
+  const vision = $derived(capability?.canVision === true)
   const canSend = $derived(
     session !== null &&
       !session.running &&
@@ -502,12 +512,24 @@
       !historyBusy &&
       capability !== null &&
       modelError === null &&
-      draft.trim() !== '',
+      draft.trim() !== '' &&
+      (images.length === 0 || vision) &&
+      reading === 0,
   )
-  let recovery = $state<{ draft: string; droppedKey: string | null; contextKey: string | null } | null>(null)
+  let recovery = $state<{
+    draft: string
+    images: Attached[]
+    droppedKey: string | null
+    contextKey: string | null
+  } | null>(null)
+  function discardRecovery() {
+    for (const image of recovery?.images ?? []) URL.revokeObjectURL(image.preview)
+    recovery = null
+  }
   function recoverDraft() {
-    if (!recovery || draft !== '') return
+    if (!recovery || draft !== '' || images.length > 0) return
     draft = recovery.draft
+    images = recovery.images
     draftRevision++
     if (contextKey === recovery.contextKey) droppedKey = recovery.droppedKey
     contextRevision++
@@ -516,22 +538,76 @@
   async function send() {
     if (!session || !canSend) return
     const original = draft
+    const attached = images
     const revision = draftRevision
     const contextVersion = contextRevision
     const removed = droppedKey
     const key = contextKey
     draft = ''
-    recovery = null
+    images = []
+    discardRecovery()
     follow = true
-    const accepted = await session.send(base, original.trim(), webSearch)
+    const accepted = await session.send(
+      base,
+      original.trim(),
+      webSearch,
+      attached.map(({ mime, data }) => ({ mime, data })),
+    )
     if (accepted) {
+      for (const image of attached) URL.revokeObjectURL(image.preview)
       if (contextRevision === contextVersion && contextKey === key) droppedKey = null
-    } else if (draftRevision === revision) {
+    } else if (draftRevision === revision && images.length === 0) {
       draft = original
+      images = attached
       if (contextRevision === contextVersion && contextKey === key) droppedKey = removed
     } else {
-      recovery = { draft: original, droppedKey: removed, contextKey: key }
+      recovery = { draft: original, images: attached, droppedKey: removed, contextKey: key }
     }
+  }
+
+  onDestroy(() => {
+    for (const image of images) URL.revokeObjectURL(image.preview)
+    discardRecovery()
+  })
+  function removeImage(index: number) {
+    const [image] = images.splice(index, 1)
+    if (image) URL.revokeObjectURL(image.preview)
+  }
+  function readBase64(file: File) {
+    const { promise, resolve, reject } = Promise.withResolvers<string>()
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).slice(String(reader.result).indexOf(',') + 1))
+    reader.onerror = () => reject(reader.error ?? new Error('read failed'))
+    reader.readAsDataURL(file)
+    return promise
+  }
+  /** Adds the image files to the tray, or rejects all of them with a toast. */
+  async function attach(files: FileList | null | undefined) {
+    const picked = [...(files ?? [])].filter((file) => file.type.startsWith('image/'))
+    if (picked.length === 0) return
+    if (!vision) notify.toast('error', t('chat.visionUnsupported'))
+    else if (picked.some((file) => !IMAGE_MIMES.includes(file.type))) notify.toast('error', t('chat.imageType'))
+    else if (picked.some((file) => file.size > MAX_IMAGE_BYTES)) notify.toast('error', t('chat.imageSize'))
+    else if (images.length + picked.length > MAX_IMAGES)
+      notify.toast('error', t('chat.imageLimit', { max: MAX_IMAGES }))
+    else {
+      reading++
+      try {
+        const read = await Promise.all(
+          picked.map(async (file) => ({ mime: file.type, data: await readBase64(file), file })),
+        )
+        // Another add may have landed while reading.
+        if (images.length + read.length > MAX_IMAGES) notify.toast('error', t('chat.imageLimit', { max: MAX_IMAGES }))
+        else images.push(...read.map(({ mime, data, file }) => ({ mime, data, preview: URL.createObjectURL(file) })))
+      } catch {
+        notify.toast('error', t('errors.internal'))
+      } finally {
+        reading--
+      }
+    }
+  }
+  function hasImages(files: FileList | null | undefined) {
+    return [...(files ?? [])].some((file) => file.type.startsWith('image/'))
   }
 </script>
 
@@ -632,7 +708,9 @@
                 onSwitchModel={purpose === 'chat' && history && session.conversationId && turn.persisted
                   ? (picked: ModelRef) => void switchModel(turn, picked)
                   : undefined}
-                {modelOptions}
+                modelOptions={turn.images.length > 0
+                  ? (modelOptions?.filter((option) => option.canVision) ?? null)
+                  : modelOptions}
                 sourceModel={sourceModel(turn)}
                 onTranslate={purpose === 'chat' && history && session.conversationId && turn.persisted
                   ? () => translateDialog(turn)
@@ -686,6 +764,14 @@
         e.preventDefault()
         void send()
       }}
+      ondragover={(e) => {
+        if (e.dataTransfer?.types.includes('Files')) e.preventDefault()
+      }}
+      ondrop={(e) => {
+        if (!hasImages(e.dataTransfer?.files)) return
+        e.preventDefault()
+        void attach(e.dataTransfer?.files)
+      }}
     >
       <div class="expand-control">
         <Button
@@ -718,12 +804,35 @@
           >
         </div>
       {/if}
+      {#if images.length > 0}
+        <ul class="image-tray">
+          {#each images as image, index (image.preview)}
+            <li>
+              <img src={image.preview} alt="" /><Button
+                type="button"
+                variant="secondary"
+                size="icon-xs"
+                aria-label={t('chat.removeImage', { index: index + 1 })}
+                title={t('chat.removeImage', { index: index + 1 })}
+                onclick={() => removeImage(index)}><XIcon /></Button
+              >
+            </li>
+          {/each}
+        </ul>
+        {#if !vision}<p class="search-status" role="status">{t('chat.visionUnsupported')}</p>{/if}
+      {/if}
       <Textarea
         bind:value={draft}
         rows={3}
         aria-label={t('chat.input')}
         placeholder={t('chat.placeholder')}
         oninput={() => draftRevision++}
+        onpaste={(e) => {
+          const files = e.clipboardData?.files
+          if (!hasImages(files)) return
+          e.preventDefault()
+          void attach(files)
+        }}
         onkeydown={(e) => {
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing && e.keyCode !== 229) {
             e.preventDefault()
@@ -737,7 +846,7 @@
             type="button"
             variant="outline"
             size="sm"
-            disabled={draft !== ''}
+            disabled={draft !== '' || images.length > 0}
             onclick={recoverDraft}>{t('chat.restoreDraft')}</Button
           >
         </div>
@@ -759,6 +868,25 @@
             title={t('chat.newConversation')}
             onclick={newConversation}><PlusIcon /></Button
           >
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            disabled={session.running || !vision}
+            aria-label={t('chat.attachImages')}
+            title={t(vision ? 'chat.attachImages' : 'chat.visionUnsupported')}
+            onclick={() => fileInput?.click()}><ImagePlusIcon /></Button
+          ><input
+            bind:this={fileInput}
+            type="file"
+            accept={IMAGE_MIMES.join(',')}
+            multiple
+            hidden
+            onchange={(e) => {
+              const input = e.currentTarget
+              void attach(input.files).finally(() => (input.value = ''))
+            }}
+          />
           {#if ports.search && purpose === 'chat'}<Button
               type="button"
               variant="ghost"
@@ -1169,6 +1297,29 @@
   }
   .context-chip :global(button) {
     flex-shrink: 0;
+  }
+  .image-tray {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .image-tray li {
+    position: relative;
+  }
+  .image-tray img {
+    width: 3.5rem;
+    height: 3.5rem;
+    object-fit: cover;
+    border: 1px solid var(--color-border);
+    border-radius: var(--kit-radius, var(--radius));
+  }
+  .image-tray :global(button) {
+    position: absolute;
+    top: -0.375rem;
+    right: -0.375rem;
   }
   .composer-tools,
   .tool-group {

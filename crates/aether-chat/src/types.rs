@@ -6,6 +6,38 @@ use ts_rs::TS;
 
 pub use aether_support::Approval;
 use aether_support::{Connection, KitError, ReasoningBlock, ReasoningEffort};
+
+/// Images per user input (docs/19 §2).
+pub const MAX_IMAGES: usize = 4;
+/// Decoded bytes per image.
+pub const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
+/// Accepted image MIME types.
+pub const IMAGE_MIMES: &[&str] = &["image/png", "image/jpeg", "image/webp", "image/gif"];
+/// Days stored image bytes are kept before `purge_images` clears them.
+pub const IMAGE_TTL_DAYS: i64 = 7;
+
+/// One user image: standard base64 without a `data:` prefix.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
+pub struct ImagePart {
+    /// One of [`IMAGE_MIMES`].
+    pub mime: String,
+    /// Base64 bytes.
+    pub data: String,
+}
+
+/// An image as shown in history; `url = None` once its bytes expired.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ImageRef {
+    /// MIME type.
+    pub mime: String,
+    /// Host URL (desktop `data:` URL, web same-origin route).
+    pub url: Option<String>,
+}
+
 /// Everything one run needs, assembled by the integration layer before the run starts.
 #[derive(Debug)]
 pub struct RunInput {
@@ -19,6 +51,8 @@ pub struct RunInput {
     pub history: Vec<Message>,
     /// This turn's user input.
     pub input: String,
+    /// This turn's images; empty for text-only input.
+    pub images: Vec<ImagePart>,
     /// Tool catalogue, fixed for the whole run.
     pub tools: Vec<ToolSpec>,
     /// Limits.
@@ -165,6 +199,13 @@ pub enum ToolExecution {
 pub enum Message {
     /// User text.
     User(String),
+    /// User text with images; only built by `trim_history`, never stored in `turns.messages`.
+    UserImages {
+        /// Text.
+        text: String,
+        /// Images, in order.
+        images: Vec<ImagePart>,
+    },
     /// Assistant text plus the tool calls it requested.
     Assistant {
         /// Text.

@@ -317,7 +317,10 @@ impl Builder {
                 app.manage(host);
                 app.manage(logs);
                 #[cfg(feature = "chat")]
-                app.manage(chat);
+                {
+                    chat.spawn_image_purge();
+                    app.manage(chat);
+                }
                 #[cfg(feature = "mcp-client")]
                 app.manage(mcp_client);
                 #[cfg(feature = "mcp-server")]

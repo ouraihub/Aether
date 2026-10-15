@@ -6,7 +6,7 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::{ConversationStore, SqliteStore, Turn, TurnRecord, TurnStatus, trim_history};
-use crate::types::{EndStatus, Message, ToolCall};
+use crate::types::{EndStatus, ImagePart, Message, ToolCall};
 
 fn completed(messages: Vec<Message>) -> TurnRecord {
     TurnRecord {
@@ -72,6 +72,7 @@ fn tool_turn(seq: u32, input: &str) -> Turn {
         reasoning_effort: None,
         endpoint_id: None,
         created_at: 0,
+        images: vec![],
     }
 }
 
@@ -83,14 +84,14 @@ fn assert_paired(history: &[Message]) {
             Message::Assistant { tool_calls, .. } => {
                 tool_calls.iter().map(|call| call.id.as_str()).collect()
             }
-            Message::User(_) | Message::Tool { .. } => vec![],
+            Message::User(_) | Message::UserImages { .. } | Message::Tool { .. } => vec![],
         })
         .collect();
     let results: Vec<&str> = history
         .iter()
         .filter_map(|message| match message {
             Message::Tool { call_id, .. } => Some(call_id.as_str()),
-            Message::User(_) | Message::Assistant { .. } => None,
+            Message::User(_) | Message::UserImages { .. } | Message::Assistant { .. } => None,
         })
         .collect();
     assert_eq!(calls, results);
@@ -303,6 +304,90 @@ fn answer(text: &str) -> Vec<Message> {
 }
 
 #[test]
+fn images_persist_copy_on_retry_replay_and_expire() {
+    let dir = TempDir::new().unwrap();
+    let store = SqliteStore::open(dir.path()).unwrap();
+    let png = ImagePart {
+        mime: "image/png".into(),
+        data: "iVBORw0KGgo=".into(),
+    };
+    let first = store
+        .begin_action(
+            None,
+            None,
+            "look",
+            std::slice::from_ref(&png),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let id = first.conversation_id.clone();
+    store
+        .finish_turn(first.clone(), completed(answer("a cat")))
+        .unwrap();
+    let retry = store
+        .begin_action(
+            Some(&id),
+            None,
+            "ignored",
+            &[],
+            None,
+            Some(&first.turn_id),
+            None,
+            None,
+        )
+        .unwrap();
+    store
+        .finish_turn(retry, completed(answer("a dog")))
+        .unwrap();
+    assert_eq!(
+        store
+            .begin_action(
+                Some(&id),
+                None,
+                "x",
+                std::slice::from_ref(&png),
+                None,
+                Some(&first.turn_id),
+                None,
+                None
+            )
+            .unwrap_err()
+            .details()
+            .reason(),
+        Some("action_conflict")
+    );
+    drop(store);
+    let store = SqliteStore::open(dir.path()).unwrap();
+    let turns = store.load(&id).unwrap().turns;
+    assert!(
+        turns.iter().all(|t| t.image_parts() == vec![png.clone()]),
+        "{turns:?}"
+    );
+    assert_eq!(
+        trim_history(&turns[..1], u32::MAX)[0],
+        Message::UserImages {
+            text: "look".into(),
+            images: vec![png]
+        }
+    );
+    assert_eq!(store.purge_images(i64::MAX).unwrap(), 2);
+    let expired = store.load(&id).unwrap().turns;
+    assert!(
+        expired
+            .iter()
+            .all(|t| t.images.len() == 1 && t.images[0].data.is_none())
+    );
+    assert_eq!(
+        trim_history(&expired[..1], u32::MAX)[0],
+        Message::User("look".into())
+    );
+    store.delete(&id).unwrap();
+}
+
+#[test]
 fn edit_compare_and_swap_preserves_usage_and_invalidates_native_context() {
     let dir = TempDir::new().unwrap();
     let store = SqliteStore::open(dir.path()).unwrap();
@@ -403,6 +488,7 @@ fn running_foreign_selected_and_dependent_targets_are_rejected_atomically() {
                     Some(id),
                     None,
                     "ignored",
+                    &[],
                     parent,
                     retry,
                     translation,
@@ -523,6 +609,7 @@ fn terminal_failed_cancelled_replies_support_edit_retry_and_translation() {
                 Some(id),
                 None,
                 "ignored",
+                &[],
                 None,
                 Some(&source.turn_id),
                 None,
@@ -549,6 +636,7 @@ fn terminal_failed_cancelled_replies_support_edit_retry_and_translation() {
                 Some(id),
                 None,
                 "ignored",
+                &[],
                 None,
                 None,
                 Some(&source.turn_id),

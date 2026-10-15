@@ -1,12 +1,14 @@
 //! Request encoding and stream decoding of the three wire protocols (docs/12 §3).
 
+use std::iter;
+
 use aether_support::{Connection, Protocol, ReasoningEffort};
 use reqwest::RequestBuilder;
 use reqwest::header::ACCEPT;
 use serde_json::{Map, Value, json};
 
 use crate::run::Usage;
-use crate::types::{Message, ToolCall, ToolSpec};
+use crate::types::{ImagePart, Message, ToolCall, ToolSpec};
 
 /// Endpoint path below the `/v1` base URL produced by providers.
 pub(crate) const fn path(protocol: Protocol) -> &'static str {
@@ -24,6 +26,8 @@ pub(crate) struct Request<'a> {
     pub(crate) system: &'a str,
     pub(crate) history: &'a [Message],
     pub(crate) input: &'a str,
+    /// Images of `input`; the runner already rejected them for a model without vision.
+    pub(crate) images: &'a [ImagePart],
     /// Messages this run produced so far, after `input`.
     pub(crate) turn: &'a [Message],
     pub(crate) max_output: u32,
@@ -41,9 +45,10 @@ impl Request<'_> {
         }
         let protocol = self.connection.protocol;
         let mut messages = Vec::new();
-        encode_messages(protocol, self.history, &mut messages);
-        push_user(&mut messages, self.input);
-        encode_messages(protocol, self.turn, &mut messages);
+        let vision = self.connection.can_vision;
+        encode_messages(protocol, vision, self.history, &mut messages);
+        push_user(&mut messages, protocol, self.input, self.images);
+        encode_messages(protocol, vision, self.turn, &mut messages);
         let has_system = !self.system.is_empty();
         let mut body = match protocol {
             Protocol::AnthropicMessages => {
@@ -133,24 +138,31 @@ impl Request<'_> {
     }
 }
 
-fn encode_messages(protocol: Protocol, messages: &[Message], out: &mut Vec<Value>) {
+/// `vision = false` strips history images: only their text is sent (docs/19 §3).
+fn encode_messages(protocol: Protocol, vision: bool, messages: &[Message], out: &mut Vec<Value>) {
     if protocol == Protocol::AnthropicMessages {
-        anthropic_messages(messages, out);
+        anthropic_messages(vision, messages, out);
     } else {
         for message in messages {
-            openai_message(protocol, message, out);
+            openai_message(protocol, vision, message, out);
         }
     }
 }
 
 /// Anthropic: consecutive tool results become one user message of `tool_result` blocks,
 /// ordered like the `tool_use` blocks of the assistant message they answer.
-fn anthropic_messages(history: &[Message], out: &mut Vec<Value>) {
+fn anthropic_messages(vision: bool, history: &[Message], out: &mut Vec<Value>) {
     let is_tool = |m: &Message| matches!(m, Message::Tool { .. });
     let mut calls: &[ToolCall] = &[];
     for group in history.chunk_by(|a, b| is_tool(a) && is_tool(b)) {
         match group {
-            [Message::User(text), ..] => push_user(out, text),
+            [Message::User(text), ..] => push_user(out, Protocol::AnthropicMessages, text, &[]),
+            [Message::UserImages { text, images }, ..] => push_user(
+                out,
+                Protocol::AnthropicMessages,
+                text,
+                if vision { images } else { &[] },
+            ),
             [
                 Message::Assistant {
                     text,
@@ -185,7 +197,9 @@ fn anthropic_messages(history: &[Message], out: &mut Vec<Value>) {
                                 .unwrap_or(usize::MAX),
                             json!({ "type": "tool_result", "tool_use_id": call_id, "content": text }),
                         )),
-                        Message::User(_) | Message::Assistant { .. } => None,
+                        Message::User(_)
+                        | Message::UserImages { .. }
+                        | Message::Assistant { .. } => None,
                     })
                     .collect();
                 blocks.sort_by_key(|(position, _)| *position);
@@ -196,23 +210,55 @@ fn anthropic_messages(history: &[Message], out: &mut Vec<Value>) {
     }
 }
 
-/// Appends user text; after Anthropic tool results it joins that user message as a text block.
-fn push_user(out: &mut Vec<Value>, text: &str) {
+/// Appends user content (docs/19 §4); after Anthropic tool results it joins that user
+/// message as blocks.
+fn push_user(out: &mut Vec<Value>, protocol: Protocol, text: &str, images: &[ImagePart]) {
     if let Some(Value::Array(blocks)) = out
         .last_mut()
-        .filter(|last| last["role"] == "user")
+        .filter(|last| protocol == Protocol::AnthropicMessages && last["role"] == "user")
         .map(|last| &mut last["content"])
     {
-        blocks.push(json!({ "type": "text", "text": text }));
+        blocks.extend(user_blocks(protocol, text, images));
     } else {
-        out.push(json!({ "role": "user", "content": text }));
+        out.push(json!({ "role": "user", "content": user_content(protocol, text, images) }));
     }
 }
 
-fn openai_message(protocol: Protocol, message: &Message, out: &mut Vec<Value>) {
+/// Plain string without images, so text-only request bodies stay byte-identical.
+fn user_content(protocol: Protocol, text: &str, images: &[ImagePart]) -> Value {
+    if images.is_empty() {
+        json!(text)
+    } else {
+        user_blocks(protocol, text, images).into()
+    }
+}
+
+/// Anthropic puts images before the text (its guidance); OpenAI text first.
+fn user_blocks(protocol: Protocol, text: &str, images: &[ImagePart]) -> Vec<Value> {
+    let url = |image: &ImagePart| format!("data:{};base64,{}", image.mime, image.data);
+    match protocol {
+        Protocol::AnthropicMessages => images
+            .iter()
+            .map(|image| json!({ "type": "image", "source": { "type": "base64", "media_type": image.mime, "data": image.data } }))
+            .chain(iter::once(json!({ "type": "text", "text": text })))
+            .collect(),
+        Protocol::OpenaiChat => iter::once(json!({ "type": "text", "text": text }))
+            .chain(images.iter().map(|image| json!({ "type": "image_url", "image_url": { "url": url(image) } })))
+            .collect(),
+        Protocol::OpenaiResponses => iter::once(json!({ "type": "input_text", "text": text }))
+            .chain(images.iter().map(|image| json!({ "type": "input_image", "image_url": url(image) })))
+            .collect(),
+    }
+}
+
+fn openai_message(protocol: Protocol, vision: bool, message: &Message, out: &mut Vec<Value>) {
     let responses = protocol == Protocol::OpenaiResponses;
     match message {
         Message::User(text) => out.push(json!({ "role": "user", "content": text })),
+        Message::UserImages { text, images } => out.push(json!({
+            "role": "user",
+            "content": user_content(protocol, text, if vision { images } else { &[] }),
+        })),
         Message::Assistant {
             text,
             tool_calls,

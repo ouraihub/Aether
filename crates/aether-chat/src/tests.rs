@@ -25,8 +25,8 @@ use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 use crate::{
-    Approval, Approver, BoxFuture, Budget, EndStatus, Message, RunEvent, RunInput, RunSummary,
-    Runner, SystemPart, ToolCall, ToolExecution, ToolExecutor, Usage,
+    Approval, Approver, BoxFuture, Budget, EndStatus, ImagePart, Message, RunEvent, RunInput,
+    RunSummary, Runner, SystemPart, ToolCall, ToolExecution, ToolExecutor, Usage,
 };
 
 const KEY: &str = "sk-test-0123456789abcdefghijkl";
@@ -192,6 +192,7 @@ fn input(protocol: Protocol, base_url: String) -> RunInput {
         supports_tools: None,
         reasoning: None,
         native_web_search: false,
+        can_vision: true,
     };
     RunInput {
         run_id: "r1".to_owned(),
@@ -207,6 +208,7 @@ fn input(protocol: Protocol, base_url: String) -> RunInput {
             },
         ],
         input: "hi".to_owned(),
+        images: Vec::new(),
         tools: Vec::new(),
         reasoning_effort: aether_support::ReasoningEffort::Default,
         native_web_search: false,
@@ -669,4 +671,79 @@ async fn stream_without_terminal_event_fails() {
     .await;
     assert_eq!(end(&events).1, Some(KitErrorCode::Network));
     assert_eq!(summary_text(&summary), "Hello");
+}
+
+fn png() -> ImagePart {
+    ImagePart {
+        mime: "image/png".to_owned(),
+        data: "iVBORw0KGgo=".to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn images_are_encoded_per_protocol_for_input_and_history() {
+    for protocol in PROTOCOLS {
+        let (base, seen) = upstream(sse(fixture(protocol, "text"))).await;
+        let mut with = input(protocol, base);
+        with.images = vec![png()];
+        with.history[0] = Message::UserImages {
+            text: "earlier".to_owned(),
+            images: vec![png()],
+        };
+        let (summary, _) = run(&runner(5_000, 5_000), with, false).await;
+        assert_eq!(summary.status, EndStatus::Completed);
+        let body = request_body(&seen.lock().await[0]);
+        let list = if protocol == Protocol::OpenaiResponses {
+            &body["input"]
+        } else {
+            &body["messages"]
+        };
+        let users: Vec<_> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .collect();
+        let url = "data:image/png;base64,iVBORw0KGgo=";
+        let (history, current) = (&users[0]["content"], &users[1]["content"]);
+        for (content, text) in [(history, "earlier"), (current, "hi")] {
+            let want = match protocol {
+                Protocol::OpenaiChat => {
+                    serde_json::json!([{"type":"text","text":text},{"type":"image_url","image_url":{"url":url}}])
+                }
+                Protocol::OpenaiResponses => {
+                    serde_json::json!([{"type":"input_text","text":text},{"type":"input_image","image_url":url}])
+                }
+                Protocol::AnthropicMessages => {
+                    serde_json::json!([{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},{"type":"text","text":text}])
+                }
+            };
+            assert_eq!(content, &want, "{protocol:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn non_vision_rejects_input_images_offline_and_strips_history_images() {
+    let (base, seen) = upstream(sse(fixture(Protocol::OpenaiChat, "text"))).await;
+    let mut rejected = input(Protocol::OpenaiChat, base);
+    rejected.connection.can_vision = false;
+    rejected.images = vec![png()];
+    let (summary, events) = run(&runner(5_000, 5_000), rejected, false).await;
+    assert_eq!(summary.status, EndStatus::Failed);
+    assert_eq!(end(&events).1, Some(KitErrorCode::BadRequest));
+    assert!(seen.lock().await.is_empty(), "no request may leave");
+
+    let (base, seen) = upstream(sse(fixture(Protocol::OpenaiChat, "text"))).await;
+    let mut stripped = input(Protocol::OpenaiChat, base);
+    stripped.connection.can_vision = false;
+    stripped.history[0] = Message::UserImages {
+        text: "earlier".to_owned(),
+        images: vec![png()],
+    };
+    let (summary, _) = run(&runner(5_000, 5_000), stripped, false).await;
+    assert_eq!(summary.status, EndStatus::Completed);
+    let body = request_body(&seen.lock().await[0]);
+    assert_eq!(body["messages"][1]["content"], "earlier");
+    assert_eq!(body["messages"][3]["content"], "hi");
 }
