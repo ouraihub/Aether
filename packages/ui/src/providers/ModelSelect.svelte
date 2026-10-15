@@ -10,6 +10,7 @@
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
   import { Button } from '#lib/components/ui/button/index.js'
   import { getKitContext } from '../context'
+  import type { Snippet } from 'svelte'
   import type { ModelFilter, ModelOption, ModelRef } from '../ports'
 
   let {
@@ -20,6 +21,7 @@
     disabled = false,
     options: suppliedOptions,
     onOpenSettings,
+    trigger,
   }: {
     value: ModelRef | null
     filter?: ModelFilter
@@ -30,6 +32,8 @@
     options?: ModelOption[] | null
     /** Shows a footer link to the model settings. */
     onOpenSettings?: () => void
+    /** Replaces the default trigger button; spread `props` onto the element. */
+    trigger?: Snippet<[{ props: Record<string, unknown> }]>
   } = $props()
 
   const { ports, i18n } = getKitContext()
@@ -108,26 +112,28 @@
     >
       <Popover.Trigger disabled={disabled || options === null || options.length === 0}>
         {#snippet child({ props })}
-          <Button
-            {...props}
-            variant="outline"
-            class="model-trigger"
-            aria-invalid={invalid}
-            aria-label={t('providers.model_placeholder')}
-            title={current?.label}
-          >
-            {#if options === null}
-              <span class="model-name muted">{t('chat.modelsLoading')}</span>
-            {:else if current}
-              <span class="model-name">{current.modelId}</span>
-              <span class="model-group">| {group(current)}</span>
-            {:else}
-              <span class="model-name muted"
-                >{invalid ? t('providers.model_invalid') : (placeholder ?? t('providers.model_placeholder'))}</span
-              >
-            {/if}
-            <ChevronDownIcon class="model-chevron" />
-          </Button>
+          {#if trigger}{@render trigger({ props })}{:else}
+            <Button
+              {...props}
+              variant="outline"
+              class="model-trigger"
+              aria-invalid={invalid}
+              aria-label={t('providers.model_placeholder')}
+              title={current?.label}
+            >
+              {#if options === null}
+                <span class="model-name muted">{t('chat.modelsLoading')}</span>
+              {:else if current}
+                <span class="model-name">{current.modelId}</span>
+                <span class="model-group">| {group(current)}</span>
+              {:else}
+                <span class="model-name muted"
+                  >{invalid ? t('providers.model_invalid') : (placeholder ?? t('providers.model_placeholder'))}</span
+                >
+              {/if}
+              <ChevronDownIcon class="model-chevron" />
+            </Button>
+          {/if}
         {/snippet}
       </Popover.Trigger>
       <Popover.Content

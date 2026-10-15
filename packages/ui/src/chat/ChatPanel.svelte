@@ -298,7 +298,7 @@
     return [...grouped.entries()]
   })
   const actionBusy = $derived(historyBusy || session?.running === true || restoreBlocked)
-  let replyDialog = $state<'edit' | 'model' | 'translate' | null>(null)
+  let replyDialog = $state<'edit' | 'translate' | null>(null)
   let replyOpen = $state(false)
   let sourceReply = $state<ChatTurn | null>(null)
   let editDraft = $state('')
@@ -344,12 +344,12 @@
     replyDialog = 'edit'
     replyOpen = true
   }
-  function generationDialog(turn: ChatTurn, kind: 'model' | 'translate') {
+  function translateDialog(turn: ChatTurn) {
     sourceReply = turn
     replyModel = sourceModel(turn)
     targetLanguage = i18n.locale
     replyError = null
-    replyDialog = kind
+    replyDialog = 'translate'
     replyOpen = true
   }
   function showConversation(conversation: Conversation) {
@@ -399,20 +399,25 @@
     const source = sourceModel(turn)
     if (history && turn.persisted) {
       if (modelOptions === null || modelError) {
-        generationDialog(turn, 'model')
+        notify.toast('error', modelError ?? t('chat.modelsLoading'))
         return
       }
       if (
         !source ||
         !modelOptions.some((option) => option.endpointId === source.endpointId && option.modelId === source.modelId)
       ) {
-        generationDialog(turn, 'model')
-        replyError = t('chat.sourceModelUnavailable')
+        notify.toast('error', t('chat.sourceModelUnavailable'))
         return
       }
     }
     follow = true
     await session.retry(base, turn.id)
+  }
+  async function switchModel(turn: ChatTurn, model: ModelRef) {
+    if (!session || actionBusy) return
+    follow = true
+    if (!(await session.retry(base, turn.id, model)))
+      notify.toast('error', t(`errors.${session.actionError ?? 'internal'}`))
   }
   async function submitReply() {
     const turn = sourceReply
@@ -432,11 +437,8 @@
       }
     } else {
       if (!validReplyModel || !replyModel) return
-      if (replyDialog === 'translate' && (!targetLanguage.trim() || targetLanguage.trim().length > 80)) return
-      const accepted =
-        replyDialog === 'translate'
-          ? await session.translate({ ...base, model: replyModel }, turn.id, targetLanguage.trim())
-          : await session.retry(base, turn.id, replyModel)
+      if (!targetLanguage.trim() || targetLanguage.trim().length > 80) return
+      const accepted = await session.translate({ ...base, model: replyModel }, turn.id, targetLanguage.trim())
       if (accepted) replyOpen = false
       else replyError = session.actionError ? t(`errors.${session.actionError}`) : t('errors.internal')
     }
@@ -620,10 +622,12 @@
                   ? () => void mutateReply(turn, 'copy')
                   : undefined}
                 onSwitchModel={purpose === 'chat' && history && session.conversationId && turn.persisted
-                  ? () => generationDialog(turn, 'model')
+                  ? (picked: ModelRef) => void switchModel(turn, picked)
                   : undefined}
+                {modelOptions}
+                sourceModel={sourceModel(turn)}
                 onTranslate={purpose === 'chat' && history && session.conversationId && turn.persisted
-                  ? () => generationDialog(turn, 'translate')
+                  ? () => translateDialog(turn)
                   : undefined}
                 onDelete={purpose === 'chat' && history && session.conversationId && turn.persisted
                   ? () => void mutateReply(turn, 'remove')
@@ -971,15 +975,7 @@
     <Dialog.Root bind:open={replyOpen}>
       <Dialog.Content class="reply-dialog" showCloseButton={false}>
         <Dialog.Header>
-          <Dialog.Title
-            >{t(
-              replyDialog === 'edit'
-                ? 'chat.editReply'
-                : replyDialog === 'translate'
-                  ? 'chat.translate'
-                  : 'chat.switchModel',
-            )}</Dialog.Title
-          >
+          <Dialog.Title>{t(replyDialog === 'edit' ? 'chat.editReply' : 'chat.translate')}</Dialog.Title>
           <Dialog.Description
             >{t(replyDialog === 'edit' ? 'chat.editReplyHint' : 'chat.candidateHint')}</Dialog.Description
           >
@@ -1016,14 +1012,14 @@
                     >{t('chat.retryModels')}</Button
                   >
                 </p>{/if}
-              {#if replyDialog === 'translate'}<Field.Field
-                  ><Field.FieldLabel for="chat-target-language">{t('chat.targetLanguage')}</Field.FieldLabel><Input
-                    id="chat-target-language"
-                    bind:value={targetLanguage}
-                    maxlength={80}
-                    disabled={actionBusy}
-                  /></Field.Field
-                >{/if}
+              <Field.Field
+                ><Field.FieldLabel for="chat-target-language">{t('chat.targetLanguage')}</Field.FieldLabel><Input
+                  id="chat-target-language"
+                  bind:value={targetLanguage}
+                  maxlength={80}
+                  disabled={actionBusy}
+                /></Field.Field
+              >
             {/if}
             {#if replyError}<p role="alert" class="text-destructive">{replyError}</p>{/if}
             <Dialog.Footer>
@@ -1035,8 +1031,7 @@
                 disabled={actionBusy ||
                   (replyDialog === 'edit'
                     ? !editDraft.trim() || editDraft.length > 24_000
-                    : !validReplyModel || (replyDialog === 'translate' && !targetLanguage.trim()))}
-                >{t('common.confirm')}</Button
+                    : !validReplyModel || !targetLanguage.trim())}>{t('common.confirm')}</Button
               >
             </Dialog.Footer>
           </Field.FieldGroup>

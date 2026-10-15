@@ -53,7 +53,7 @@ export const en: Messages = {
     'This is the only reply to its question. Both the question and reply will disappear. This cannot be undone.',
   'chat.deleteSelectedDisabled': 'Choose another reply as context before deleting this reply.',
   'chat.deleteChildrenDisabled': 'This reply has descendants or newer candidates and cannot be deleted.',
-  'chat.sourceModelUnavailable': 'The source model is unavailable. Choose a model to generate another candidate.',
+  'chat.sourceModelUnavailable': 'The source model is unavailable. Use @ to pick another model.',
   'chat.candidateHint': 'The original reply is retained. Choose Use as context to continue from a candidate.',
   'chat.editReplyHint': 'Edits only replace this reply. A concurrent change will reject the edit and keep your draft.',
   'chat.replyRefreshFailed': 'Could not reload the saved replies.',

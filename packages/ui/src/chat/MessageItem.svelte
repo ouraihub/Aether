@@ -5,6 +5,8 @@
   import { renderMarkdown } from '../markdown'
   import ApprovalCard from './ApprovalCard.svelte'
   import type { ChatTurn, ToolItem } from './run-session.svelte'
+  import type { ModelOption, ModelRef } from '../ports'
+  import ModelSelect from '../providers/ModelSelect.svelte'
   import ExternalLinkIcon from '@lucide/svelte/icons/external-link'
   import { onDestroy } from 'svelte'
   import CopyIcon from '@lucide/svelte/icons/copy'
@@ -34,6 +36,8 @@
     onBranch,
     onCopyConversation,
     onSwitchModel,
+    modelOptions = null,
+    sourceModel = null,
     onTranslate,
     onDelete,
     onUseContext,
@@ -54,7 +58,10 @@
     onEdit?: (() => void) | undefined
     onBranch?: (() => void) | undefined
     onCopyConversation?: (() => void) | undefined
-    onSwitchModel?: (() => void) | undefined
+    /** Regenerates this reply with the picked model (Cherry's @ menu). */
+    onSwitchModel?: ((model: ModelRef) => void) | undefined
+    modelOptions?: ModelOption[] | null
+    sourceModel?: ModelRef | null
     onTranslate?: (() => void) | undefined
     onDelete?: (() => void) | undefined
     onUseContext?: (() => void) | undefined
@@ -225,14 +232,20 @@
             ><RotateCcwIcon /></Button
           >
         {/if}
-        {#if onSwitchModel}<Button
-            variant="ghost"
-            size="icon-xs"
-            title={t('chat.switchModel')}
-            aria-label={t('chat.switchModel')}
+        {#if onSwitchModel}<ModelSelect
+            value={sourceModel}
+            options={modelOptions}
             disabled={busy}
-            onclick={onSwitchModel}><AtSignIcon /></Button
-          >{/if}
+            onchange={(model) => onSwitchModel(model)}
+          >
+            {#snippet trigger({ props })}<Button
+                {...props}
+                variant="ghost"
+                size="icon-xs"
+                title={t('chat.switchModel')}
+                aria-label={t('chat.switchModel')}><AtSignIcon /></Button
+              >{/snippet}
+          </ModelSelect>{/if}
         {#if onTranslate}<Button
             variant="ghost"
             size="icon-xs"

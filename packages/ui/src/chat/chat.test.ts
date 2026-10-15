@@ -1011,10 +1011,8 @@ describe('ChatPanel', () => {
       expect(screen.getAllByRole('button', { name: 'Switch model' })[1]?.hasAttribute('disabled')).toBe(false),
     )
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Switch model' })[1]))
-    const dialog = await screen.findByRole('dialog')
-    await fireEvent.click(within(dialog).getByLabelText('Select a model'))
+    expect(screen.queryByRole('dialog')).toBeNull()
     await fireEvent.click(await screen.findByRole('option', { name: /m2/ }))
-    await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
     expect(runs[1]?.request).toMatchObject({ conversationId: 'saved', retryTurnId: 'b', model: secondModel })
   })
 
@@ -1140,17 +1138,14 @@ describe('ChatPanel', () => {
     const conversation = candidates()
     required(conversation.turns[1]).endpointId = 'removed-endpoint'
     required(conversation.turns[1]).modelId = 'removed-model'
-    const { runs } = setup(true, null, {
+    const { runs, notify } = setup(true, null, {
       props: { conversationId: 'saved' },
       history: { get: () => Promise.resolve(conversation) },
     })
     await screen.findByText('Alternative reply')
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Regenerate' })[1]))
-    await screen.findByRole('dialog')
-    expect(
-      screen.getByText('The source model is unavailable. Choose a model to generate another candidate.'),
-    ).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'OK' }).hasAttribute('disabled')).toBe(true)
+    expect(notify.toast).toHaveBeenCalledWith('error', 'The source model is unavailable. Use @ to pick another model.')
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(runs).toHaveLength(0)
     expect(screen.getByText('Alternative reply')).toBeTruthy()
   })

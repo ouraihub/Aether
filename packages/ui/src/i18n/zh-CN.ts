@@ -47,7 +47,7 @@ export const zhCN: Messages = {
   'chat.deleteOnlyReplyBody': '这是该问题唯一的回复，问题和回复都将消失。此操作无法撤销。',
   'chat.deleteSelectedDisabled': '请先将另一条回复选为上下文，再删除此回复。',
   'chat.deleteChildrenDisabled': '此回复存在后续回复或新候选，无法删除。',
-  'chat.sourceModelUnavailable': '来源模型已不可用，请选择模型生成新的候选回复。',
+  'chat.sourceModelUnavailable': '来源模型已不可用，请点 @ 选择其他模型。',
   'chat.candidateHint': '原回复将保留。选择“用作上下文”后，可从候选回复继续对话。',
   'chat.editReplyHint': '编辑只替换此回复。若回复被同时修改，将拒绝保存并保留你的草稿。',
   'chat.replyRefreshFailed': '重新加载已保存回复失败。',
