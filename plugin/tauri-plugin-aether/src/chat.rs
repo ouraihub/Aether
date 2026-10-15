@@ -487,7 +487,28 @@ pub(crate) async fn chat_run<R: Runtime>(
     .await?;
     let skill_refs = request.skills.clone();
     let cancel = CancellationToken::new();
-    let executor = HostTools::new(Arc::clone(&*app.state::<Arc<dyn KitHost>>()));
+    let mut executor = HostTools::new(Arc::clone(&*app.state::<Arc<dyn KitHost>>()));
+    if request.generate_image == Some(true) {
+        if request.purpose != "chat" {
+            return Err(KitError::bad_request("generateImage", "chat_only"));
+        }
+        if input.connection.supports_tools == Some(false) {
+            return Err(KitError::bad_request("generateImage", "tools_unsupported"));
+        }
+        let model = executor
+            .host
+            .painting_model()
+            .ok_or_else(|| KitError::needs_config("painting_model"))?;
+        let providers = Arc::clone(&app.state::<Providers>().store);
+        let connection = blocking(move || providers.resolve(&model)).await?;
+        input.tools.push(aether_chat::generate_image_spec());
+        executor.painting = Some(crate::tools::Painting {
+            connection,
+            policy: AddressPolicy::default(),
+            store: None,
+            calls: std::sync::atomic::AtomicU8::new(0),
+        });
+    }
     let web_search = request.web_search.unwrap_or(false);
     if web_search && request.purpose != "chat" {
         return Err(KitError::bad_request("webSearch", "chat_only"));
@@ -503,7 +524,7 @@ pub(crate) async fn chat_run<R: Runtime>(
     }
     // Before `validate`, so a name clash with a host tool is rejected (docs/15 §4 step 5).
     #[cfg(feature = "mcp-client")]
-    let executor = {
+    let mut executor = {
         let (specs, session) = crate::tools::mcp_tools(&app, &cancel).await;
         input.tools.extend(specs);
         HostTools {
@@ -603,6 +624,13 @@ pub(crate) async fn chat_run<R: Runtime>(
     }
     let conversation_id = turn.as_ref().map(|t| t.conversation_id.clone());
     let accepted_turn_id = turn.as_ref().map(|t| t.turn_id.clone());
+    if let (Some(painting), Some(store), Some(turn_id)) = (
+        executor.painting.as_mut(),
+        chat.store.clone(),
+        accepted_turn_id.clone(),
+    ) {
+        painting.store = Some((store, turn_id));
+    }
 
     chat.runs().insert(
         run_id.clone(),
@@ -893,6 +921,8 @@ pub(crate) struct Turn {
     reasoning_text: Option<String>,
     /// Images attached to the input; never base64 in history (docs/19 §2).
     images: Vec<aether_chat::ImageRef>,
+    /// Images `generate_image` produced in this reply (docs/20 §2).
+    generated: Vec<aether_chat::ImageRef>,
 }
 
 impl From<aether_chat::Turn> for Turn {
@@ -968,17 +998,18 @@ impl From<aether_chat::Turn> for Turn {
             context_usage: t.context_usage,
             reasoning_effort: t.reasoning_effort,
             reasoning_text: Some(reasoning_text),
-            images: t
-                .images
-                .into_iter()
-                .map(|image| aether_chat::ImageRef {
-                    url: image
-                        .data
-                        .map(|data| format!("data:{};base64,{data}", image.mime)),
-                    mime: image.mime,
-                })
-                .collect(),
+            images: t.images.into_iter().map(image_ref).collect(),
+            generated: t.generated.into_iter().map(image_ref).collect(),
         }
+    }
+}
+
+fn image_ref(image: aether_chat::TurnImage) -> aether_chat::ImageRef {
+    aether_chat::ImageRef {
+        url: image
+            .data
+            .map(|data| format!("data:{};base64,{data}", image.mime)),
+        mime: image.mime,
     }
 }
 

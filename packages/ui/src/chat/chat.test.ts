@@ -88,6 +88,7 @@ function setup(
                 mime: image.mime,
                 url: `data:${image.mime};base64,${image.data}`,
               })),
+          generated: [],
           text: '',
           status: 'running',
           errorCode: null,
@@ -315,6 +316,7 @@ describe('ChatPanel', () => {
       reasoningEffort: 'default',
       reasoningText: null,
       images: [],
+      generated: [],
     }
     const summary: Conversation['summary'] = {
       id: 'c9',
@@ -467,6 +469,7 @@ describe('ChatPanel', () => {
                 reasoningEffort: 'high',
                 reasoningText: 'summary',
                 images: [],
+                generated: [],
                 usage: {
                   inputTokens: 12,
                   outputTokens: 3,
@@ -644,6 +647,7 @@ describe('ChatPanel', () => {
                 reasoningEffort: 'default',
                 reasoningText: null,
                 images: [],
+                generated: [],
               },
             ],
           }),
@@ -913,6 +917,7 @@ describe('ChatPanel', () => {
             reasoningEffort: 'default',
             reasoningText: null,
             images: [],
+            generated: [],
           },
         ],
       })
@@ -969,6 +974,7 @@ describe('ChatPanel', () => {
       reasoningEffort: 'default',
       reasoningText: null,
       images: [],
+      generated: [],
     })
     return {
       summary: { id: 'saved', title: 'Candidates', scope: null, selectedTurnId: 'a', createdAt: 0, updatedAt: 0 },
@@ -1349,9 +1355,15 @@ describe('ChatPanel images', () => {
       providers: { modelOptions: () => Promise.resolve([textOption, visionOption]), ...extra.providers },
     })
   }
+  async function uploadItem() {
+    await fireEvent.click(screen.getByRole('button', { name: 'More tools' }))
+    return screen.findByRole('button', { name: /^Upload attachment/ })
+  }
   async function pick(files: File[]) {
-    const attach = screen.getByRole('button', { name: 'Attach images' })
-    await waitFor(() => expect(attach.hasAttribute('disabled')).toBe(false))
+    const upload = await uploadItem()
+    await waitFor(() => expect(upload.hasAttribute('disabled')).toBe(false))
+    await fireEvent.click(upload)
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Upload attachment/ })).toBeNull())
     const input = required(document.querySelector<HTMLInputElement>('input[type=file]'))
     expect(input.accept).toBe('image/png,image/jpeg,image/webp,image/gif')
     await fireEvent.change(input, { target: { files } })
@@ -1376,9 +1388,7 @@ describe('ChatPanel images', () => {
   it('takes pasted images and leaves plain text paste alone', async () => {
     const { runs } = visionSetup()
     const input = screen.getByRole('textbox', { name: 'Message' })
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Attach images' }).hasAttribute('disabled')).toBe(false),
-    )
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
     expect(await fireEvent.paste(input, { clipboardData: { files: [] } })).toBe(true)
     expect(await fireEvent.paste(input, { clipboardData: { files: [png()] } })).toBe(false)
     await screen.findByRole('button', { name: 'Remove image 1' })
@@ -1404,9 +1414,10 @@ describe('ChatPanel images', () => {
 
   it('disables attach and send for a non-vision model until a vision model is picked', async () => {
     const { notify } = visionSetup({ props: { model } })
-    const attach = screen.getByRole('button', { name: 'Attach images' })
-    await waitFor(() => expect(attach.getAttribute('title')).toBe('The current model does not support images'))
-    expect(attach.hasAttribute('disabled')).toBe(true)
+    const upload = await uploadItem()
+    await waitFor(() => expect(upload.getAttribute('title')).toBe('The current model does not support images'))
+    expect(upload.hasAttribute('disabled')).toBe(true)
+    await fireEvent.keyDown(upload, { key: 'Escape' })
     await fireEvent.paste(screen.getByRole('textbox', { name: 'Message' }), { clipboardData: { files: [png()] } })
     await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'The current model does not support images'))
     expect(screen.queryByRole('button', { name: 'Remove image 1' })).toBeNull()
@@ -1456,6 +1467,7 @@ describe('ChatPanel images', () => {
         { mime: 'image/png', url: null },
         { mime: 'image/png', url: '/img/1' },
       ],
+      generated: [],
     })
     const conversation: Conversation = {
       summary: { id: 'saved', title: 'Images', scope: null, selectedTurnId: 'a', createdAt: 0, updatedAt: 0 },

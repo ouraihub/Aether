@@ -72,4 +72,8 @@ language: string,
 /**
  * Requested reasoning effort; omitted uses the endpoint default.
  */
-reasoningEffort?: ReasoningEffort, };
+reasoningEffort?: ReasoningEffort, 
+/**
+ * Offer the `generate_image` tool this run (docs/20 §2).
+ */
+generateImage?: boolean, };

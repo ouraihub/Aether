@@ -12,7 +12,10 @@
   import SquareIcon from '@lucide/svelte/icons/square'
   import GaugeIcon from '@lucide/svelte/icons/gauge'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
-  import ImagePlusIcon from '@lucide/svelte/icons/image-plus'
+  import PaperclipIcon from '@lucide/svelte/icons/paperclip'
+  import MessageSquarePlusIcon from '@lucide/svelte/icons/message-square-plus'
+  import ImageIcon from '@lucide/svelte/icons/image'
+  import CheckIcon from '@lucide/svelte/icons/check'
   import { Popover } from 'bits-ui'
   import { Button } from '#lib/components/ui/button/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
@@ -55,6 +58,7 @@
     conversationId = null,
     onConversationChange,
     onClose,
+    paintingModel = false,
   }: {
     purpose?: string
     model?: ModelRef | null
@@ -72,6 +76,8 @@
     conversationId?: string | null
     onConversationChange?: (id: string | null) => void
     onClose?: () => void
+    /** Whether the host has a painting model bound; gates “Generate image” (docs/20 §1). */
+    paintingModel?: boolean
   } = $props()
 
   const { ports, i18n, notify } = getKitContext()
@@ -147,6 +153,7 @@
   const contextKey = $derived(context ? `${context.kind}:${context.id}` : null)
   const activeContext = $derived(context && contextKey !== droppedKey ? context : null)
   let webSearch = $state(false)
+  let generateImage = $state(false)
   const base = $derived({
     purpose,
     scope: scope ?? null,
@@ -154,6 +161,7 @@
     model: picked,
     skills: selected,
     reasoningEffort,
+    generateImage: purpose === 'chat' && generateImage && paintingModel,
     context: activeContext ? { kind: activeContext.kind, id: activeContext.id } : null,
   })
   const currentContext = $derived(
@@ -503,6 +511,7 @@
   let images = $state<Attached[]>([])
   let reading = $state(0)
   let fileInput = $state<HTMLInputElement | null>(null)
+  let toolsOpen = $state(false)
   const vision = $derived(capability?.canVision === true)
   const canSend = $derived(
     session !== null &&
@@ -866,17 +875,63 @@
             disabled={session.running || historyBusy}
             aria-label={t('chat.newConversation')}
             title={t('chat.newConversation')}
-            onclick={newConversation}><PlusIcon /></Button
+            onclick={newConversation}><MessageSquarePlusIcon /></Button
           >
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            disabled={session.running || !vision}
-            aria-label={t('chat.attachImages')}
-            title={t(vision ? 'chat.attachImages' : 'chat.visionUnsupported')}
-            onclick={() => fileInput?.click()}><ImagePlusIcon /></Button
-          ><input
+          <Popover.Root bind:open={toolsOpen}>
+            <Popover.Trigger disabled={session.running}>
+              {#snippet child({ props })}<Button
+                  {...props}
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t('chat.tools')}
+                  title={t('chat.tools')}><PlusIcon /></Button
+                >{/snippet}
+            </Popover.Trigger>
+            <Popover.Content class="tools-menu" side="top" align="start" sideOffset={6} collisionPadding={8}>
+              <button
+                type="button"
+                class="tools-item"
+                disabled={!vision}
+                title={vision ? undefined : t('chat.visionUnsupported')}
+                onclick={() => {
+                  toolsOpen = false
+                  fileInput?.click()
+                }}
+                ><PaperclipIcon /><span>{t('chat.uploadAttachment')}</span>{#if !vision}<small
+                    >{t('chat.visionUnsupported')}</small
+                  >{/if}</button
+              >
+              {#if purpose === 'chat'}<button
+                  type="button"
+                  class="tools-item"
+                  aria-pressed={generateImage}
+                  disabled={!paintingModel || capability?.supportsTools === false}
+                  title={!paintingModel
+                    ? t('chat.paintingUnconfigured')
+                    : capability?.supportsTools === false
+                      ? t('chat.toolsUnsupported')
+                      : undefined}
+                  onclick={() => {
+                    toolsOpen = false
+                    generateImage = !generateImage
+                  }}
+                  ><ImageIcon /><span>{t('chat.generateImage')}</span>{#if !paintingModel}<small
+                      >{t('chat.paintingUnconfigured')}</small
+                    >{:else if generateImage}<CheckIcon />{/if}</button
+                >{/if}
+            </Popover.Content>
+          </Popover.Root>
+          {#if generateImage && paintingModel && purpose === 'chat'}<Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              class="tool-chip"
+              aria-label={t('chat.generateImageOff')}
+              title={t('chat.generateImageOff')}
+              onclick={() => (generateImage = false)}><ImageIcon />{t('chat.generateImage')}<XIcon /></Button
+            >{/if}
+          <input
             bind:this={fileInput}
             type="file"
             accept={IMAGE_MIMES.join(',')}
@@ -1346,6 +1401,54 @@
   }
   .chat-panel :global(button.search-toggle[aria-pressed='true']:hover:not(:disabled)) {
     background: color-mix(in oklch, var(--color-primary) 85%, var(--color-foreground));
+  }
+  :global(.tools-menu) {
+    z-index: 50;
+    box-sizing: border-box;
+    width: min(16rem, calc(100vw - 1rem));
+    display: flex;
+    flex-direction: column;
+    padding: 0.25rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--kit-radius, var(--radius));
+    background: var(--color-popover);
+    color: var(--color-popover-foreground);
+    box-shadow: 0 4px 12px color-mix(in oklch, var(--color-foreground) 12%, transparent);
+    font-size: var(--kit-font-size-sm, 0.8125rem);
+  }
+  :global(.tools-item) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.25rem;
+    padding: 0.25rem 0.625rem;
+    border: 0;
+    border-radius: calc(var(--kit-radius, var(--radius)) - 2px);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  :global(.tools-item:hover:not(:disabled)),
+  :global(.tools-item:focus-visible) {
+    background: var(--color-accent);
+    color: var(--color-accent-foreground);
+    outline: none;
+  }
+  :global(.tools-item:disabled) {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+  :global(.tools-item svg) {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+  }
+  :global(.tools-item small) {
+    margin-left: auto;
+    color: var(--color-muted-foreground);
+    font-size: 0.75rem;
   }
   :global(.reasoning-popover) {
     box-sizing: border-box;

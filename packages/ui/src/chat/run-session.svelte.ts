@@ -42,6 +42,8 @@ export interface ChatTurn {
   modelId: string | null
   input: string
   images: ImageRef[]
+  /** Images `generate_image` produced in this reply (docs/20). */
+  generated: ImageRef[]
   text: string
   reasoningText: string
   reasoningEffort: ReasoningEffort
@@ -70,6 +72,8 @@ export interface RunBase {
   skills: SkillRef[]
   context: ContextRef | null
   reasoningEffort?: ReasoningEffort
+  /** Offer the `generate_image` tool (docs/20). */
+  generateImage?: boolean
 }
 
 export class RunSession {
@@ -215,6 +219,7 @@ export class RunSession {
         action.images?.map((image) => ({ mime: image.mime, url: `data:${image.mime};base64,${image.data}` })) ??
         source?.images ??
         [],
+      generated: [],
       text: '',
       reasoningText: '',
       reasoningEffort: base.reasoningEffort ?? 'default',
@@ -291,6 +296,7 @@ export class RunSession {
       modelId: turn.modelId,
       input: turn.input,
       images: turn.images,
+      generated: turn.generated,
       text: turn.text,
       reasoningText: turn.reasoningText ?? '',
       reasoningEffort: turn.reasoningEffort ?? 'default',
@@ -429,6 +435,8 @@ export class RunSession {
         case 'tool_result': {
           const item = tool(event.callId)
           if (item) Object.assign(item, { pending: null, outcome: event.outcome, summary: event.summary })
+          const painted = (event.payload as { images?: ImageRef[] } | undefined)?.images
+          if (event.outcome === 'ok' && Array.isArray(painted)) turn.generated.push(...painted)
           break
         }
         case 'end':
@@ -455,6 +463,7 @@ export class RunSession {
       regenerate: false,
       language: base.language,
       reasoningEffort: base.reasoningEffort ?? 'default',
+      ...(base.generateImage && !action.translateTurnId ? { generateImage: true } : {}),
       ...(base.purpose === 'chat' && this.#stored && !action.retryTurnId && !action.translateTurnId
         ? { replyToId: this.selectedTurnId }
         : {}),

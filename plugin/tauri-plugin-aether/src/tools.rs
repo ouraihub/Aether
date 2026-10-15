@@ -18,6 +18,17 @@ pub(crate) struct HostTools {
     /// Calls in one run are sequential, so the lock is never contended.
     #[cfg(feature = "mcp-client")]
     pub(crate) mcp: Option<tokio::sync::Mutex<aether_mcp_client::McpSession>>,
+    /// Set when this run offers `generate_image` (docs/20 §3).
+    pub(crate) painting: Option<Painting>,
+}
+
+/// What `generate_image` needs during one run.
+pub(crate) struct Painting {
+    pub(crate) connection: aether_support::Connection,
+    pub(crate) policy: aether_support::net::AddressPolicy,
+    pub(crate) store: Option<(Arc<dyn aether_chat::ConversationStore>, String)>,
+    /// ponytail: per-run cap stops a looping model; raise only if users ask for batches.
+    pub(crate) calls: std::sync::atomic::AtomicU8,
 }
 
 impl HostTools {
@@ -26,6 +37,7 @@ impl HostTools {
             host,
             #[cfg(feature = "mcp-client")]
             mcp: None,
+            painting: None,
         }
     }
 }
@@ -38,6 +50,11 @@ impl ToolExecutor for HostTools {
     }
 
     async fn execute(&self, call: &ToolCall, cancel: &CancellationToken) -> ToolExecution {
+        if call.name == aether_chat::GENERATE_IMAGE
+            && let Some(painting) = &self.painting
+        {
+            return paint(painting, call, cancel).await;
+        }
         // Dispatch by catalogue: the names are unique across sources (Chat `validate`).
         #[cfg(feature = "mcp-client")]
         if let Some(mcp) = &self.mcp {
@@ -63,6 +80,47 @@ impl ToolExecutor for HostTools {
                 message: error.message,
             },
         }
+    }
+}
+
+/// One `generate_image` call: paint, store as the turn's generated image, show it in the UI.
+async fn paint(painting: &Painting, call: &ToolCall, cancel: &CancellationToken) -> ToolExecution {
+    if painting
+        .calls
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        >= 2
+    {
+        return ToolExecution::Error {
+            code: "limit".to_owned(),
+            message: "At most 2 images per reply.".to_owned(),
+        };
+    }
+    let generated = tokio::select! {
+        () = cancel.cancelled() => return ToolExecution::Unknown { reason: "cancelled".to_owned() },
+        result = aether_chat::generate_image(&painting.connection, &painting.policy, &call.args) => result,
+    };
+    let image = match generated {
+        Ok(image) => image,
+        Err(error) => {
+            return ToolExecution::Error {
+                code: format!("{:?}", error.code()).to_lowercase(),
+                message: error.message().to_owned(),
+            };
+        }
+    };
+    if let Some((store, turn_id)) = &painting.store {
+        let (store, turn_id, part) = (Arc::clone(store), turn_id.clone(), image.clone());
+        let saved =
+            tauri::async_runtime::spawn_blocking(move || store.add_generated(&turn_id, &[part]))
+                .await;
+        if !matches!(saved, Ok(Ok(()))) {
+            tracing::warn!("chat.images.generated_store_failed");
+        }
+    }
+    let url = format!("data:{};base64,{}", image.mime, image.data);
+    ToolExecution::Ok {
+        text: "Generated 1 image; it is already shown to the user.".to_owned(),
+        payload: Some(serde_json::json!({ "images": [{ "mime": image.mime, "url": url }] })),
     }
 }
 

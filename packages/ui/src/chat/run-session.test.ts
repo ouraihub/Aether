@@ -35,6 +35,7 @@ function stored(overrides: Partial<Turn> = {}): Turn {
     reasoningText: 'Original reasoning',
     reasoningEffort: 'default',
     images: [],
+    generated: [],
     ...overrides,
   }
 }

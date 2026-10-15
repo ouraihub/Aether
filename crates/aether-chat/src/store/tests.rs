@@ -73,6 +73,7 @@ fn tool_turn(seq: u32, input: &str) -> Turn {
         endpoint_id: None,
         created_at: 0,
         images: vec![],
+        generated: vec![],
     }
 }
 

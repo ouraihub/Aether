@@ -22,6 +22,7 @@ const turn = (id: string, overrides: Partial<Turn> = {}): Turn => ({
   errorCode: null,
   reasoningText: 'Thinking',
   images: [],
+  generated: [],
   usage: { inputTokens: 100, outputTokens: 60, cacheReadTokens: 20, cacheWriteTokens: null, reasoningTokens: 4 },
   contextUsage: { tokens: 160, contextWindow: 1000, source: 'reported', ...model },
   ...overrides,

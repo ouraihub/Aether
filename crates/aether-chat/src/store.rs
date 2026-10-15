@@ -30,6 +30,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 4,
         sql: "CREATE TABLE turn_images (turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE, idx INTEGER NOT NULL, mime TEXT NOT NULL, data TEXT, created_at INTEGER NOT NULL, PRIMARY KEY(turn_id, idx));",
     },
+    Migration {
+        version: 5,
+        sql: "ALTER TABLE turn_images ADD COLUMN kind TEXT NOT NULL DEFAULT 'input' CHECK (kind IN ('input','generated'));",
+    },
 ];
 
 /// Title = first input without line breaks, cut to this many characters.
@@ -121,6 +125,10 @@ pub trait ConversationStore: Send + Sync {
     /// # Errors
     /// `internal` on storage failure.
     fn purge_images(&self, before_ms: i64) -> Result<usize, KitError>;
+    /// Appends images produced by a tool (`generate_image`) during `turn_id`'s run (docs/20 §3).
+    /// # Errors
+    /// `internal` on storage failure.
+    fn add_generated(&self, turn_id: &str, images: &[ImagePart]) -> Result<(), KitError>;
 }
 
 /// A row of the history list.
@@ -211,6 +219,8 @@ pub struct Turn {
     pub created_at: i64,
     /// Input images in order; `data: None` once purged.
     pub images: Vec<TurnImage>,
+    /// Images a tool generated during this turn; `data: None` once purged. Never replayed.
+    pub generated: Vec<TurnImage>,
 }
 
 impl Turn {
@@ -578,7 +588,7 @@ impl ConversationStore for SqliteStore {
         }
         tx.execute("INSERT INTO turns (id,conversation_id,seq,status,input,parent_id,question_id,supersedes_id,kind,model_id,endpoint_id,created_at) SELECT ?1,?2,COALESCE(MAX(seq),0)+1,'running',?3,?4,?5,?6,?7,?8,?9,?10 FROM turns WHERE conversation_id=?2", params![turn_id,&cid,run_input,parent,question,supersedes,kind,source_model,source_endpoint,now])?;
         if let Some(source) = &supersedes {
-            tx.execute("INSERT INTO turn_images (turn_id,idx,mime,data,created_at) SELECT ?1,idx,mime,data,created_at FROM turn_images WHERE turn_id=?2", params![turn_id, source])?;
+            tx.execute("INSERT INTO turn_images (turn_id,idx,mime,data,created_at,kind) SELECT ?1,idx,mime,data,created_at,kind FROM turn_images WHERE turn_id=?2 AND kind='input'", params![turn_id, source])?;
         }
         for (idx, image) in images.iter().enumerate() {
             let idx = i64::try_from(idx).map_err(KitError::internal)?;
@@ -812,7 +822,7 @@ impl ConversationStore for SqliteStore {
         for (seq, t) in path.iter().enumerate() {
             let seq = i64::try_from(seq + 1).map_err(KitError::internal)?;
             tx.execute("INSERT INTO turns (id,conversation_id,seq,parent_id,question_id,supersedes_id,kind,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,created_at) SELECT ?1,?2,?3,?4,?5,?6,kind,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,created_at FROM turns WHERE id=?7 AND conversation_id=?8", params![ids[&t.id.as_str()],id,seq,t.parent_id.as_deref().and_then(|p| ids.get(p)),questions[&t.question_id.as_str()],t.supersedes_id.as_deref().and_then(|s| ids.get(s)),t.id,conversation_id])?;
-            tx.execute("INSERT INTO turn_images (turn_id,idx,mime,data,created_at) SELECT ?1,idx,mime,data,created_at FROM turn_images WHERE turn_id=?2", params![ids[&t.id.as_str()], t.id])?;
+            tx.execute("INSERT INTO turn_images (turn_id,idx,mime,data,created_at,kind) SELECT ?1,idx,mime,data,created_at,kind FROM turn_images WHERE turn_id=?2", params![ids[&t.id.as_str()], t.id])?;
         }
         tx.execute(
             "UPDATE conversations SET selected_turn_id=?1 WHERE id=?2",
@@ -829,6 +839,15 @@ impl ConversationStore for SqliteStore {
             [before_ms],
         )?;
         Ok(cleared)
+    }
+
+    fn add_generated(&self, turn_id: &str, images: &[ImagePart]) -> Result<(), KitError> {
+        let db = self.lock()?;
+        let now = now_millis();
+        for image in images {
+            db.execute("INSERT INTO turn_images (turn_id,idx,mime,data,created_at,kind) SELECT ?1,COALESCE(MAX(idx),-1)+1,?2,?3,?4,'generated' FROM turn_images WHERE turn_id=?1", params![turn_id, image.mime, image.data, now])?;
+        }
+        Ok(())
     }
 }
 
@@ -892,6 +911,7 @@ fn turn(row: &Row<'_>) -> rusqlite::Result<Turn> {
         kind: row.get(20)?,
         created_at: row.get(21)?,
         images: Vec::new(),
+        generated: Vec::new(),
     })
 }
 
@@ -906,15 +926,20 @@ fn load_conversation(db: &rusqlite::Connection, id: &str) -> Result<Conversation
         .ok_or_else(|| KitError::not_found("conversation"))?;
     let mut stmt = db.prepare("SELECT id,seq,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,conversation_id,parent_id,question_id,supersedes_id,kind,created_at FROM turns WHERE conversation_id=?1 ORDER BY seq")?;
     let mut turns: Vec<Turn> = stmt.query_map([id], turn)?.collect::<Result<_, _>>()?;
-    let mut stmt = db.prepare("SELECT i.turn_id,i.mime,i.data FROM turn_images i JOIN turns t ON t.id=i.turn_id WHERE t.conversation_id=?1 ORDER BY i.turn_id,i.idx")?;
+    let mut stmt = db.prepare("SELECT i.turn_id,i.mime,i.data,i.kind FROM turn_images i JOIN turns t ON t.id=i.turn_id WHERE t.conversation_id=?1 ORDER BY i.turn_id,i.idx")?;
     let mut rows = stmt.query([id])?;
     while let Some(row) = rows.next()? {
         let turn_id: String = row.get(0)?;
         if let Some(turn) = turns.iter_mut().find(|t| t.id == turn_id) {
-            turn.images.push(TurnImage {
+            let image = TurnImage {
                 mime: row.get(1)?,
                 data: row.get(2)?,
-            });
+            };
+            if row.get::<_, String>(3)? == "generated" {
+                turn.generated.push(image);
+            } else {
+                turn.images.push(image);
+            }
         }
     }
     Ok(Conversation { summary, turns })

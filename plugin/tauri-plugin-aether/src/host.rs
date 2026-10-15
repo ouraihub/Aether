@@ -36,6 +36,11 @@ pub trait KitHost: Send + Sync + 'static {
     fn tools(&self, _req: &RunRequest) -> Vec<HostTool> {
         Vec::new()
     }
+    /// Image model for `generate_image` (docs/20 §2); `None` keeps the tool off.
+    #[cfg(feature = "chat")]
+    fn painting_model(&self) -> Option<ModelRef> {
+        None
+    }
     /// Runs a host tool.
     ///
     /// # Errors
@@ -130,6 +135,10 @@ mod chat_contract {
         #[serde(default)]
         #[ts(optional)]
         pub reasoning_effort: Option<ReasoningEffort>,
+        /// Offer the `generate_image` tool this run (docs/20 §2).
+        #[serde(default)]
+        #[ts(optional)]
+        pub generate_image: Option<bool>,
     }
 
     /// Reference to host data; `kind` and `id` are defined by the app.

@@ -192,6 +192,22 @@
         <ApprovalCard {tool} onAnswer={(allow) => onApprove(tool, allow)} />
       {/if}
     {/each}
+    {#if turn.generated.length > 0}
+      <ul class="generated-images" aria-label={t('chat.generatedImages')}>
+        {#each turn.generated as image, index (index)}
+          <li>
+            {#if image.url}<a
+                href={image.url}
+                target="_blank"
+                rel="noopener"
+                onclick={(event) => openImage(event, image.url)}
+                aria-label={t('chat.openGeneratedImage', { index: index + 1 })}
+                title={t('chat.openGeneratedImage', { index: index + 1 })}><img src={image.url} alt="" /></a
+              >{:else}<span class="image-expired">{t('chat.imageExpired')}</span>{/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
     <div
       class="markdown"
       {@attach (node) => {
@@ -368,6 +384,29 @@
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+  .generated-images {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .generated-images a {
+    display: block;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: var(--kit-radius, var(--radius));
+  }
+  .generated-images a:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+  .generated-images img {
+    display: block;
+    width: 100%;
+    height: auto;
   }
   .user-images a,
   .image-expired {

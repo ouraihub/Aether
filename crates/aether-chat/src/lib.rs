@@ -2,6 +2,7 @@
 //!
 //! 设计：`docs/12-详细设计-kit-chat.md`。实现按 `docs/90-开发任务清单.md` 领取任务后填充。
 
+mod painting;
 mod protocol;
 mod run;
 mod store;
@@ -13,6 +14,7 @@ pub use tokio_util::sync::CancellationToken;
 
 /// Hosts build a [`Runner`] with it without depending on the private `aether-support`.
 pub use aether_support::net::AddressPolicy;
+pub use painting::{GENERATE_IMAGE, generate_image, generate_image_spec};
 pub use run::{RunSummary, Runner, Usage};
 pub use store::{
     Conversation, ConversationStore, ConversationSummary, SqliteStore, Turn, TurnHandle, TurnImage,

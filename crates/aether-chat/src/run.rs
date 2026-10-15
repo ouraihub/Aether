@@ -463,7 +463,7 @@ fn timed_out(reason: &str) -> KitError {
     KitError::new(KitErrorCode::Timeout, format!("upstream {reason} timeout")).with_reason(reason)
 }
 
-fn transport(error: reqwest::Error) -> KitError {
+pub(crate) fn transport(error: reqwest::Error) -> KitError {
     let error = error.without_url();
     if net::is_blocked(&error) {
         return KitError::bad_request("url", "blocked_address").with_cause(error);

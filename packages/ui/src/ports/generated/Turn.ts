@@ -12,4 +12,8 @@ export type Turn = { id: string, parentId: string | null, questionId: string, su
 /**
  * Images attached to the input; never base64 in history (docs/19 §2).
  */
-images: Array<ImageRef>, };
+images: Array<ImageRef>, 
+/**
+ * Images `generate_image` produced in this reply (docs/20 §2).
+ */
+generated: Array<ImageRef>, };

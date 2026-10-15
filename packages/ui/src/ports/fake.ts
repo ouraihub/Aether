@@ -279,6 +279,7 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
                   mime: image.mime,
                   url: `data:${image.mime};base64,${image.data}`,
                 })),
+          generated: [],
           text: `Fake reply: ${input}`,
           status: 'running',
           errorCode: null,
