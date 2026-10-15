@@ -67,7 +67,8 @@ pub async fn generate_image(
     let mut request = client
         .post(url)
         .timeout(TIMEOUT)
-        .json(&json!({ "model": painting.model_id, "prompt": prompt, "size": size, "n": 1, "response_format": "b64_json" }));
+        // No `response_format`: gpt-image-* rejects it (always b64); others may answer `url`, handled below.
+        .json(&json!({ "model": painting.model_id, "prompt": prompt, "size": size, "n": 1 }));
     if let Some(key) = &painting.api_key {
         request = request.bearer_auth(key.as_str());
     }
@@ -207,7 +208,7 @@ mod tests {
         let sent: Value = serde_json::from_str(&seen.lock().await[0]).unwrap();
         assert_eq!(
             sent,
-            json!({"model": "gpt-image-1", "prompt": "a red fox", "size": "1536x1024", "n": 1, "response_format": "b64_json"})
+            json!({"model": "gpt-image-1", "prompt": "a red fox", "size": "1536x1024", "n": 1})
         );
 
         let (files, _) = serve(vec![(200, "\u{89}PNG".to_owned())]).await;
