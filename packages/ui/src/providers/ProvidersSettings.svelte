@@ -309,7 +309,7 @@
           >
           <Switch
             id="kit-provider-enabled"
-            class="data-checked:bg-success ml-auto"
+            class="data-[state=checked]:bg-success ml-auto"
             aria-label={t('providers.enabled')}
             checked={draft.enabled}
             disabled={enabledSaving || draft.id === null}
