@@ -60,6 +60,19 @@ pub(crate) async fn providers_save<R: Runtime>(
 ) -> Result<Vec<Provider>, KitError> {
     blocking(&app, move |store| store.save(input)).await
 }
+#[tauri::command]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "providers_set_enabled"),
+    err(level = "warn")
+)]
+pub(crate) async fn providers_set_enabled<R: Runtime>(
+    app: AppHandle<R>,
+    id: String,
+    enabled: bool,
+) -> Result<Vec<Provider>, KitError> {
+    blocking(&app, move |store| store.set_enabled(&id, enabled)).await
+}
 
 #[tauri::command]
 #[tracing::instrument(skip_all, fields(command = "providers_delete"), err(level = "warn"))]
@@ -71,14 +84,23 @@ pub(crate) async fn providers_delete<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "providers_key_reveal"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "providers_key_reveal"),
+    err(level = "warn")
+)]
 pub(crate) async fn providers_key_reveal<R: Runtime>(
     app: AppHandle<R>,
     endpoint_id: String,
 ) -> Result<String, KitError> {
     blocking(&app, move |store| {
-        Ok(store.endpoint_connection(&endpoint_id)?.api_key.map(|key| key.to_string()).ok_or_else(|| KitError::needs_config("missing_key"))?)
-    }).await
+        Ok(store
+            .endpoint_connection(&endpoint_id)?
+            .api_key
+            .map(|key| key.to_string())
+            .ok_or_else(|| KitError::needs_config("missing_key"))?)
+    })
+    .await
 }
 
 #[tauri::command]

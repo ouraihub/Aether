@@ -120,6 +120,18 @@ impl Store {
     /// `bad_request` for invalid input; `not_found` for an unknown provider or endpoint id;
     /// the sealing error (e.g. `unsupported`) when a new key cannot be encrypted, in which
     /// case nothing is written.
+    pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<Vec<Provider>, KitError> {
+        let db = self.lock()?;
+        let changed = db.execute(
+            "UPDATE providers SET enabled = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, enabled, now_millis()],
+        )?;
+        if changed == 0 {
+            return Err(KitError::not_found("provider"));
+        }
+        list(&db)
+    }
+
     pub fn save(&self, input: ProviderSave) -> Result<Vec<Provider>, KitError> {
         self.save_with(input, secret::seal)
     }
@@ -911,6 +923,20 @@ mod tests {
         assert_eq!(error.code(), KitErrorCode::NotFound);
         drop(store);
         assert_eq!(Store::open(dir.path()).unwrap().list().unwrap(), saved);
+    }
+    #[test]
+    fn set_enabled_changes_only_provider_switch() {
+        let (_dir, store) = store();
+        let saved = store
+            .save(request(json!({ "name": "Acme", "endpoints": [endpoint(None, "main", &["m1"])] })))
+            .unwrap();
+        let provider = &saved[0];
+        let endpoint_id = provider.endpoints[0].id.clone();
+        let changed = store.set_enabled(&provider.id, false).unwrap();
+        assert!(!changed[0].enabled);
+        assert_eq!(changed[0].name, "Acme");
+        assert_eq!(changed[0].endpoints[0].id, endpoint_id);
+        assert_eq!(changed[0].endpoints[0].models[0].id, "m1");
     }
 
     #[test]

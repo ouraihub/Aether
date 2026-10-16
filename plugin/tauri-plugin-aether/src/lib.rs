@@ -257,6 +257,8 @@ impl Builder {
                 #[cfg(feature = "providers")]
                 providers::providers_delete,
                 #[cfg(feature = "providers")]
+                providers::providers_set_enabled,
+                #[cfg(feature = "providers")]
                 providers::providers_model_options,
                 #[cfg(feature = "providers")]
                 providers::providers_probe,

@@ -26,6 +26,7 @@
   let baseline = $state('')
   let expanded = $state(0)
   let saving = $state(false)
+  let enabledSaving = $state(false)
   let probe = $state<{ index: number; result: ProbeResult | null; error: string | null } | null>(null)
   let pickerOpen = $state(false)
   let abort: AbortController | null = null
@@ -79,6 +80,31 @@
   function add() {
     load({ id: null, name: t('providers.new_name'), enabled: true, endpoints: [newEndpoint(0)] })
     baseline = ''
+  }
+  async function setEnabled(enabled: boolean) {
+    const providerId = draft?.id
+    if (!providerId || !port || enabledSaving) return
+    const previous = draft.enabled
+    draft.enabled = enabled
+    enabledSaving = true
+    try {
+      providers = await port.setEnabled(providerId, enabled)
+      if (draft?.id !== providerId) return
+      const current = providers.find((provider) => provider.id === providerId)
+      if (current && draft) {
+        draft.enabled = current.enabled
+        const saved = JSON.parse(baseline) as ProviderDraft
+        saved.enabled = current.enabled
+        baseline = JSON.stringify(saved)
+      }
+      providersRevision.value++
+      onchanged?.()
+    } catch (error) {
+      if (draft?.id === providerId) draft.enabled = previous
+      notify.toast('error', errorText(error))
+    } finally {
+      enabledSaving = false
+    }
   }
   async function save() {
     if (!draft || !port) return
@@ -212,7 +238,9 @@
             id="kit-provider-enabled"
             size="default"
             aria-label={t('providers.enabled')}
-            bind:checked={draft.enabled}
+            checked={draft.enabled}
+            disabled={enabledSaving}
+            onCheckedChange={(enabled) => void setEnabled(enabled)}
           />
         </div>
         <h3 class="text-kit-base font-semibold">{t('providers.endpoints')}</h3>

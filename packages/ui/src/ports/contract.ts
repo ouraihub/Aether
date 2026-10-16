@@ -50,6 +50,7 @@ export interface ProvidersPort {
   /** Browser asks for the current password; desktop uses its local credential boundary. */
   readonly revealNeedsPassword: boolean
   list(): Promise<Provider[]>
+  setEnabled(id: string, enabled: boolean): Promise<Provider[]>
   save(provider: ProviderSave): Promise<Provider[]>
   remove(id: string): Promise<Provider[]>
   modelOptions(filter?: ModelFilter): Promise<ModelOption[]>

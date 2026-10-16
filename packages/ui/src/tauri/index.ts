@@ -46,6 +46,7 @@ export function createTauriPorts(options: TauriPortsOptions = {}): KitPorts & { 
   if (options.providers) {
     ports.providers = {
       list: () => call('providers_list'),
+      setEnabled: (id, enabled) => call('providers_set_enabled', { id, enabled }),
       save: (input) => call('providers_save', { input }),
       remove: (id) => call('providers_delete', { id }),
       modelOptions: (filter = {}) => call('providers_model_options', { filter }),
