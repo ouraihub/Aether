@@ -201,17 +201,16 @@
             </Alert.Description>
           </Alert.Root>
         {/if}
-        <div class="flex items-end gap-3">
+        <div class="flex items-end gap-4">
           <Field.Field class="min-w-0 flex-1">
             <Field.Label for="kit-provider-name">{t('providers.name')}</Field.Label>
             <Input id="kit-provider-name" maxlength={80} bind:value={draft.name} />
           </Field.Field>
-          <div class="flex h-9 shrink-0 items-center gap-2">
-            <label for="kit-provider-enabled" class="text-kit-sm">{t('providers.enabled')}</label>
-            <Switch id="kit-provider-enabled" bind:checked={draft.enabled} />
-          </div>
+          <label for="kit-provider-enabled" class="flex h-9 shrink-0 items-center gap-3 pb-0.5 text-base font-medium">
+            {t('providers.enabled')}
+            <Switch id="kit-provider-enabled" size="default" bind:checked={draft.enabled} />
+          </label>
         </div>
-        {#if !draft.enabled}<p class="text-muted-foreground text-kit-sm">{t('providers.disabled_hint')}</p>{/if}
         <h3 class="text-kit-base font-semibold">{t('providers.endpoints')}</h3>
         {#each draft.endpoints as endpoint, index (index)}
           <EndpointCard
