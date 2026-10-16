@@ -66,7 +66,7 @@ setKitContext(ctx)  // 宿主根组件调用一次；未自带通知实现的宿
 
 - aether 不读写宿主偏好；需要持久化的选择（默认模型、上次选的技能）通过组件 props/事件交给应用。
 - **主题就是 shadcn-svelte 的 CSS 变量**（`--background`、`--foreground`、`--card`、`--muted-foreground`、`--primary`、`--destructive`、`--border` 等）。三个已用 shadcn-svelte 的宿主无需额外配置；未用的宿主引入 `@ouraihub/aether-ui/styles.css`（这组变量的默认值，亮/暗两套，中性色带少量 265° 色相）。aether 不定义自己的颜色变量。
-- **状态色合同**：在 shadcn 变量之外，aether 只额外使用三个语义状态色 `success`（启用、视觉能力、成功）、`warning`（缺密钥、工具能力）、`info`（推理能力）。组件只写 `bg-success`、`text-info` 等语义类，禁止写具体色值或借用 `chart-*`。`styles.css` 提供亮/暗默认值；自带 Tailwind 入口的宿主必须在自己的 `@theme` 中映射 `--color-success/warning/info`（AutoNote 映射到其 `--success/--warning/--info`），新增主题只改变量。Switch 关闭态用 `muted-foreground/45`、滑块用 `background`，不依赖 `--input`（宿主常把它映射为透明边框色）。
+- **状态色合同**：在 shadcn 变量之外，aether 只额外使用三个语义状态色 `success`（启用、视觉能力、成功）、`warning`（缺密钥、工具能力）、`info`（推理能力）。组件只写 `bg-success`、`text-info` 等语义类，禁止写具体色值或借用 `chart-*`。`styles.css` 提供亮/暗默认值；自带 Tailwind 入口的宿主必须在自己的 `@theme` 中映射 `--color-success/warning/info`（AutoNote 映射到其 `--success/--warning/--info`），新增主题只改变量。Switch 与 AutoNote 原生开关一致：开 = `primary`（宿主强调色），关 = `muted-foreground/35`，白色滑块，34×20；状态选择器必须用 bits-ui 实际输出的 `data-[state=checked|unchecked]`，不能写 `data-checked`（不存在，样式永远不生效）。
 - **尺寸令牌**（`styles/tokens.css`，`styles.css` 已包含；自带 Tailwind 入口的宿主在 `@import 'tailwindcss'` 之后引入 `@ouraihub/aether-ui/tokens.css` 并 `@source` aether 的 `src`）。默认值取自 AutoNote，宿主在自己的 `:root` 覆盖：
 
   | 变量 | 默认 | Tailwind 工具类 | 用途 |
