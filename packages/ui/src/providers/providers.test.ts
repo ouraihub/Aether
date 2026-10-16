@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from '../i18n'
 import { createFakePorts, type Endpoint, type Provider, type ProviderSave } from '../ports'
-import { adopt, savable, toDraft } from './draft'
+import { adopt, primaryKey, savable, toDraft } from './draft'
 import Harness from './Harness.test.svelte'
 
 const endpoint: Endpoint = {
@@ -10,13 +10,15 @@ const endpoint: Endpoint = {
   slug: 'main',
   baseUrl: 'http://127.0.0.1:9/v1',
   protocol: 'openai-chat',
-  hasKey: true,
-  keyMasked: 'sk-a…wxyz',
-  keyReadable: true,
+  keys: [{ id: 'k1', label: '', enabled: true, masked: 'sk-a****wxyz', readable: true }],
   probeUrl: 'http://127.0.0.1:9/v1/models',
   models: [],
 }
 const stored: Provider = { id: 'p1', name: 'Local', enabled: true, endpoints: [endpoint] }
+const twoKeys: Endpoint = {
+  ...endpoint,
+  keys: [...endpoint.keys, { id: 'k2', label: 'backup', enabled: true, masked: 'sk-b****1234', readable: true }],
+}
 const model = {
   contextWindow: null,
   maxOutput: null,
@@ -25,11 +27,11 @@ const model = {
   nativeWebSearch: false,
 } as const
 
-function setup(overrides: NonNullable<Parameters<typeof createFakePorts>[0]>['providers'] = {}) {
+function setup(overrides: NonNullable<Parameters<typeof createFakePorts>[0]>['providers'] = {}, list = stored) {
   const saves: ProviderSave[] = []
   const ports = createFakePorts({
     providers: {
-      list: () => Promise.resolve([stored]),
+      list: () => Promise.resolve([list]),
       save: (input) => {
         saves.push(input)
         return Promise.resolve([stored])
@@ -65,7 +67,7 @@ async function openPicker() {
 }
 
 describe('ProvidersSettings', () => {
-  it('saves each +/- at once with the endpoint id and without touching the key', async () => {
+  it('saves each +/- at once with the endpoint id and ', async () => {
     const { saves } = setup()
     const picker = await openPicker()
     await fireEvent.click(picker.getByRole('button', { name: 'Add gpt-4o' }))
@@ -73,7 +75,6 @@ describe('ProvidersSettings', () => {
     expect(screen.queryByRole('button', { name: /Use \d+ models/ })).toBeNull()
     const saved = saves[0]?.endpoints[0]
     expect(saved?.id).toBe('e1')
-    expect(saved && 'apiKey' in saved).toBe(false)
     expect(saved?.models.map((m) => m.id)).toEqual(['gpt-4o'])
   })
 
@@ -107,7 +108,36 @@ describe('ProvidersSettings', () => {
     setup({ revealKey })
     await fireEvent.click(await screen.findByRole('button', { name: 'Copy key' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('sk-plain-key'))
-    expect(revealKey).toHaveBeenCalledWith('e1', '')
+    expect(revealKey).toHaveBeenCalledWith('k1', '')
+  })
+
+  it('shows the primary key with +N and offers delete only for a single key', async () => {
+    setup({}, { ...stored, endpoints: [twoKeys] })
+    expect(await screen.findByText('+1')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Delete key' })).toBeNull()
+  })
+
+  it('deletes the only key from the row after confirming', async () => {
+    const removeKey = vi.fn(() => Promise.resolve([stored]))
+    setup({ removeKey })
+    expect(screen.queryByText('+1')).toBeNull()
+    await fireEvent.click(await screen.findByRole('button', { name: 'Delete key' }))
+    await waitFor(() => expect(removeKey).toHaveBeenCalledWith('e1', 'k1'))
+  })
+
+  it('adds no key without text and toggles a key from the dialog', async () => {
+    const saveKey = vi.fn(() => Promise.resolve([{ ...stored, endpoints: [twoKeys] }]))
+    const { notify } = setup({ saveKey }, { ...stored, endpoints: [twoKeys] })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Manage API keys' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    expect(dialog.getByText('2 / 2 enabled')).toBeTruthy()
+    await fireEvent.click(dialog.getByRole('button', { name: 'Add API key' }))
+    await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    expect(notify.toast).toHaveBeenCalledWith('error', 'API key is required')
+    expect(saveKey).not.toHaveBeenCalled()
+    await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    await fireEvent.click(dialog.getByRole('switch', { name: 'Enable backup' }))
+    await waitFor(() => expect(saveKey).toHaveBeenCalledWith({ endpointId: 'e1', id: 'k2', enabled: false }))
   })
 
   it('commits a changed address on blur and rejects an invalid one without a request', async () => {
@@ -121,7 +151,6 @@ describe('ProvidersSettings', () => {
     await fireEvent.blur(url)
     await waitFor(() => expect(saves).toHaveLength(1))
     expect(saves[0]?.endpoints[0]).toMatchObject({ id: 'e1', baseUrl: 'https://api.example.com/v1' })
-    expect(saves[0]?.endpoints[0] && 'apiKey' in saves[0].endpoints[0]).toBe(false)
   })
 
   it('keeps local edits and offers a retry when a save fails', async () => {
@@ -138,20 +167,26 @@ describe('ProvidersSettings', () => {
 })
 
 describe('draft helpers', () => {
-  it('drops unsaved endpoints without a usable address and adopts stored ids by slug', () => {
+  it('keeps endpoints without an address, drops malformed new ones and adopts stored ids by slug', () => {
     const draft = toDraft(stored)
-    const added = { saved: null, slug: 'ep-2', baseUrl: '', protocol: 'openai-chat' as const, key: 'k', models: [] }
+    const added = { saved: null, slug: 'ep-2', baseUrl: '', protocol: 'openai-chat' as const, models: [] }
     draft.endpoints.push(added)
+    expect(savable(draft).endpoints.map((e) => e.slug)).toEqual(['main', 'ep-2'])
+    added.baseUrl = 'nope'
     expect(savable(draft).endpoints.map((e) => e.slug)).toEqual(['main'])
 
     added.baseUrl = 'https://b.example.com'
     const sent = structuredClone(savable(draft))
-    const created: Endpoint = { ...endpoint, id: 'e2', slug: 'ep-2', baseUrl: 'https://b.example.com' }
+    const created: Endpoint = { ...endpoint, id: 'e2', slug: 'ep-2', baseUrl: 'https://b.example.com', keys: [] }
     const next = adopt(draft, sent, { ...stored, endpoints: [endpoint, created] })
     expect(next.endpoints[1]?.saved?.id).toBe('e2')
-    expect(next.endpoints[1]?.key).toBeNull()
+  })
 
-    added.key = 'typed-after-send'
-    expect(adopt(draft, sent, { ...stored, endpoints: [endpoint, created] }).endpoints[1]?.key).toBe('typed-after-send')
+  it('picks the first enabled key as primary', () => {
+    const k1 = { id: 'k1', label: '', enabled: false, masked: 'sk-a****wxyz', readable: true }
+    const k2 = { ...k1, id: 'k2', enabled: true }
+    expect(primaryKey([k1, k2])?.id).toBe('k2')
+    expect(primaryKey([k1])?.id).toBe('k1')
+    expect(primaryKey([])).toBeNull()
   })
 })

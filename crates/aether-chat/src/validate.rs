@@ -123,7 +123,7 @@ pub(crate) fn prepare(input: &mut RunInput) -> Result<String, KitError> {
     }
 
     let connection = &input.connection;
-    if connection.api_key.as_ref().is_none_or(|key| key.is_empty()) {
+    if connection.api_keys.is_empty() {
         let url = reqwest::Url::parse(&connection.base_url)
             .map_err(|e| KitError::bad_request("url", "invalid_url").with_cause(e))?;
         if !net::is_loopback(&url) {

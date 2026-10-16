@@ -95,7 +95,24 @@ pub struct ModelSave {
     pub native_web_search: bool,
 }
 
-/// A stored endpoint as shown to the UI: the key only as `hasKey` / masked value.
+/// One API key of an endpoint as shown to the UI: never the plaintext.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EndpointKey {
+    /// Key id.
+    pub id: String,
+    /// Optional user label, at most 40 characters.
+    pub label: String,
+    /// Disabled keys are skipped by rotation.
+    pub enabled: bool,
+    /// First 4 and last 4 characters; `None` when the ciphertext cannot be decrypted.
+    pub masked: Option<String>,
+    /// `false` when the ciphertext cannot be decrypted (e.g. another Windows user).
+    pub readable: bool,
+}
+
+/// A stored endpoint as shown to the UI: keys only as masked entries.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -104,16 +121,12 @@ pub struct Endpoint {
     pub id: String,
     /// Short name, unique within the provider.
     pub slug: String,
-    /// Base URL as entered.
+    /// Base URL as entered; may be empty.
     pub base_url: String,
     /// Wire protocol.
     pub protocol: Protocol,
-    /// Whether a ciphertext is stored.
-    pub has_key: bool,
-    /// First 4 and last 4 characters; `None` without a readable key.
-    pub key_masked: Option<String>,
-    /// `false` when a ciphertext exists but cannot be decrypted (e.g. another Windows user).
-    pub key_readable: bool,
+    /// API keys ordered by position.
+    pub keys: Vec<EndpointKey>,
     /// Where model listing is fetched from.
     pub probe_url: String,
     /// Selected models in display order.
@@ -146,16 +159,37 @@ pub struct EndpointSave {
     pub id: Option<String>,
     /// Short name, 1–40 of `[a-z0-9-]`.
     pub slug: String,
-    /// Base URL, `http(s)://`, at most 2048 bytes.
+    /// Base URL: empty, or `http(s)://` of at most 2048 bytes.
     pub base_url: String,
     /// Wire protocol.
     pub protocol: Protocol,
-    /// Key tri-state: absent = keep, `""` = clear, otherwise set (docs/00 §7.3).
-    #[serde(default)]
-    #[ts(optional)]
-    pub api_key: Option<String>,
     /// Selected models in display order.
     pub models: Vec<ModelSave>,
+}
+
+/// Adds (no `id`) or patches (with `id`) one key of an endpoint; omitted fields keep.
+#[derive(Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
+pub struct EndpointKeySave {
+    /// Endpoint the key belongs to.
+    pub endpoint_id: String,
+    /// Existing key id; absent = new key.
+    #[serde(default)]
+    #[ts(optional)]
+    pub id: Option<String>,
+    /// Plaintext key, at most 4096 bytes; required for a new key.
+    #[serde(default)]
+    #[ts(optional)]
+    pub key: Option<String>,
+    /// Label, at most 40 characters; new keys default to `""`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub label: Option<String>,
+    /// New keys default to enabled.
+    #[serde(default)]
+    #[ts(optional)]
+    pub enabled: Option<bool>,
 }
 
 /// A whole-provider save: endpoints missing from `endpoints` are deleted.
@@ -275,28 +309,27 @@ impl TypeSource {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[ts(export)]
 pub enum ProbeTarget {
-    /// A stored endpoint with its stored key.
+    /// A stored endpoint with its stored keys.
     Saved {
         /// Endpoint id.
         #[serde(rename = "endpointId")]
         endpoint_id: String,
     },
-    /// Unsaved form values. `apiKey` follows the key tri-state; absent with
-    /// `endpointId` reuses the stored key.
+    /// Unsaved form values; keys come from `endpointId` when given.
     #[serde(rename_all = "camelCase")]
     Draft {
         /// Base URL as typed.
         base_url: String,
         /// Wire protocol.
         protocol: Protocol,
-        /// Absent = keep, `""` = clear, otherwise the typed key.
-        #[serde(default)]
-        #[ts(optional)]
-        api_key: Option<String>,
         /// Endpoint being edited, if any.
         #[serde(default)]
         #[ts(optional)]
         endpoint_id: Option<String>,
+        /// Use only this key of `endpointId`; absent = rotate with failover.
+        #[serde(default)]
+        #[ts(optional)]
+        key_id: Option<String>,
     },
 }
 

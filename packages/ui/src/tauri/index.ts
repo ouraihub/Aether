@@ -64,7 +64,9 @@ export function createTauriPorts(options: TauriPortsOptions = {}): KitPorts & { 
         }
       },
       revealNeedsPassword: false,
-      revealKey: (endpointId) => call('providers_key_reveal', { endpointId }),
+      saveKey: (input) => call('providers_key_save', { input }),
+      removeKey: (endpointId, keyId) => call('providers_key_delete', { endpointId, keyId }),
+      revealKey: (keyId) => call('providers_key_reveal', { keyId }),
     }
   }
   if (options.search) {

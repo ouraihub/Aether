@@ -317,8 +317,9 @@ impl Runner {
             &format!("{base}/{}", path(connection.protocol)),
             &self.policy,
         )?;
-        let request = Request {
+        let mut request = Request {
             connection,
+            key: None,
             model,
             system: run.system,
             history: &input.history,
@@ -330,22 +331,33 @@ impl Runner {
             native_web_search: input.native_web_search,
             reasoning_effort: input.reasoning_effort,
         };
-        let known: Vec<&str> = connection.api_key.iter().map(|key| key.as_str()).collect();
-        let first_byte = async {
-            let mut response = request
-                .encode(self.http.post(url))
-                .send()
+        let known: Vec<&str> = connection.api_keys.iter().map(|key| key.as_str()).collect();
+        // Keys in rotation order; an auth/limit reply before the first byte tries the next (docs/34 §3.4).
+        let attempts = known.len().max(1);
+        let mut attempt = 0;
+        let (mut response, mut chunk) = loop {
+            request.key = known.get(attempt).copied();
+            let first_byte = async {
+                let mut response = request
+                    .encode(self.http.post(url.clone()))
+                    .send()
+                    .await
+                    .map_err(transport)?;
+                if !response.status().is_success() {
+                    return Err(upstream(response, &known).await);
+                }
+                let chunk = response.chunk().await.map_err(transport)?;
+                Ok((response, chunk))
+            };
+            match timeout(self.first_byte, first_byte)
                 .await
-                .map_err(transport)?;
-            if !response.status().is_success() {
-                return Err(upstream(response, &known).await);
+                .map_err(|_| timed_out("first_byte"))?
+            {
+                Ok(started) => break started,
+                Err(error) if attempt + 1 < attempts && next_key(&error) => attempt += 1,
+                Err(error) => return Err(error),
             }
-            let chunk = response.chunk().await.map_err(transport)?;
-            Ok((response, chunk))
         };
-        let (mut response, mut chunk) = timeout(self.first_byte, first_byte)
-            .await
-            .map_err(|_| timed_out("first_byte"))??;
         let mut parser = SseParser::new();
         let mut decoder = Decoder::new(connection.protocol);
         while let Some(bytes) = chunk {
@@ -461,6 +473,11 @@ impl<F: FnMut(RunEvent)> Drop for Emitter<F> {
 
 fn timed_out(reason: &str) -> KitError {
     KitError::new(KitErrorCode::Timeout, format!("upstream {reason} timeout")).with_reason(reason)
+}
+
+/// An upstream reply that another key may fix (docs/34 §3.4).
+pub(crate) fn next_key(error: &KitError) -> bool {
+    matches!(error.details().status(), Some(401 | 403 | 429))
 }
 
 pub(crate) fn transport(error: reqwest::Error) -> KitError {

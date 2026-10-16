@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use aether_support::error::upstream_excerpt;
 use aether_support::net::{self, AddressPolicy};
-use aether_support::secret::KeyChange;
 use aether_support::{KitError, Protocol};
 use reqwest::header::{AUTHORIZATION, HeaderValue};
 use serde_json::Value;
@@ -25,39 +24,56 @@ type Outcome = Result<Vec<ProbedModel>, ProbeError>;
 
 impl Store {
     /// `GET <api_base>/models` for a saved endpoint or an unsaved draft. Upstream and
-    /// network failures are reported in [`ProbeResult::error`]; no retry.
+    /// network failures are reported in [`ProbeResult::error`]; an unauthorized or
+    /// rate-limited key falls through to the next enabled key (docs/34 §3.4).
     ///
     /// # Errors
-    /// `cancelled` when `cancel` fires; `not_found{entity:"endpoint"}` or
-    /// `needs_config{reason:"key_unreadable"}` for the stored endpoint; `bad_request`
+    /// `cancelled` when `cancel` fires; `not_found{entity:"endpoint"|"key"}` or
+    /// `needs_config{reason:"key_unreadable"}` for stored keys; `bad_request`
     /// for an unusable URL (field `url`) or key (field `apiKey`); `internal`.
     pub async fn probe(
         &self,
         target: ProbeTarget,
         cancel: &CancellationToken,
     ) -> Result<ProbeResult, KitError> {
-        let (base_url, protocol, key) = match target {
+        let (base_url, protocol, keys) = match target {
             ProbeTarget::Saved { endpoint_id } => self.endpoint(&endpoint_id)?,
+            // The address may be edited and unsaved while the keys stay stored (docs/11 §4).
             ProbeTarget::Draft {
                 base_url,
                 protocol,
-                api_key,
                 endpoint_id,
+                key_id,
             } => {
-                let key = match (KeyChange::from_field(api_key), endpoint_id) {
-                    (KeyChange::Set(key), _) => Some(key),
-                    // The address may be edited and unsaved while the key stays stored (docs/11 §4).
-                    (KeyChange::Keep, Some(id)) => self.endpoint(&id)?.2,
-                    (KeyChange::Keep, None) | (KeyChange::Clear, _) => None,
+                let keys = match (endpoint_id, key_id) {
+                    (Some(endpoint), Some(key)) => vec![self.endpoint_key(&endpoint, &key)?],
+                    (Some(endpoint), None) => self.endpoint(&endpoint)?.2,
+                    (None, Some(_)) => return Err(KitError::not_found("key")),
+                    (None, None) => Vec::new(),
                 };
-                (base_url, protocol, key)
+                (base_url, protocol, keys)
             }
         };
         let probe_url = format!("{}/models", api_base(&base_url));
-        let outcome = cancel
-            .run_until_cancelled(fetch(&probe_url, &base_url, protocol, key.as_ref()))
-            .await
-            .ok_or_else(KitError::cancelled)??;
+        let known: Vec<&str> = keys.iter().map(|key| key.as_str()).collect();
+        let attempts = keys.len().max(1);
+        let mut outcome = Ok(Vec::new());
+        for attempt in 0..attempts {
+            outcome = cancel
+                .run_until_cancelled(fetch(
+                    &probe_url,
+                    &base_url,
+                    protocol,
+                    keys.get(attempt),
+                    &known,
+                ))
+                .await
+                .ok_or_else(KitError::cancelled)??;
+            let next = matches!(&outcome, Err(e) if matches!(e.kind, ProbeErrorKind::Unauthorized | ProbeErrorKind::RateLimited));
+            if !next {
+                break;
+            }
+        }
         let (models, error) = match outcome {
             Ok(models) => (models, None),
             Err(error) => (Vec::new(), Some(error)),
@@ -75,6 +91,7 @@ async fn fetch(
     base_url: &str,
     protocol: Protocol,
     key: Option<&Zeroizing<String>>,
+    known: &[&str],
 ) -> Result<Outcome, KitError> {
     let policy = AddressPolicy::default();
     let url = match net::check_url(probe_url, &policy) {
@@ -116,9 +133,8 @@ async fn fetch(
     if !response.status().is_success() {
         // The error body only adds a message; failing to read it keeps the status.
         let body = read_capped(&mut response).await.ok().flatten();
-        let known = [key.map_or("", |k| k.as_str())];
         let message = body
-            .map(|b| upstream_excerpt(&String::from_utf8_lossy(&b), &known))
+            .map(|b| upstream_excerpt(&String::from_utf8_lossy(&b), known))
             .filter(|m| !m.is_empty());
         let (kind, hint) = match status {
             401 | 403 => (

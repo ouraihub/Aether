@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use crate::run::transport;
+use crate::run::{next_key, transport};
 use crate::types::{Approval, ImagePart, MAX_IMAGE_BYTES, ToolSource, ToolSpec};
 use aether_support::net::{self, AddressPolicy};
 use aether_support::{Connection, KitError};
@@ -64,26 +64,33 @@ pub async fn generate_image(
         policy,
     )?;
     let client = net::client(policy.clone(), Duration::from_secs(10))?;
-    let mut request = client
-        .post(url)
-        .timeout(TIMEOUT)
-        // No `response_format`: gpt-image-* rejects it (always b64); others may answer `url`, handled below.
-        .json(&json!({ "model": painting.model_id, "prompt": prompt, "size": size, "n": 1 }));
-    if let Some(key) = &painting.api_key {
-        request = request.bearer_auth(key.as_str());
-    }
-    let response = request.send().await.map_err(transport)?;
-    let status = response.status();
-    let body: Value = response.json().await.map_err(transport)?;
-    if !status.is_success() {
+    let known: Vec<&str> = painting.api_keys.iter().map(|key| key.as_str()).collect();
+    let attempts = known.len().max(1);
+    let mut attempt = 0;
+    // Same key failover as a chat round (docs/34 §3.4).
+    let (status, body) = loop {
+        let mut request = client
+            .post(url.clone())
+            .timeout(TIMEOUT)
+            // No `response_format`: gpt-image-* rejects it (always b64); others may answer `url`, handled below.
+            .json(&json!({ "model": painting.model_id, "prompt": prompt, "size": size, "n": 1 }));
+        if let Some(key) = known.get(attempt) {
+            request = request.bearer_auth(key);
+        }
+        let response = request.send().await.map_err(transport)?;
+        let status = response.status();
+        let body: Value = response.json().await.map_err(transport)?;
+        if status.is_success() {
+            break (status, body);
+        }
         let text = serde_json::to_string(&body).unwrap_or_default();
-        let secret = painting.api_key.as_deref().map(String::as_str);
-        return Err(KitError::upstream(
-            status.as_u16(),
-            &text,
-            secret.as_slice(),
-        ));
-    }
+        let error = KitError::upstream(status.as_u16(), &text, &known);
+        if attempt + 1 < attempts && next_key(&error) {
+            attempt += 1;
+        } else {
+            return Err(error);
+        }
+    };
     let first = &body["data"][0];
     let bytes = if let Some(data) = first["b64_json"].as_str() {
         base64::engine::general_purpose::STANDARD
@@ -171,7 +178,7 @@ mod tests {
         Connection {
             base_url: base.to_owned(),
             protocol: Protocol::OpenaiChat,
-            api_key: Some(Zeroizing::new("sk-paint".to_owned())),
+            api_keys: vec![Zeroizing::new("sk-paint".to_owned())],
             model_id: Some("gpt-image-1".to_owned()),
             endpoint_id: None,
             context_window: None,
@@ -252,5 +259,20 @@ mod tests {
                 aether_support::KitErrorCode::BadRequest
             );
         }
+    }
+
+    #[tokio::test]
+    async fn rate_limited_key_fails_over_to_the_next() {
+        let policy = AddressPolicy::default();
+        let ok = format!(r#"{{"data":[{{"b64_json":"{PNG}"}}]}}"#);
+        let (base, seen) = serve(vec![(429, "{}".to_owned()), (200, ok)]).await;
+        let mut connection = painting(&base);
+        connection
+            .api_keys
+            .push(Zeroizing::new("sk-paint-2".to_owned()));
+        generate_image(&connection, &policy, &json!({"prompt": "x"}))
+            .await
+            .unwrap();
+        assert_eq!(seen.lock().await.len(), 2);
     }
 }

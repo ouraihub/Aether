@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use aether_providers::{
-    ModelFilter, ModelOption, ProbeResult, ProbeTarget, Provider, ProviderSave, Store,
+    EndpointKeySave, ModelFilter, ModelOption, ProbeResult, ProbeTarget, Provider, ProviderSave,
+    Store,
 };
 use aether_support::KitError;
 use tauri::{AppHandle, Manager, Runtime};
@@ -84,6 +85,29 @@ pub(crate) async fn providers_delete<R: Runtime>(
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, fields(command = "providers_key_save"), err(level = "warn"))]
+pub(crate) async fn providers_key_save<R: Runtime>(
+    app: AppHandle<R>,
+    input: EndpointKeySave,
+) -> Result<Vec<Provider>, KitError> {
+    blocking(&app, move |store| store.save_key(input)).await
+}
+
+#[tauri::command]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "providers_key_delete"),
+    err(level = "warn")
+)]
+pub(crate) async fn providers_key_delete<R: Runtime>(
+    app: AppHandle<R>,
+    endpoint_id: String,
+    key_id: String,
+) -> Result<Vec<Provider>, KitError> {
+    blocking(&app, move |store| store.remove_key(&endpoint_id, &key_id)).await
+}
+
+#[tauri::command]
 #[tracing::instrument(
     skip_all,
     fields(command = "providers_key_reveal"),
@@ -91,14 +115,10 @@ pub(crate) async fn providers_delete<R: Runtime>(
 )]
 pub(crate) async fn providers_key_reveal<R: Runtime>(
     app: AppHandle<R>,
-    endpoint_id: String,
+    key_id: String,
 ) -> Result<String, KitError> {
     blocking(&app, move |store| {
-        Ok(store
-            .endpoint_connection(&endpoint_id)?
-            .api_key
-            .map(|key| key.to_string())
-            .ok_or_else(|| KitError::needs_config("missing_key"))?)
+        Ok(store.reveal_key(&key_id)?.to_string())
     })
     .await
 }

@@ -18,10 +18,10 @@ baseUrl: string,
  */
 protocol: Protocol, 
 /**
- * Absent = keep, `""` = clear, otherwise the typed key.
- */
-apiKey?: string, 
-/**
  * Endpoint being edited, if any.
  */
-endpointId?: string, };
+endpointId?: string, 
+/**
+ * Use only this key of `endpointId`; absent = rotate with failover.
+ */
+keyId?: string, };

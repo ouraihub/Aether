@@ -1,4 +1,4 @@
-//! `providers.db`: whole-provider save, key tri-state and connection snapshots (docs/11 §2–§4).
+//! `providers.db`: whole-provider save, per-endpoint keys and connection snapshots (docs/11 §2–§4, docs/34).
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -8,14 +8,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use aether_support::db::{self, Migration};
 use aether_support::id::new_id;
 use aether_support::mask::mask_secret;
-use aether_support::secret::{self, KeyChange};
+use aether_support::secret;
 use aether_support::{Connection, KitError, Protocol};
 use rusqlite::{Connection as Db, OptionalExtension, params};
 use zeroize::Zeroizing;
 
 use crate::dto::{
-    Endpoint, EndpointSave, Model, ModelFilter, ModelOption, ModelRef, ModelType, Provider,
-    ProviderSave, TypeSource,
+    Endpoint, EndpointKey, EndpointKeySave, EndpointSave, Model, ModelFilter, ModelOption,
+    ModelRef, ModelType, Provider, ProviderSave, TypeSource,
 };
 use crate::{api_base, infer_reasoning};
 
@@ -55,16 +55,18 @@ const MAX_ENDPOINTS: usize = 20;
 const MAX_MODELS: usize = 1000;
 const MAX_SLUG: usize = 40;
 const MAX_BASE_URL: usize = 2048;
+const MAX_KEYS: i64 = 16;
+const MAX_LABEL_CHARS: usize = 40;
+const MAX_KEY_BYTES: usize = 4096;
 
-/// Seals a plaintext key; a parameter only so tests can make sealing fail.
-type Seal = fn(&str) -> Result<Vec<u8>, KitError>;
-
-/// Stored base URL, protocol and plaintext key of one endpoint.
-pub(crate) type EndpointRow = (String, Protocol, Option<Zeroizing<String>>);
+/// Stored base URL, protocol and rotated plaintext keys of one endpoint.
+pub(crate) type EndpointRow = (String, Protocol, Vec<Zeroizing<String>>);
 
 /// Provider configuration stored in `<root>/providers.db`.
 pub struct Store {
     db: Mutex<Db>,
+    /// Next rotation start per endpoint id; in memory, so a restart begins at the first key.
+    cursors: Mutex<HashMap<String, usize>>,
 }
 
 impl Store {
@@ -100,9 +102,24 @@ impl Store {
                 version: 4,
                 sql: "ALTER TABLE providers ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;",
             },
+            // Old single keys are dropped, not migrated (docs/34 §4).
+            Migration {
+                version: 5,
+                sql: "ALTER TABLE endpoints DROP COLUMN key_ciphertext;
+CREATE TABLE endpoint_keys (
+  id TEXT PRIMARY KEY,
+  endpoint_id TEXT NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE,
+  label TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1,
+  key_ciphertext BLOB NOT NULL, position INTEGER NOT NULL
+);
+CREATE INDEX idx_endpoint_keys ON endpoint_keys(endpoint_id, position, id);",
+            },
         ];
         let db = db::open(&path, &steps)?;
-        Ok(Self { db: Mutex::new(db) })
+        Ok(Self {
+            db: Mutex::new(db),
+            cursors: Mutex::default(),
+        })
     }
 
     /// All providers with endpoints and models in display order.
@@ -113,13 +130,10 @@ impl Store {
         list(&*self.lock()?)
     }
 
-    /// Replaces one provider as a whole (docs/11 §3): endpoints missing from the request
-    /// are deleted with their models; keys follow the tri-state of `apiKey`.
+    /// Turns a provider on or off without touching anything else.
     ///
     /// # Errors
-    /// `bad_request` for invalid input; `not_found` for an unknown provider or endpoint id;
-    /// the sealing error (e.g. `unsupported`) when a new key cannot be encrypted, in which
-    /// case nothing is written.
+    /// `not_found` for an unknown id; `internal` when SQLite fails.
     pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<Vec<Provider>, KitError> {
         let db = self.lock()?;
         let changed = db.execute(
@@ -132,8 +146,190 @@ impl Store {
         list(&db)
     }
 
+    /// Replaces one provider as a whole (docs/11 §3): endpoints missing from the request
+    /// are deleted with their models and keys. Keys themselves change only via [`Self::save_key`].
+    ///
+    /// # Errors
+    /// `bad_request` for invalid input; `not_found` for an unknown provider or endpoint id.
     pub fn save(&self, input: ProviderSave) -> Result<Vec<Provider>, KitError> {
-        self.save_with(input, secret::seal)
+        validate(&input)?;
+        let mut db = self.lock()?;
+        let tx = db.transaction()?;
+        let now = now_millis();
+        let provider_id = if let Some(id) = &input.id {
+            let sql = "UPDATE providers SET name = ?2, updated_at = ?3, enabled = COALESCE(?4, enabled) WHERE id = ?1";
+            if tx.execute(sql, params![id, input.name, now, input.enabled])? == 0 {
+                return Err(KitError::not_found("provider"));
+            }
+            id.clone()
+        } else {
+            let id = new_id()?;
+            tx.execute(
+                "INSERT INTO providers (id, name, position, created_at, updated_at, enabled)
+                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM providers), ?3, ?3, ?4)",
+                params![id, input.name, now, input.enabled.unwrap_or(true)],
+            )?;
+            id
+        };
+
+        let old: HashSet<String> = tx
+            .prepare("SELECT id FROM endpoints WHERE provider_id = ?1")?
+            .query_map([&provider_id], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        let kept: HashSet<&str> = input
+            .endpoints
+            .iter()
+            .filter_map(|e| e.id.as_deref())
+            .collect();
+        if kept.iter().any(|id| !old.contains(*id)) {
+            return Err(KitError::not_found("endpoint"));
+        }
+        // Ciphertexts to `forget` once the new state is committed (docs/10 §2).
+        let mut stale = Vec::new();
+        for id in old.iter().filter(|id| !kept.contains(id.as_str())) {
+            stale.extend(ciphertexts(&tx, "endpoint_id = ?1", [id])?);
+            tx.execute("DELETE FROM endpoints WHERE id = ?1", [id])?;
+        }
+        // Kept endpoints may swap slugs; park them on their unique ids first so the
+        // UNIQUE (provider_id, slug) check never sees a transient duplicate.
+        tx.execute(
+            "UPDATE endpoints SET slug = id WHERE provider_id = ?1",
+            [&provider_id],
+        )?;
+        for (position, endpoint) in input.endpoints.into_iter().enumerate() {
+            write_endpoint(&tx, &provider_id, position, &endpoint)?;
+        }
+        tx.commit()?;
+        forget_all(&stale)?;
+        list(&db)
+    }
+
+    /// Adds (no `id`) or patches (with `id`) one key of an endpoint (docs/34 §3.1–§3.2).
+    ///
+    /// # Errors
+    /// `not_found{endpoint|key}`; `bad_request{apiKey: empty|too_long|duplicate}`,
+    /// `bad_request{label: too_long}`, `bad_request{keys: too_many}`; the sealing error
+    /// (e.g. `unsupported`) when the key cannot be encrypted, in which case nothing is written.
+    pub fn save_key(&self, input: EndpointKeySave) -> Result<Vec<Provider>, KitError> {
+        let had_key = input.key.is_some();
+        // The request's plaintext is wiped on drop like every other clear key.
+        let plain = input.key.map(Zeroizing::new);
+        let key = plain.as_deref().map(|key| key.trim());
+        if key.is_some_and(|key| key.len() > MAX_KEY_BYTES) {
+            return Err(KitError::bad_request("apiKey", "too_long"));
+        }
+        let key = key.filter(|key| !key.is_empty());
+        if key.is_none() && (input.id.is_none() || had_key) {
+            return Err(KitError::bad_request("apiKey", "empty"));
+        }
+        let label = input.label.as_deref().map(str::trim);
+        if label.is_some_and(|label| label.chars().count() > MAX_LABEL_CHARS) {
+            return Err(KitError::bad_request("label", "too_long"));
+        }
+        // Sealed before any write: a failing seal leaves everything unchanged.
+        let sealed = key.map(secret::seal).transpose()?;
+        let mut db = self.lock()?;
+        let tx = db.transaction()?;
+        let endpoint_known = tx
+            .query_row(
+                "SELECT 1 FROM endpoints WHERE id = ?1",
+                [&input.endpoint_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !endpoint_known {
+            return Err(KitError::not_found("endpoint"));
+        }
+        if let Some(key) = key {
+            let others = tx
+                .prepare("SELECT key_ciphertext FROM endpoint_keys WHERE endpoint_id = ?1 AND id IS NOT ?2")?
+                .query_map(params![input.endpoint_id, input.id], |row| row.get::<_, Vec<u8>>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            // Unreadable keys cannot be compared; they are not duplicates of anything typed.
+            if others
+                .iter()
+                .any(|cipher| secret::open(cipher).is_ok_and(|plain| plain.as_str() == key))
+            {
+                return Err(KitError::bad_request("apiKey", "duplicate"));
+            }
+        }
+        let mut stale = Vec::new();
+        if let Some(id) = &input.id {
+            let old: Vec<u8> = tx
+                .query_row(
+                    "SELECT key_ciphertext FROM endpoint_keys WHERE id = ?1 AND endpoint_id = ?2",
+                    params![id, input.endpoint_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .ok_or_else(|| KitError::not_found("key"))?;
+            if sealed.is_some() {
+                stale.push(old);
+            }
+            tx.execute(
+                "UPDATE endpoint_keys SET label = COALESCE(?2, label), enabled = COALESCE(?3, enabled),
+                 key_ciphertext = COALESCE(?4, key_ciphertext) WHERE id = ?1",
+                params![id, label, input.enabled, sealed],
+            )?;
+        } else {
+            let count: i64 = tx.query_row(
+                "SELECT count(*) FROM endpoint_keys WHERE endpoint_id = ?1",
+                [&input.endpoint_id],
+                |row| row.get(0),
+            )?;
+            if count >= MAX_KEYS {
+                return Err(KitError::bad_request("keys", "too_many"));
+            }
+            tx.execute(
+                "INSERT INTO endpoint_keys (id, endpoint_id, label, enabled, key_ciphertext, position)
+                 SELECT ?1, ?2, ?3, ?4, ?5, COALESCE(MAX(position) + 1, 0) FROM endpoint_keys WHERE endpoint_id = ?2",
+                params![
+                    new_id()?,
+                    input.endpoint_id,
+                    label.unwrap_or_default(),
+                    input.enabled.unwrap_or(true),
+                    sealed
+                ],
+            )?;
+        }
+        tx.commit()?;
+        forget_all(&stale)?;
+        list(&db)
+    }
+
+    /// Deletes one key of an endpoint.
+    ///
+    /// # Errors
+    /// `not_found{key}` when the key does not exist or belongs to another endpoint.
+    pub fn remove_key(&self, endpoint_id: &str, key_id: &str) -> Result<Vec<Provider>, KitError> {
+        let mut db = self.lock()?;
+        let tx = db.transaction()?;
+        let stale = ciphertexts(&tx, "id = ?1 AND endpoint_id = ?2", [key_id, endpoint_id])?;
+        if stale.is_empty() {
+            return Err(KitError::not_found("key"));
+        }
+        tx.execute("DELETE FROM endpoint_keys WHERE id = ?1", [key_id])?;
+        tx.commit()?;
+        forget_all(&stale)?;
+        list(&db)
+    }
+
+    /// The plaintext of one stored key, on explicit user request.
+    ///
+    /// # Errors
+    /// `not_found{key}`; `needs_config{reason:"key_unreadable"}`.
+    pub fn reveal_key(&self, key_id: &str) -> Result<Zeroizing<String>, KitError> {
+        let cipher: Vec<u8> = self
+            .lock()?
+            .query_row(
+                "SELECT key_ciphertext FROM endpoint_keys WHERE id = ?1",
+                [key_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| KitError::not_found("key"))?;
+        secret::open(&cipher)
     }
 
     /// Deletes a provider with its endpoints and models.
@@ -144,13 +340,11 @@ impl Store {
         let mut db = self.lock()?;
         let tx = db.transaction()?;
         // The cascade does not call `secret::forget`, so collect ciphertexts first (docs/10 §2).
-        let stale = tx
-            .prepare(
-                "SELECT key_ciphertext FROM endpoints
-                 WHERE provider_id = ?1 AND key_ciphertext IS NOT NULL",
-            )?
-            .query_map([id], |row| row.get::<_, Vec<u8>>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
+        let stale = ciphertexts(
+            &tx,
+            "endpoint_id IN (SELECT id FROM endpoints WHERE provider_id = ?1)",
+            [id],
+        )?;
         if tx.execute("DELETE FROM providers WHERE id = ?1", [id])? == 0 {
             return Err(KitError::not_found("provider"));
         }
@@ -237,25 +431,25 @@ impl Store {
     }
 
     /// The connection snapshot for one stored model. `base_url` is [`api_base`] of the
-    /// stored address; `api_key` is `None` when no key is stored.
+    /// stored address; `api_keys` are the enabled keys in this request's rotation order.
     ///
     /// # Errors
-    /// `not_found{entity:"model"}`; `needs_config{reason:"key_unreadable"}` when the stored
-    /// key cannot be decrypted; `internal` when SQLite fails.
+    /// `not_found{entity:"model"}`; `needs_config{reason:"missing_url"}` for an empty address;
+    /// `needs_config{reason:"key_unreadable"}` when an enabled key cannot be decrypted;
+    /// `internal` when SQLite fails.
     pub fn resolve(&self, model: &ModelRef) -> Result<Connection, KitError> {
         let db = self.lock()?;
         let row = db.query_row(
-            "SELECT e.base_url, e.protocol, e.key_ciphertext, m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, m.can_vision
+            "SELECT e.base_url, e.protocol, m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, m.can_vision
              FROM models m JOIN endpoints e ON e.id = m.endpoint_id JOIN providers p ON p.id = e.provider_id
              WHERE m.endpoint_id = ?1 AND m.model_id = ?2 AND p.enabled = 1",
             params![model.endpoint_id, model.model_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<Vec<u8>>>(2)?,
-                row.get::<_, String>(3)?, row.get::<_, Option<u32>>(4)?, row.get::<_, Option<u32>>(5)?, row.get::<_, Option<bool>>(6)?, row.get::<_, Option<String>>(7)?, row.get::<_, bool>(8)?, row.get::<_, bool>(9)?)),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?, row.get::<_, Option<u32>>(3)?, row.get::<_, Option<u32>>(4)?, row.get::<_, Option<bool>>(5)?, row.get::<_, Option<String>>(6)?, row.get::<_, bool>(7)?, row.get::<_, bool>(8)?)),
         ).optional()?;
         let (
             base_url,
             protocol,
-            key,
             model_type,
             context_window,
             max_output,
@@ -264,6 +458,10 @@ impl Store {
             native_web_search,
             can_vision,
         ) = row.ok_or_else(|| KitError::not_found("model"))?;
+        if base_url.trim().is_empty() {
+            return Err(KitError::needs_config("missing_url"));
+        }
+        let api_keys = self.keys(&db, &model.endpoint_id)?;
         let protocol = parse_protocol(&protocol)?;
         let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
         let reasoning = reasoning
@@ -279,7 +477,7 @@ impl Store {
         Ok(Connection {
             base_url: api_base(&base_url),
             protocol,
-            api_key: open_key(key.as_deref())?,
+            api_keys,
             model_id: Some(model.model_id.clone()),
             endpoint_id: Some(model.endpoint_id.clone()),
             context_window,
@@ -295,11 +493,11 @@ impl Store {
     /// # Errors
     /// Reports missing endpoints, unreadable credentials or storage failures.
     pub fn endpoint_connection(&self, endpoint_id: &str) -> Result<Connection, KitError> {
-        let (base_url, protocol, api_key) = self.endpoint(endpoint_id)?;
+        let (base_url, protocol, api_keys) = self.endpoint(endpoint_id)?;
         Ok(Connection {
             base_url: api_base(&base_url),
             protocol,
-            api_key,
+            api_keys,
             model_id: None,
             endpoint_id: Some(endpoint_id.to_owned()),
             context_window: None,
@@ -311,102 +509,57 @@ impl Store {
         })
     }
 
-    /// The stored (not normalised) base URL, protocol and opened key of one endpoint.
+    /// The stored (not normalised) base URL, protocol and rotated keys of one endpoint.
     pub(crate) fn endpoint(&self, endpoint_id: &str) -> Result<EndpointRow, KitError> {
         let db = self.lock()?;
         let row = db
             .query_row(
-                "SELECT base_url, protocol, key_ciphertext FROM endpoints WHERE id = ?1",
+                "SELECT base_url, protocol FROM endpoints WHERE id = ?1",
                 [endpoint_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<Vec<u8>>>(2)?,
-                    ))
-                },
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        let (base_url, protocol, key) = row.ok_or_else(|| KitError::not_found("endpoint"))?;
-        Ok((
-            base_url,
-            parse_protocol(&protocol)?,
-            open_key(key.as_deref())?,
-        ))
+        let (base_url, protocol) = row.ok_or_else(|| KitError::not_found("endpoint"))?;
+        let keys = self.keys(&db, endpoint_id)?;
+        Ok((base_url, parse_protocol(&protocol)?, keys))
     }
 
-    fn save_with(&self, input: ProviderSave, seal: Seal) -> Result<Vec<Provider>, KitError> {
-        validate(&input)?;
-        let mut db = self.lock()?;
-        let tx = db.transaction()?;
-        let now = now_millis();
-        let provider_id = if let Some(id) = &input.id {
-            let sql = "UPDATE providers SET name = ?2, updated_at = ?3, enabled = COALESCE(?4, enabled) WHERE id = ?1";
-            if tx.execute(sql, params![id, input.name, now, input.enabled])? == 0 {
-                return Err(KitError::not_found("provider"));
-            }
-            id.clone()
-        } else {
-            let id = new_id()?;
-            tx.execute(
-                "INSERT INTO providers (id, name, position, created_at, updated_at, enabled)
-                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM providers), ?3, ?3, ?4)",
-                params![id, input.name, now, input.enabled.unwrap_or(true)],
-            )?;
-            id
-        };
+    /// One stored key of `endpoint_id`, for a probe of that key alone.
+    pub(crate) fn endpoint_key(
+        &self,
+        endpoint_id: &str,
+        key_id: &str,
+    ) -> Result<Zeroizing<String>, KitError> {
+        let cipher: Vec<u8> = self
+            .lock()?
+            .query_row(
+                "SELECT key_ciphertext FROM endpoint_keys WHERE id = ?1 AND endpoint_id = ?2",
+                [key_id, endpoint_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| KitError::not_found("key"))?;
+        secret::open(&cipher)
+    }
 
-        let mut old_keys: HashMap<String, Option<Vec<u8>>> = tx
-            .prepare("SELECT id, key_ciphertext FROM endpoints WHERE provider_id = ?1")?
-            .query_map([&provider_id], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .collect::<Result<_, _>>()?;
-        let kept: HashSet<&str> = input
-            .endpoints
-            .iter()
-            .filter_map(|e| e.id.as_deref())
-            .collect();
-        if kept.iter().any(|id| !old_keys.contains_key(*id)) {
-            return Err(KitError::not_found("endpoint"));
+    /// Enabled keys of an endpoint, decrypted, starting at this endpoint's cursor and
+    /// wrapping once; advances the cursor (docs/34 §3.4). Empty = no key.
+    fn keys(&self, db: &Db, endpoint_id: &str) -> Result<Vec<Zeroizing<String>>, KitError> {
+        let mut keys = db
+            .prepare_cached("SELECT key_ciphertext FROM endpoint_keys WHERE endpoint_id = ?1 AND enabled = 1 ORDER BY position, id")?
+            .query_map([endpoint_id], |row| row.get::<_, Vec<u8>>(0))?
+            .map(|cipher| secret::open(&cipher?))
+            .collect::<Result<Vec<_>, _>>()?;
+        if !keys.is_empty() {
+            let mut cursors = self.cursors.lock().map_err(|_| {
+                KitError::internal(std::io::Error::other("providers cursor lock poisoned"))
+            })?;
+            let cursor = cursors.entry(endpoint_id.to_owned()).or_default();
+            let start = *cursor % keys.len();
+            *cursor = (start + 1) % keys.len();
+            keys.rotate_left(start);
         }
-        // Ciphertexts to `forget` once the new state is committed (docs/10 §2).
-        let mut stale = Vec::new();
-        for (id, key) in &old_keys {
-            if !kept.contains(id.as_str()) {
-                tx.execute("DELETE FROM endpoints WHERE id = ?1", [id])?;
-                stale.extend(key.clone());
-            }
-        }
-        // Kept endpoints may swap slugs; park them on their unique ids first so the
-        // UNIQUE (provider_id, slug) check never sees a transient duplicate.
-        tx.execute(
-            "UPDATE endpoints SET slug = id WHERE provider_id = ?1",
-            [&provider_id],
-        )?;
-
-        for (position, mut endpoint) in input.endpoints.into_iter().enumerate() {
-            let old_key = endpoint
-                .id
-                .as_ref()
-                .and_then(|id| old_keys.remove(id))
-                .flatten();
-            let key = match KeyChange::from_field(endpoint.api_key.take()) {
-                KeyChange::Keep => old_key,
-                KeyChange::Clear => {
-                    stale.extend(old_key);
-                    None
-                }
-                // A failing seal returns here; dropping `tx` rolls everything back.
-                KeyChange::Set(plain) => {
-                    let sealed = seal(&plain)?;
-                    stale.extend(old_key);
-                    Some(sealed)
-                }
-            };
-            write_endpoint(&tx, &provider_id, position, &endpoint, key.as_deref())?;
-        }
-        tx.commit()?;
-        forget_all(&stale)?;
-        list(&db)
+        Ok(keys)
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Db>, KitError> {
@@ -450,7 +603,8 @@ fn validate(input: &ProviderSave) -> Result<(), KitError> {
         if url.len() > MAX_BASE_URL {
             return Err(too_long("baseUrl", MAX_BASE_URL));
         }
-        if !(url.starts_with("http://") || url.starts_with("https://")) {
+        // Empty is allowed: the endpoint exists before its address (docs/34 §3.5).
+        if !(url.is_empty() || url.starts_with("http://") || url.starts_with("https://")) {
             return Err(KitError::bad_request("baseUrl", "invalid_url"));
         }
         if endpoint.models.len() > MAX_MODELS {
@@ -494,17 +648,16 @@ fn write_endpoint(
     provider_id: &str,
     position: usize,
     endpoint: &EndpointSave,
-    key: Option<&[u8]>,
 ) -> Result<(), KitError> {
     let position = i64::try_from(position).unwrap_or(i64::MAX);
     let base_url = endpoint.base_url.trim();
     let protocol = protocol_str(endpoint.protocol);
     let id = if let Some(id) = &endpoint.id {
-        tx.execute("UPDATE endpoints SET slug = ?2, base_url = ?3, protocol = ?4, key_ciphertext = ?5, position = ?6 WHERE id = ?1", params![id, endpoint.slug, base_url, protocol, key, position])?;
+        tx.execute("UPDATE endpoints SET slug = ?2, base_url = ?3, protocol = ?4, position = ?5 WHERE id = ?1", params![id, endpoint.slug, base_url, protocol, position])?;
         id.clone()
     } else {
         let id = new_id()?;
-        tx.execute("INSERT INTO endpoints (id, provider_id, slug, base_url, protocol, key_ciphertext, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", params![id, provider_id, endpoint.slug, base_url, protocol, key, position])?;
+        tx.execute("INSERT INTO endpoints (id, provider_id, slug, base_url, protocol, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![id, provider_id, endpoint.slug, base_url, protocol, position])?;
         id
     };
     let old: HashMap<String, Option<String>> = tx
@@ -569,21 +722,32 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
             native_web_search: row.get(9)?,
         });
     }
+    let mut keys: HashMap<String, Vec<EndpointKey>> = HashMap::new();
+    let mut stmt = db.prepare_cached("SELECT endpoint_id, id, label, enabled, key_ciphertext FROM endpoint_keys ORDER BY endpoint_id, position, id")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let masked = secret::open(&row.get::<_, Vec<u8>>(4)?)
+            .ok()
+            .map(|plain| mask_secret(&plain));
+        keys.entry(row.get(0)?).or_default().push(EndpointKey {
+            id: row.get(1)?,
+            label: row.get(2)?,
+            enabled: row.get(3)?,
+            readable: masked.is_some(),
+            masked,
+        });
+    }
     let mut endpoints: HashMap<String, Vec<Endpoint>> = HashMap::new();
-    let mut stmt = db.prepare_cached("SELECT provider_id, id, slug, base_url, protocol, key_ciphertext FROM endpoints ORDER BY provider_id, position")?;
+    let mut stmt = db.prepare_cached("SELECT provider_id, id, slug, base_url, protocol FROM endpoints ORDER BY provider_id, position")?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(1)?;
         let base_url: String = row.get(3)?;
         let protocol: String = row.get(4)?;
-        let key: Option<Vec<u8>> = row.get(5)?;
-        let plain = key.as_deref().map(secret::open).and_then(Result::ok);
         endpoints.entry(row.get(0)?).or_default().push(Endpoint {
             slug: row.get(2)?,
             protocol: parse_protocol(&protocol)?,
-            has_key: key.is_some(),
-            key_masked: plain.as_ref().map(|plain| mask_secret(plain)),
-            key_readable: key.is_none() || plain.is_some(),
+            keys: keys.remove(&id).unwrap_or_default(),
             probe_url: format!("{}/models", api_base(&base_url)),
             models: models.remove(&id).unwrap_or_default(),
             base_url,
@@ -612,8 +776,18 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
         .collect())
 }
 
-fn open_key(key: Option<&[u8]>) -> Result<Option<Zeroizing<String>>, KitError> {
-    key.map(secret::open).transpose()
+/// Ciphertexts of `endpoint_keys` rows matching `filter`, to `forget` after they are deleted.
+fn ciphertexts(
+    tx: &Db,
+    filter: &str,
+    params: impl rusqlite::Params,
+) -> Result<Vec<Vec<u8>>, KitError> {
+    Ok(tx
+        .prepare(&format!(
+            "SELECT key_ciphertext FROM endpoint_keys WHERE {filter}"
+        ))?
+        .query_map(params, |row| row.get::<_, Vec<u8>>(0))?
+        .collect::<Result<Vec<_>, _>>()?)
 }
 
 fn forget_all(stale: &[Vec<u8>]) -> Result<(), KitError> {
@@ -685,13 +859,36 @@ mod tests {
         value
     }
 
-    fn key_of(store: &Store, endpoint_id: &str) -> Option<String> {
+    /// Keys of an endpoint in this request's try order.
+    fn keys_of(store: &Store, endpoint_id: &str) -> Vec<String> {
         let connection = store.endpoint_connection(endpoint_id).unwrap();
-        connection.api_key.map(|key| key.as_str().to_owned())
+        connection
+            .api_keys
+            .iter()
+            .map(|key| key.as_str().to_owned())
+            .collect()
     }
 
-    fn fail_seal(_: &str) -> Result<Vec<u8>, KitError> {
-        Err(KitError::unsupported("secret_store"))
+    fn save_key(store: &Store, value: Value) -> Result<Vec<Provider>, KitError> {
+        store.save_key(serde_json::from_value(value).unwrap())
+    }
+
+    /// A saved provider with one endpoint `a` holding model `m1`; returns (provider id, endpoint id).
+    fn saved(store: &Store) -> (String, String) {
+        let saved = store
+            .save(request(
+                json!({ "name": "P", "endpoints": [endpoint(None, "a", &["m1"])] }),
+            ))
+            .unwrap();
+        (saved[0].id.clone(), saved[0].endpoints[0].id.clone())
+    }
+
+    fn reason(error: &KitError) -> (KitErrorCode, Option<&str>, Option<&str>) {
+        (
+            error.code(),
+            error.details().field(),
+            error.details().reason(),
+        )
     }
 
     #[test]
@@ -767,7 +964,7 @@ mod tests {
     }
 
     #[test]
-    fn version_two_upgrade_preserves_models_credentials_and_native_declarations() {
+    fn version_two_upgrade_preserves_models_and_native_declarations() {
         for already_has_native in [false, true] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("providers.db");
@@ -796,22 +993,36 @@ mod tests {
                     Some(200_000)
                 );
                 let db = store.lock().unwrap();
-                let cipher: Vec<u8> = db
-                    .query_row(
-                        "SELECT key_ciphertext FROM endpoints WHERE id = 'e'",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert_eq!(cipher, [1, 2, 3, 4]);
                 assert_eq!(
                     db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                         .unwrap(),
-                    4
+                    5
                 );
             }
             assert!(path.with_file_name("providers.db.bak-v2").is_file());
         }
+    }
+
+    #[test]
+    fn version_four_db_opens_with_old_keys_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(dir.path().join("providers.db")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE providers (id TEXT PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+             CREATE TABLE endpoints (id TEXT PRIMARY KEY, provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE, slug TEXT NOT NULL, base_url TEXT NOT NULL, protocol TEXT NOT NULL, key_ciphertext BLOB, position INTEGER NOT NULL, UNIQUE(provider_id, slug));
+             CREATE TABLE models (endpoint_id TEXT NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE, model_id TEXT NOT NULL, model_type TEXT NOT NULL, type_source TEXT NOT NULL, context_window INTEGER, max_output INTEGER, can_vision INTEGER NOT NULL DEFAULT 0, supports_tools INTEGER, position INTEGER NOT NULL, reasoning TEXT, native_web_search INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(endpoint_id, model_id));
+             INSERT INTO providers VALUES ('p', 'Saved', 0, 1, 1, 1);
+             INSERT INTO endpoints VALUES ('e', 'p', 'saved', 'https://example.com', 'openai-chat', X'01020304', 0);
+             INSERT INTO models VALUES ('e', 'm', 'chat', 'user', NULL, NULL, 0, 1, 0, NULL, 0);
+             PRAGMA user_version = 4;",
+        )
+        .unwrap();
+        drop(db);
+        let store = Store::open(dir.path()).unwrap();
+        let endpoint = &store.list().unwrap()[0].endpoints[0];
+        assert_eq!((endpoint.id.as_str(), endpoint.models.len()), ("e", 1));
+        assert!(endpoint.keys.is_empty());
+        assert!(keys_of(&store, "e").is_empty());
     }
 
     #[test]
@@ -928,7 +1139,9 @@ mod tests {
     fn set_enabled_changes_only_provider_switch() {
         let (_dir, store) = store();
         let saved = store
-            .save(request(json!({ "name": "Acme", "endpoints": [endpoint(None, "main", &["m1"])] })))
+            .save(request(
+                json!({ "name": "Acme", "endpoints": [endpoint(None, "main", &["m1"])] }),
+            ))
             .unwrap();
         let provider = &saved[0];
         let endpoint_id = provider.endpoints[0].id.clone();
@@ -940,89 +1153,234 @@ mod tests {
     }
 
     #[test]
-    fn key_is_tri_state() {
+    fn keys_are_added_patched_revealed_and_removed() {
         let (_dir, store) = store();
-        let mut first = endpoint(None, "a", &["m1"]);
-        first["apiKey"] = json!(KEY);
-        let saved = store
-            .save(request(json!({ "name": "P", "endpoints": [first] })))
-            .unwrap();
-        let (provider_id, ep) = (saved[0].id.clone(), saved[0].endpoints[0].clone());
-        assert!(ep.has_key && ep.key_readable);
-        assert_eq!(ep.key_masked.as_deref(), Some("sk-t**************abcd"));
-        let resolved = store
-            .resolve(&ModelRef {
-                endpoint_id: ep.id.clone(),
-                model_id: "m1".to_owned(),
-            })
-            .unwrap();
-        assert_eq!(resolved.api_key.unwrap().as_str(), KEY);
-        assert_eq!(resolved.base_url, "https://a.example.com/v1");
+        let (_, ep) = saved(&store);
+        let list = save_key(
+            &store,
+            json!({ "endpointId": ep, "key": format!(" {KEY} ") }),
+        )
+        .unwrap();
+        let key = list[0].endpoints[0].keys[0].clone();
+        assert_eq!(
+            (
+                key.label.as_str(),
+                key.enabled,
+                key.readable,
+                key.masked.as_deref()
+            ),
+            ("", true, true, Some("sk-t**************abcd"))
+        );
+        let reference = ModelRef {
+            endpoint_id: ep.clone(),
+            model_id: "m1".to_owned(),
+        };
+        let resolved = store.resolve(&reference).unwrap();
+        assert_eq!(resolved.api_keys.len(), 1);
+        assert_eq!(resolved.api_keys[0].as_str(), KEY);
+        assert_eq!(store.reveal_key(&key.id).unwrap().as_str(), KEY);
 
-        // Field omitted: keep.
-        let keep = endpoint(Some(&ep.id), "a", &["m1"]);
-        store
-            .save(request(
-                json!({ "id": provider_id, "name": "P", "endpoints": [keep] }),
-            ))
-            .unwrap();
-        assert_eq!(key_of(&store, &ep.id).as_deref(), Some(KEY));
+        // Label-only patch keeps the ciphertext byte for byte.
+        let cipher = |store: &Store| -> Vec<u8> {
+            store
+                .lock()
+                .unwrap()
+                .query_row("SELECT key_ciphertext FROM endpoint_keys", [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        let before = cipher(&store);
+        let list = save_key(
+            &store,
+            json!({ "endpointId": ep, "id": key.id, "label": " main " }),
+        )
+        .unwrap();
+        assert_eq!(list[0].endpoints[0].keys[0].label, "main");
+        assert_eq!(cipher(&store), before);
+        save_key(
+            &store,
+            json!({ "endpointId": ep, "id": key.id, "key": "sk-other-key-000000" }),
+        )
+        .unwrap();
+        assert_eq!(keys_of(&store, &ep), ["sk-other-key-000000"]);
 
-        // "": clear.
-        let mut clear = endpoint(Some(&ep.id), "a", &["m1"]);
-        clear["apiKey"] = json!("");
-        let saved = store
-            .save(request(
-                json!({ "id": provider_id, "name": "P", "endpoints": [clear] }),
-            ))
-            .unwrap();
-        let ep = &saved[0].endpoints[0];
-        assert!(!ep.has_key && ep.key_readable && ep.key_masked.is_none());
-        assert_eq!(key_of(&store, &ep.id), None);
+        assert!(
+            store.remove_key(&ep, &key.id).unwrap()[0].endpoints[0]
+                .keys
+                .is_empty()
+        );
+        assert_eq!(
+            reason(&store.remove_key(&ep, &key.id).unwrap_err()).0,
+            KitErrorCode::NotFound
+        );
+        assert_eq!(
+            reason(&store.reveal_key(&key.id).unwrap_err()).0,
+            KitErrorCode::NotFound
+        );
     }
 
     #[test]
-    fn seal_failure_leaves_everything_unchanged() {
+    fn rotation_skips_disabled_keys_and_all_disabled_is_no_key() {
         let (_dir, store) = store();
-        let mut first = endpoint(None, "a", &["m1"]);
-        first["apiKey"] = json!(KEY);
-        let before = store
-            .save(request(json!({ "name": "P", "endpoints": [first] })))
+        let (_, ep) = saved(&store);
+        for key in ["k1", "k2", "k3"] {
+            save_key(&store, json!({ "endpointId": ep, "key": key })).unwrap();
+        }
+        let ids: Vec<String> = store.list().unwrap()[0].endpoints[0]
+            .keys
+            .iter()
+            .map(|k| k.id.clone())
+            .collect();
+        save_key(
+            &store,
+            json!({ "endpointId": ep, "id": ids[1], "enabled": false }),
+        )
+        .unwrap();
+        let reference = ModelRef {
+            endpoint_id: ep.clone(),
+            model_id: "m1".to_owned(),
+        };
+        let firsts: Vec<String> = (0..4)
+            .map(|_| {
+                store.resolve(&reference).unwrap().api_keys[0]
+                    .as_str()
+                    .to_owned()
+            })
+            .collect();
+        assert_eq!(firsts, ["k1", "k3", "k1", "k3"]);
+        // Each request still carries every enabled key for failover, starting at the cursor.
+        assert_eq!(keys_of(&store, &ep), ["k1", "k3"]);
+        assert_eq!(keys_of(&store, &ep), ["k3", "k1"]);
+
+        for id in [&ids[0], &ids[2]] {
+            save_key(
+                &store,
+                json!({ "endpointId": ep, "id": id, "enabled": false }),
+            )
             .unwrap();
-        let ep_id = before[0].endpoints[0].id.clone();
-        let mut change = endpoint(Some(&ep_id), "renamed", &[]);
-        change["apiKey"] = json!("sk-new-key-0000000000");
-        let input = request(json!({ "id": before[0].id, "name": "Q",
-            "endpoints": [change, endpoint(None, "extra", &[])] }));
-        let error = store.save_with(input, fail_seal).err().unwrap();
-        assert_eq!(error.code(), KitErrorCode::Unsupported);
-        assert_eq!(store.list().unwrap(), before);
-        assert_eq!(key_of(&store, &ep_id).as_deref(), Some(KEY));
+        }
+        assert!(store.resolve(&reference).unwrap().api_keys.is_empty());
+    }
+
+    #[test]
+    fn invalid_keys_are_rejected() {
+        let (_dir, store) = store();
+        let (_, ep) = saved(&store);
+        save_key(&store, json!({ "endpointId": ep, "key": KEY })).unwrap();
+        let id = store.list().unwrap()[0].endpoints[0].keys[0].id.clone();
+        let cases = [
+            (json!({ "endpointId": ep }), ("apiKey", "empty")),
+            (
+                json!({ "endpointId": ep, "key": "  " }),
+                ("apiKey", "empty"),
+            ),
+            (
+                json!({ "endpointId": ep, "id": id, "key": "" }),
+                ("apiKey", "empty"),
+            ),
+            (
+                json!({ "endpointId": ep, "key": "k".repeat(4097) }),
+                ("apiKey", "too_long"),
+            ),
+            (
+                json!({ "endpointId": ep, "key": format!("{KEY} ") }),
+                ("apiKey", "duplicate"),
+            ),
+            (
+                json!({ "endpointId": ep, "key": "k2", "label": "x".repeat(41) }),
+                ("label", "too_long"),
+            ),
+        ];
+        for (input, (field, why)) in cases {
+            let error = save_key(&store, input).unwrap_err();
+            assert_eq!(
+                reason(&error),
+                (KitErrorCode::BadRequest, Some(field), Some(why))
+            );
+        }
+        // Re-saving a key's own value is not a duplicate of itself.
+        save_key(&store, json!({ "endpointId": ep, "id": id, "key": KEY })).unwrap();
+        let missing = save_key(&store, json!({ "endpointId": "nope", "key": "k2" })).unwrap_err();
+        assert_eq!(missing.details().entity(), Some("endpoint"));
+        let missing = save_key(
+            &store,
+            json!({ "endpointId": ep, "id": "nope", "label": "x" }),
+        )
+        .unwrap_err();
+        assert_eq!(missing.details().entity(), Some("key"));
+        for n in 1..16 {
+            save_key(&store, json!({ "endpointId": ep, "key": format!("k-{n}") })).unwrap();
+        }
+        let error = save_key(&store, json!({ "endpointId": ep, "key": "k-17" })).unwrap_err();
+        assert_eq!(
+            reason(&error),
+            (KitErrorCode::BadRequest, Some("keys"), Some("too_many"))
+        );
+        assert_eq!(store.list().unwrap()[0].endpoints[0].keys.len(), 16);
+    }
+
+    #[test]
+    fn deleting_endpoints_and_providers_removes_their_keys() {
+        let (_dir, store) = store();
+        let count = |store: &Store| -> i64 {
+            store
+                .lock()
+                .unwrap()
+                .query_row("SELECT count(*) FROM endpoint_keys", [], |row| row.get(0))
+                .unwrap()
+        };
+        let (provider, ep) = saved(&store);
+        save_key(&store, json!({ "endpointId": ep, "key": KEY })).unwrap();
+        store
+            .save(request(
+                json!({ "id": provider, "name": "P", "endpoints": [endpoint(None, "b", &[])] }),
+            ))
+            .unwrap();
+        assert_eq!(count(&store), 0);
+        let (provider, ep) = saved(&store);
+        save_key(&store, json!({ "endpointId": ep, "key": KEY })).unwrap();
+        store.delete(&provider).unwrap();
+        assert_eq!(count(&store), 0);
+    }
+
+    #[test]
+    fn empty_address_saves_but_does_not_resolve() {
+        let (_dir, store) = store();
+        let mut ep = endpoint(None, "a", &["m1"]);
+        ep["baseUrl"] = json!("");
+        let saved = store
+            .save(request(json!({ "name": "P", "endpoints": [ep] })))
+            .unwrap();
+        let reference = ModelRef {
+            endpoint_id: saved[0].endpoints[0].id.clone(),
+            model_id: "m1".to_owned(),
+        };
+        let error = store.resolve(&reference).unwrap_err();
+        assert_eq!(
+            reason(&error),
+            (KitErrorCode::NeedsConfig, None, Some("missing_url"))
+        );
     }
 
     #[test]
     fn unreadable_ciphertext_is_reported_not_fatal() {
         let (_dir, store) = store();
-        let saved = store
-            .save(request(
-                json!({ "name": "P", "endpoints": [endpoint(None, "a", &["m1"])] }),
-            ))
-            .unwrap();
-        let ep_id = saved[0].endpoints[0].id.clone();
+        let (_, ep) = saved(&store);
+        save_key(&store, json!({ "endpointId": ep, "key": KEY })).unwrap();
         // Unknown format marker, as after copying the database to another platform.
         store
             .lock()
             .unwrap()
-            .execute(
-                "UPDATE endpoints SET key_ciphertext = X'7F0102' WHERE id = ?1",
-                [&ep_id],
-            )
+            .execute("UPDATE endpoint_keys SET key_ciphertext = X'7F0102'", [])
             .unwrap();
-        let ep = &store.list().unwrap()[0].endpoints[0];
-        assert!(ep.has_key && !ep.key_readable && ep.key_masked.is_none());
-        let error = store.endpoint_connection(&ep_id).err().unwrap();
-        assert_eq!(error.code(), KitErrorCode::NeedsConfig);
-        assert_eq!(error.details().reason(), Some("key_unreadable"));
+        let key = &store.list().unwrap()[0].endpoints[0].keys[0];
+        assert!(!key.readable && key.masked.is_none());
+        let error = store.endpoint_connection(&ep).err().unwrap();
+        assert_eq!(
+            reason(&error),
+            (KitErrorCode::NeedsConfig, None, Some("key_unreadable"))
+        );
     }
 
     #[test]

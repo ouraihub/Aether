@@ -7,6 +7,7 @@ import type { IssuedToken } from './generated/IssuedToken'
 import type { KitError } from './generated/KitError'
 import type { KitErrorCode } from './generated/KitErrorCode'
 import type { Details } from './generated/Details'
+import type { EndpointKeySave } from './generated/EndpointKeySave'
 import type { LogEntry } from './generated/LogEntry'
 import type { LogLevel } from './generated/LogLevel'
 import type { LogStatus } from './generated/LogStatus'
@@ -55,7 +56,9 @@ export interface ProvidersPort {
   remove(id: string): Promise<Provider[]>
   modelOptions(filter?: ModelFilter): Promise<ModelOption[]>
   probe(target: ProbeTarget, options?: CallOptions): Promise<ProbeResult>
-  revealKey(endpointId: string, currentPassword?: string | null): Promise<string>
+  saveKey(input: EndpointKeySave): Promise<Provider[]>
+  removeKey(endpointId: string, keyId: string): Promise<Provider[]>
+  revealKey(keyId: string, currentPassword?: string | null): Promise<string>
 }
 
 export interface ChatHistoryPort {

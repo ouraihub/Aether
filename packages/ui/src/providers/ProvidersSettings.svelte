@@ -59,13 +59,23 @@
   }
   function status(p: Provider): string | null {
     if (!p.enabled) return null
-    return p.endpoints.length === 0 || p.endpoints.some((e) => !e.hasKey || !e.keyReadable)
+    return p.endpoints.length === 0 || p.endpoints.some((e) => !e.keys.some((k) => k.enabled && k.readable))
       ? 'bg-warning'
       : 'bg-success'
   }
   function notifyChanged() {
     providersRevision.value++
     onchanged?.()
+  }
+  /** Key operations return the whole list; only the matching endpoint's stored record changes in the draft. */
+  function keysChanged(next: Provider[]) {
+    providers = next
+    const stored = next.find((p) => p.id === draft?.id)
+    for (const e of draft?.endpoints ?? []) {
+      const record = stored?.endpoints.find((s) => s.id === e.saved?.id)
+      if (record) e.saved = record
+    }
+    notifyChanged()
   }
 
   function load(next: ProviderDraft | null) {
@@ -175,6 +185,8 @@
     if (!draft) return
     draft.endpoints.push(newEndpoint(draft.endpoints))
     active = draft.endpoints.length - 1
+    // Stored right away so its keys can be added before it has an address (docs/34 §2).
+    void commit()
   }
   async function removeEndpoint() {
     if (!draft || !endpoint) return
@@ -194,6 +206,18 @@
     if (wasSaved) void commit()
   }
 
+  function outcome(result: ProbeResult): { state: 'ok'; count: number } | { state: 'error'; message: string } {
+    const e = result.error
+    if (!e) return { state: 'ok', count: result.models.length }
+    const message = [
+      t(`providers.probe.${e.kind}`, { status: e.status ?? '' }),
+      e.hint ? t(e.hint) : '',
+      e.message ?? '',
+    ]
+      .filter(Boolean)
+      .join('\n')
+    return { state: 'error', message }
+  }
   async function runProbe(index: number, openPicker: boolean) {
     const target = draft?.endpoints[index]
     if (!target || !port) return
@@ -202,24 +226,29 @@
     abort = controller
     const slug = target.slug
     check = { slug, value: { state: 'running' } }
+    const enabled = target.saved?.keys.filter((k) => k.enabled) ?? []
     try {
-      const result = await port.probe(probeTarget(target), { signal: controller.signal })
-      if (result.error) {
-        const e = result.error
-        const message = [
-          t(`providers.probe.${e.kind}`, { status: e.status ?? '' }),
-          e.hint ? t(e.hint) : '',
-          e.message ?? '',
-        ]
-          .filter(Boolean)
-          .join('\n')
-        check = { slug, value: { state: 'error', message } }
-      } else {
-        check = { slug, value: { state: 'ok', count: result.models.length } }
-        if (openPicker) {
-          probe = { slug, result }
+      if (enabled.length >= 2) {
+        // Cherry's "all keys" check: one probe per enabled key, in order.
+        const results = []
+        let usable: ProbeResult | null = null
+        for (const key of enabled) {
+          const result = await port.probe(probeTarget(target, key.id), { signal: controller.signal })
+          if (!result.error) usable ??= result
+          results.push({ keyId: key.id, value: outcome(result) })
+        }
+        check = { slug, value: { state: 'keys', results } }
+        if (openPicker && usable) {
+          probe = { slug, result: usable }
           pickerOpen = true
         }
+        return
+      }
+      const result = await port.probe(probeTarget(target), { signal: controller.signal })
+      check = { slug, value: outcome(result) }
+      if (!result.error && openPicker) {
+        probe = { slug, result }
+        pickerOpen = true
       }
     } catch (error) {
       check =
@@ -354,6 +383,7 @@
               onaddendpoint={draft.endpoints.length < 20 ? addEndpoint : null}
               onremove={() => void removeEndpoint()}
               oncommit={() => void commit()}
+              onkeys={keysChanged}
               oncheck={() => void runProbe(active, false)}
               onsync={() => void runProbe(active, true)}
             />

@@ -12,8 +12,8 @@ use aether_chat::{
 };
 use aether_observability::LogConfig;
 use aether_providers::{
-    EndpointSave, ModelRef, ModelSave, ModelType, Protocol, ProviderSave, ReasoningEffort, Store,
-    TypeSource,
+    EndpointKeySave, EndpointSave, ModelRef, ModelSave, ModelType, Protocol, ProviderSave,
+    ReasoningEffort, Store, TypeSource,
 };
 
 /// The only tool: read-only, so `Auto`. Its answer is not guessable, which proves the model
@@ -99,8 +99,6 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
             slug: "main".to_owned(),
             base_url,
             protocol,
-            // Absent keeps the stored key, so it only has to be passed once.
-            api_key: std::env::var("AETHER_API_KEY").ok(),
             models: vec![ModelSave {
                 id: model_id.clone(),
                 model_type: ModelType::Chat,
@@ -114,12 +112,24 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
             }],
         }],
     })?;
-    let endpoint_id = saved
+    let endpoint = saved
         .iter()
         .find(|p| p.name == "cli")
         .and_then(|p| p.endpoints.first())
-        .map(|e| e.id.clone())
         .ok_or("saved provider has no endpoint")?;
+    let endpoint_id = endpoint.id.clone();
+    // Stored keys are kept, so the key only has to be passed once.
+    if let Ok(key) = std::env::var("AETHER_API_KEY")
+        && endpoint.keys.is_empty()
+    {
+        store.save_key(EndpointKeySave {
+            endpoint_id: endpoint_id.clone(),
+            id: None,
+            key: Some(key),
+            label: None,
+            enabled: None,
+        })?;
+    }
     let connection = store.resolve(&ModelRef {
         endpoint_id,
         model_id,

@@ -21,14 +21,14 @@ pub enum Protocol {
 }
 
 /// Everything needed to call one model. Lives only in the backend: it is not
-/// `Serialize`, and `Debug` never prints the key.
+/// `Serialize`, and `Debug` never prints the keys.
 pub struct Connection {
     /// Canonical provider API base URL.
     pub base_url: String,
     /// Wire protocol.
     pub protocol: Protocol,
-    /// Backend-only clear credential.
-    pub api_key: Option<Zeroizing<String>>,
+    /// Backend-only clear credentials in try order (rotated, enabled only); empty = none.
+    pub api_keys: Vec<Zeroizing<String>>,
     /// Selected model identifier.
     pub model_id: Option<String>,
     /// Selected endpoint identifier.
@@ -52,7 +52,7 @@ impl fmt::Debug for Connection {
         f.debug_struct("Connection")
             .field("base_url", &crate::mask::mask_url(&self.base_url))
             .field("protocol", &self.protocol)
-            .field("api_key", &self.api_key.as_ref().map(|_| "***"))
+            .field("api_keys", &self.api_keys.len())
             .field("model_id", &self.model_id)
             .field("endpoint_id", &self.endpoint_id)
             .field("context_window", &self.context_window)
@@ -72,7 +72,7 @@ mod tests {
         let connection = Connection {
             base_url: "https://api.example.com/v1?key=leak-me".to_owned(),
             protocol: Protocol::OpenaiChat,
-            api_key: Some(Zeroizing::new("sk-live-0123456789abcdefghij".to_owned())),
+            api_keys: vec![Zeroizing::new("sk-live-0123456789abcdefghij".to_owned())],
             model_id: Some("gpt-x".to_owned()),
             endpoint_id: Some("e1".to_owned()),
             context_window: None,

@@ -52,28 +52,6 @@ pub const fn available() -> bool {
     cfg!(windows)
 }
 
-/// How a save request changes a stored key.
-pub enum KeyChange {
-    /// Field omitted: keep the stored key.
-    Keep,
-    /// Empty string: delete the stored key.
-    Clear,
-    /// Anything else: replace it.
-    Set(Zeroizing<String>),
-}
-
-impl KeyChange {
-    /// `None` = keep, `""` = clear, otherwise set.
-    #[must_use]
-    pub fn from_field(field: Option<String>) -> Self {
-        match field {
-            None => Self::Keep,
-            Some(key) if key.is_empty() => Self::Clear,
-            Some(key) => Self::Set(Zeroizing::new(key)),
-        }
-    }
-}
-
 #[cfg(windows)]
 #[expect(
     unsafe_code,
@@ -212,18 +190,5 @@ mod tests {
         assert_unreadable(open(&[0x00, 1, 2, 3]));
         assert_unreadable(open(&[0x02; 17]));
         assert_unreadable(open(&[0xFF]));
-    }
-
-    #[test]
-    fn from_field_is_tri_state() {
-        assert!(matches!(KeyChange::from_field(None), KeyChange::Keep));
-        assert!(matches!(
-            KeyChange::from_field(Some(String::new())),
-            KeyChange::Clear
-        ));
-        assert!(matches!(
-            KeyChange::from_field(Some("sk-x".to_owned())),
-            KeyChange::Set(key) if key.as_str() == "sk-x"
-        ));
     }
 }

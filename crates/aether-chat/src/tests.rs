@@ -184,7 +184,7 @@ fn input(protocol: Protocol, base_url: String) -> RunInput {
     let connection = Connection {
         base_url,
         protocol,
-        api_key: Some(Zeroizing::new(KEY.to_owned())),
+        api_keys: vec![Zeroizing::new(KEY.to_owned())],
         model_id: Some("model-x".to_owned()),
         endpoint_id: None,
         context_window: None,
@@ -551,6 +551,58 @@ async fn non_2xx_is_classified_and_sanitized() {
             assert!(summary.messages.is_empty());
         }
     }
+}
+
+fn bearer(raw: &str) -> String {
+    raw.lines()
+        .find_map(|line| {
+            line.to_ascii_lowercase()
+                .strip_prefix("authorization: bearer ")
+                .map(str::to_owned)
+        })
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn unauthorized_first_key_fails_over_to_the_next() {
+    let protocol = Protocol::OpenaiChat;
+    let (base, seen) = script(vec![
+        Reply::Status(401, r#"{"error":{"message":"bad k1"}}"#.to_owned()),
+        sse(fixture(protocol, "text")),
+    ])
+    .await;
+    let mut req = input(protocol, base);
+    req.connection.api_keys = vec![
+        Zeroizing::new("k1".to_owned()),
+        Zeroizing::new("k2".to_owned()),
+    ];
+    let (summary, _) = run(&runner(5_000, 5_000), req, false).await;
+    assert_eq!(summary.status, EndStatus::Completed);
+    let auth: Vec<String> = seen.lock().await.iter().map(|raw| bearer(raw)).collect();
+    assert_eq!(auth, ["k1", "k2"]);
+}
+
+#[tokio::test]
+async fn every_key_unauthorized_fails_with_the_last_reply() {
+    let protocol = Protocol::OpenaiChat;
+    let (base, seen) = upstream(Reply::Status(
+        401,
+        r#"{"error":{"message":"bad key"}}"#.to_owned(),
+    ))
+    .await;
+    let mut req = input(protocol, base);
+    req.connection.api_keys = vec![
+        Zeroizing::new("k1".to_owned()),
+        Zeroizing::new("k2".to_owned()),
+    ];
+    let (_, events) = run(&runner(5_000, 5_000), req, false).await;
+    let (end_status, end_code, _) = end(&events);
+    assert_eq!(
+        (end_status, end_code),
+        (EndStatus::Failed, Some(KitErrorCode::Unauthorized))
+    );
+    let auth: Vec<String> = seen.lock().await.iter().map(|raw| bearer(raw)).collect();
+    assert_eq!(auth, ["k1", "k2"]);
 }
 
 #[tokio::test]

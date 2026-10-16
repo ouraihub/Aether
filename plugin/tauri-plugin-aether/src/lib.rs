@@ -263,6 +263,10 @@ impl Builder {
                 #[cfg(feature = "providers")]
                 providers::providers_probe,
                 #[cfg(feature = "providers")]
+                providers::providers_key_save,
+                #[cfg(feature = "providers")]
+                providers::providers_key_delete,
+                #[cfg(feature = "providers")]
                 providers::providers_key_reveal,
                 #[cfg(feature = "providers")]
                 providers::providers_cancel,

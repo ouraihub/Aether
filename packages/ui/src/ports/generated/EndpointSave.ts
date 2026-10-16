@@ -15,17 +15,13 @@ id?: string,
  */
 slug: string, 
 /**
- * Base URL, `http(s)://`, at most 2048 bytes.
+ * Base URL: empty, or `http(s)://` of at most 2048 bytes.
  */
 baseUrl: string, 
 /**
  * Wire protocol.
  */
 protocol: Protocol, 
-/**
- * Key tri-state: absent = keep, `""` = clear, otherwise set (docs/00 §7.3).
- */
-apiKey?: string, 
 /**
  * Selected models in display order.
  */

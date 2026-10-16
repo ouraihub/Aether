@@ -155,7 +155,7 @@ fn missing_key_only_allowed_on_loopback() {
         ("https://api.example.com/v1", false),
     ] {
         let mut input = input(Protocol::OpenaiChat, base.to_owned());
-        input.connection.api_key = None;
+        input.connection.api_keys.clear();
         let result = runner.validate(&mut input);
         assert_eq!(result.is_ok(), ok, "{base}");
         if let Err(error) = result {

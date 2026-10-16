@@ -63,13 +63,36 @@ fn http(status: &str, body: &str) -> Option<Vec<u8>> {
     )
 }
 
-fn draft(base_url: &str, protocol: Protocol, api_key: Option<&str>) -> ProbeTarget {
+fn draft(base_url: &str, protocol: Protocol, endpoint_id: Option<&str>) -> ProbeTarget {
     ProbeTarget::Draft {
         base_url: base_url.to_owned(),
         protocol,
-        api_key: api_key.map(str::to_owned),
-        endpoint_id: None,
+        endpoint_id: endpoint_id.map(str::to_owned),
+        key_id: None,
     }
+}
+
+/// A saved endpoint holding `keys` in order; returns its id.
+fn keyed(store: &Store, base_url: &str, keys: &[&str]) -> String {
+    let saved = store
+        .save(
+            serde_json::from_value(serde_json::json!({ "name": "Acme", "endpoints": [{
+                "slug": "main", "baseUrl": base_url, "protocol": "anthropic-messages", "models": [] }] }))
+            .unwrap(),
+        )
+        .unwrap();
+    let endpoint_id = saved[0].endpoints[0].id.clone();
+    for key in keys {
+        store
+            .save_key(
+                serde_json::from_value(
+                    serde_json::json!({ "endpointId": endpoint_id, "key": key }),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
+    endpoint_id
 }
 
 async fn probe(store: &Store, target: ProbeTarget) -> ProbeResult {
@@ -116,6 +139,7 @@ async fn parses_the_three_shapes_sorted_and_deduplicated() {
 #[tokio::test]
 async fn maps_upstream_statuses_with_hints_and_masked_text() {
     let (_dir, store) = store();
+    let endpoint = keyed(&store, "https://unused.example.com", &[KEY]);
     let body = format!(r#"{{"error":"bad key {KEY}"}}"#);
     for (status, kind, hint) in [
         (
@@ -137,7 +161,7 @@ async fn maps_upstream_statuses_with_hints_and_masked_text() {
         ("502 Bad Gateway", ProbeErrorKind::Status, None),
     ] {
         let (base, _) = upstream(http(status, &body)).await;
-        let result = probe(&store, draft(&base, Protocol::OpenaiChat, Some(KEY))).await;
+        let result = probe(&store, draft(&base, Protocol::OpenaiChat, Some(&endpoint))).await;
         let error = error(&result);
         assert_eq!(error.kind, kind, "{status}");
         assert_eq!(error.status, Some(status[..3].parse().unwrap()));
@@ -207,22 +231,60 @@ async fn missing_key_off_loopback_sends_nothing() {
     .await;
     assert_eq!(result.probe_url, "https://api.example.com/v1/models");
     assert_eq!(error(&result).kind, ProbeErrorKind::MissingKey);
-    // Clearing the key in the draft (`""`) is no key either.
-    let result = probe(
-        &store,
-        draft("https://api.example.com", Protocol::OpenaiChat, Some("")),
-    )
-    .await;
-    assert_eq!(error(&result).kind, ProbeErrorKind::MissingKey);
+}
+
+#[tokio::test]
+async fn unauthorized_keys_fail_over_and_key_id_pins_one() {
+    let (_dir, store) = store();
+    let (base, seen) = upstream(http("401 Unauthorized", "{}")).await;
+    let endpoint = keyed(&store, &base, &["k1", "k2"]);
+    let saved = ProbeTarget::Saved {
+        endpoint_id: endpoint.clone(),
+    };
+    assert_eq!(
+        error(&probe(&store, saved).await).kind,
+        ProbeErrorKind::Unauthorized
+    );
+    let auth = |seen: &[String]| -> Vec<String> {
+        seen.iter()
+            .filter_map(|head| {
+                head.lines()
+                    .find_map(|l| l.strip_prefix("authorization: bearer ").map(str::to_owned))
+            })
+            .collect()
+    };
+    assert_eq!(auth(&seen.lock().await), ["k1", "k2"]);
+
+    let key_id = store.list().unwrap()[0].endpoints[0].keys[1].id.clone();
+    let pinned = ProbeTarget::Draft {
+        base_url: base.clone(),
+        protocol: Protocol::OpenaiChat,
+        endpoint_id: Some(endpoint.clone()),
+        key_id: Some(key_id),
+    };
+    probe(&store, pinned).await;
+    assert_eq!(auth(&seen.lock().await)[2..], ["k2"]);
+    let foreign = ProbeTarget::Draft {
+        base_url: base,
+        protocol: Protocol::OpenaiChat,
+        endpoint_id: Some(endpoint),
+        key_id: Some("nope".to_owned()),
+    };
+    let err = store
+        .probe(foreign, &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(err.details().entity(), Some("key"));
 }
 
 #[tokio::test]
 async fn blocked_addresses_are_reported() {
     let (_dir, store) = store();
     // A private IP literal is refused by `check_url`.
+    let endpoint = keyed(&store, "https://unused.example.com", &[KEY]);
     let result = probe(
         &store,
-        draft("https://10.0.0.5", Protocol::OpenaiChat, Some(KEY)),
+        draft("https://10.0.0.5", Protocol::OpenaiChat, Some(&endpoint)),
     )
     .await;
     assert_eq!(error(&result).kind, ProbeErrorKind::BlockedAddress);
@@ -230,7 +292,7 @@ async fn blocked_addresses_are_reported() {
     let (base, seen) = upstream(http("200 OK", r#"["m"]"#)).await;
     let port = base.rsplit(':').next().unwrap();
     let url = format!("https://localhost.:{port}");
-    let result = probe(&store, draft(&url, Protocol::OpenaiChat, Some(KEY))).await;
+    let result = probe(&store, draft(&url, Protocol::OpenaiChat, Some(&endpoint))).await;
     assert_eq!(error(&result).kind, ProbeErrorKind::BlockedAddress);
     assert!(seen.lock().await.is_empty());
 }
@@ -282,15 +344,7 @@ async fn cancel_aborts_a_pending_request() {
 async fn saved_and_draft_targets_send_the_stored_key() {
     let (_dir, store) = store();
     let (base, seen) = upstream(http("200 OK", r#"{"data":[{"id":"claude-sonnet-4-5"}]}"#)).await;
-    let saved = store
-        .save(
-            serde_json::from_value(serde_json::json!({ "name": "Acme", "endpoints": [{
-                "slug": "main", "baseUrl": base, "protocol": "anthropic-messages",
-                "apiKey": KEY, "models": [] }] }))
-            .unwrap(),
-        )
-        .unwrap();
-    let endpoint_id = saved[0].endpoints[0].id.clone();
+    let endpoint_id = keyed(&store, &base, &[KEY]);
 
     let saved_target = ProbeTarget::Saved {
         endpoint_id: endpoint_id.clone(),
@@ -299,14 +353,13 @@ async fn saved_and_draft_targets_send_the_stored_key() {
         ids(&probe(&store, saved_target).await),
         ["claude-sonnet-4-5"]
     );
-    // Edited address, key field untouched: the stored key of `endpointId` is reused.
+    // Edited address: the stored keys of `endpointId` are reused.
     let (edited, edited_seen) = upstream(http("200 OK", r#"["m"]"#)).await;
-    let reuse = ProbeTarget::Draft {
-        base_url: format!("{edited}/v1/"),
-        protocol: Protocol::OpenaiChat,
-        api_key: None,
-        endpoint_id: Some(endpoint_id),
-    };
+    let reuse = draft(
+        &format!("{edited}/v1/"),
+        Protocol::OpenaiChat,
+        Some(&endpoint_id),
+    );
     assert_eq!(ids(&probe(&store, reuse).await), ["m"]);
 
     let anthropic = seen.lock().await[0].clone();

@@ -1,5 +1,16 @@
-// Editable form of a provider and its conversion to save/probe requests (docs/11 §3, §7).
-import type { Endpoint, EndpointSave, Model, ProbeTarget, Protocol, Provider, ProviderSave } from '../ports'
+// Editable form of a provider and its conversion to save/probe requests (docs/11 §3, §7); key helpers (docs/34 §5).
+import type { KitI18n } from '../i18n'
+import {
+  isKitClientError,
+  type Endpoint,
+  type EndpointKey,
+  type EndpointSave,
+  type Model,
+  type ProbeTarget,
+  type Protocol,
+  type Provider,
+  type ProviderSave,
+} from '../ports'
 
 export interface EndpointDraft {
   /** Stored endpoint, `null` for a new one. Its `id` must go back on save (docs/11 陷阱 1). */
@@ -7,8 +18,6 @@ export interface EndpointDraft {
   slug: string
   baseUrl: string
   protocol: Protocol
-  /** `null` keeps the stored key, `''` clears it (explicit button only, docs/11 陷阱 2), else sets it. */
-  key: string | null
   models: Model[]
 }
 
@@ -29,14 +38,13 @@ export function toDraft(provider: Provider): ProviderDraft {
       slug: saved.slug,
       baseUrl: saved.baseUrl,
       protocol: saved.protocol,
-      key: null,
       models: saved.models,
     })),
   }
 }
 
 export function newEndpoint(taken: readonly EndpointDraft[]): EndpointDraft {
-  return { saved: null, slug: nextSlug(taken), baseUrl: '', protocol: 'openai-chat', key: null, models: [] }
+  return { saved: null, slug: nextSlug(taken), baseUrl: '', protocol: 'openai-chat', models: [] }
 }
 
 /** First free `ep-N`; slugs are unique per provider and hidden from users. */
@@ -49,28 +57,28 @@ export function nextSlug(taken: readonly EndpointDraft[]): string {
 
 export const validUrl = (url: string): boolean => /^https?:\/\/\S+$/.test(url.trim())
 
-/** New endpoints without a usable address stay local; the backend would reject them. */
+/** Endpoints are stored even without an address (keys hang on them); only a malformed address stays local. */
 export function savable(draft: ProviderDraft): ProviderDraft {
-  return { ...draft, endpoints: draft.endpoints.filter((e) => e.saved !== null || validUrl(e.baseUrl)) }
+  return {
+    ...draft,
+    endpoints: draft.endpoints.filter((e) => e.saved !== null || !e.baseUrl.trim() || validUrl(e.baseUrl)),
+  }
 }
 
 /**
  * Takes the stored provider after a save without discarding what the user typed meanwhile:
- * sent endpoints get their stored record (new ones matched by slug), keys that were sent
- * return to "keep", and edits made after `sent` was taken stay in the draft.
+ * sent endpoints get their stored record (new ones matched by slug); edits stay in the draft.
  */
 export function adopt(current: ProviderDraft, sent: ProviderDraft, stored: Provider): ProviderDraft {
-  const sentKeys = new Map(sent.endpoints.map((e) => [e.slug, e.key]))
+  const sentSlugs = new Set(sent.endpoints.map((e) => e.slug))
   return {
     ...current,
     id: stored.id,
     endpoints: current.endpoints.map((endpoint) => {
       const record =
         stored.endpoints.find((e) => e.id === endpoint.saved?.id) ??
-        (sentKeys.has(endpoint.slug) ? stored.endpoints.find((e) => e.slug === endpoint.slug) : undefined)
-      if (!record) return endpoint
-      const key = sentKeys.get(endpoint.slug) === endpoint.key ? null : endpoint.key
-      return { ...endpoint, saved: record, key }
+        (sentSlugs.has(endpoint.slug) ? stored.endpoints.find((e) => e.slug === endpoint.slug) : undefined)
+      return record ? { ...endpoint, saved: record } : endpoint
     }),
   }
 }
@@ -87,7 +95,6 @@ export function toSave(draft: ProviderDraft): ProviderSave {
       })),
     }
     if (e.saved) save.id = e.saved.id
-    if (e.key !== null) save.apiKey = e.key
     return save
   })
   return draft.id === null
@@ -95,11 +102,11 @@ export function toSave(draft: ProviderDraft): ProviderSave {
     : { id: draft.id, name: draft.name.trim(), enabled: draft.enabled, endpoints }
 }
 
-/** Always a draft target: with Keep + endpointId the backend uses the stored key on an edited, unsaved address. */
-export function probeTarget(e: EndpointDraft): ProbeTarget {
+/** Always a draft target: with endpointId the backend uses the stored keys on an edited, unsaved address. */
+export function probeTarget(e: EndpointDraft, keyId?: string): ProbeTarget {
   const target: ProbeTarget = { kind: 'draft', baseUrl: e.baseUrl.trim(), protocol: e.protocol }
-  if (e.key !== null) target.apiKey = e.key
   if (e.saved) target.endpointId = e.saved.id
+  if (keyId) target.keyId = keyId
   return target
 }
 
@@ -107,4 +114,22 @@ export function probeTarget(e: EndpointDraft): ProbeTarget {
 export function probeUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '')
   return `${trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`}/models`
+}
+
+/** Cherry's primary key: the first enabled one, else the first. */
+export const primaryKey = (keys: readonly EndpointKey[]): EndpointKey | null =>
+  keys.find((k) => k.enabled) ?? keys[0] ?? null
+
+export const maskedText = (key: EndpointKey, t: KitI18n['t']): string =>
+  key.readable && key.masked ? key.masked.replace(/\*{4,}/, '****') : t('providers.key_unreadable')
+
+/** Maps key save errors (docs/34 §3.2) to their texts. */
+export function keyError(error: unknown, t: KitI18n['t']): string {
+  if (!isKitClientError(error)) return t('providers.keys_save_failed')
+  const { field, reason } = error.details
+  if (reason === 'duplicate') return t('providers.keys_err_duplicate')
+  if (reason === 'too_many') return t('providers.keys_err_too_many')
+  if (field === 'label' && reason === 'too_long') return t('providers.keys_err_label')
+  if (field === 'apiKey' && reason === 'empty') return t('providers.keys_err_empty')
+  return error.code === 'bad_request' ? t('providers.keys_save_failed') : t(`errors.${error.code}`)
 }

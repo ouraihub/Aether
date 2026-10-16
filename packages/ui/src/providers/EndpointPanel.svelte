@@ -1,6 +1,6 @@
 <script lang="ts">
-  // One endpoint's key, address and models (Cherry AuthenticationSection + ModelList).
-  // Fields edit the draft in place; `oncommit` asks the parent to save (docs/33 §3).
+  // One endpoint's keys, address and models (Cherry AuthenticationSection + ModelList).
+  // Fields edit the draft in place; `oncommit` asks the parent to save (docs/33 §3); keys save on their own (docs/34).
   import BrainIcon from '@lucide/svelte/icons/brain'
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
   import ChevronsDownUpIcon from '@lucide/svelte/icons/chevrons-down-up'
@@ -15,18 +15,24 @@
   import Settings2Icon from '@lucide/svelte/icons/settings-2'
   import WrenchIcon from '@lucide/svelte/icons/wrench'
   import { Button } from '#lib/components/ui/button/index.js'
+  import { Switch } from '#lib/components/ui/switch/index.js'
   import * as Dialog from '#lib/components/ui/dialog/index.js'
   import * as Field from '#lib/components/ui/field/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
   import * as Select from '#lib/components/ui/select/index.js'
   import { getKitContext } from '../context'
-  import type { Model, Protocol } from '../ports'
+  import type { Model, Protocol, Provider } from '../ports'
   import { cn } from '../utils'
-  import { probeUrl, validUrl, type EndpointDraft } from './draft'
+  import { keyError, maskedText, probeUrl, validUrl, type EndpointDraft } from './draft'
   import ModelSettingsDialog from './ModelSettingsDialog.svelte'
   import SecretInput from './SecretInput.svelte'
 
-  export type CheckState = { state: 'running' } | { state: 'ok'; count: number } | { state: 'error'; message: string }
+  type Outcome = { state: 'ok'; count: number } | { state: 'error'; message: string }
+  export type CheckState =
+    | { state: 'running' }
+    | Outcome
+    /** One probe per enabled key when there are at least two (docs/34 §5.3). */
+    | { state: 'keys'; results: { keyId: string; value: Outcome }[] }
 
   let {
     endpoint = $bindable(),
@@ -34,6 +40,7 @@
     onaddendpoint,
     onremove,
     oncommit,
+    onkeys,
     oncheck,
     onsync,
   }: {
@@ -42,6 +49,8 @@
     onaddendpoint: (() => void) | null
     onremove: () => void
     oncommit: () => void
+    /** Providers returned by a key operation. */
+    onkeys: (providers: Provider[]) => void
     oncheck: () => void
     onsync: () => void
   } = $props()
@@ -55,7 +64,21 @@
     tools: 'bg-warning/15 text-warning',
     web: 'bg-primary/10 text-primary',
   }
-  const { t } = getKitContext().i18n
+  const { ports, i18n, notify } = getKitContext()
+  const { t } = i18n
+  let keySaving = $state(false)
+  async function setKeyEnabled(keyId: string, enabled: boolean) {
+    const endpointId = endpoint.saved?.id
+    if (!ports.providers || !endpointId || keySaving) return
+    keySaving = true
+    try {
+      onkeys(await ports.providers.saveKey({ endpointId, id: keyId, enabled }))
+    } catch (error) {
+      notify.toast('error', keyError(error, t))
+    } finally {
+      keySaving = false
+    }
+  }
 
   let url = $state(endpoint.baseUrl)
   let urlError = $state(false)
@@ -98,7 +121,7 @@
   function commitUrl() {
     const next = url.trim()
     if (next === endpoint.baseUrl) return
-    if (!validUrl(next)) {
+    if (next && !validUrl(next)) {
       urlError = true
       return
     }
@@ -137,21 +160,40 @@
   <Field.Field class="gap-2">
     <Field.Label for="kit-endpoint-key">{t('providers.api_key')}</Field.Label>
     <div class="flex min-w-0 items-start gap-2">
-      <SecretInput
-        id="kit-endpoint-key"
-        saved={endpoint.saved}
-        pending={endpoint.key}
-        oncommit={(key) => {
-          endpoint.key = key
-          oncommit()
-        }}
-      />
+      <SecretInput id="kit-endpoint-key" endpoint={endpoint.saved} onchanged={onkeys} />
       <Button variant="outline" class="shrink-0" disabled={!validUrl(endpoint.baseUrl)} onclick={oncheck}>
         {#if check?.state === 'running'}<LoaderIcon class="animate-spin" />{/if}
         {t('providers.check')}
       </Button>
     </div>
-    {#if check && check.state !== 'running'}
+    {#if check?.state === 'keys'}
+      <ul role="status" class="flex min-w-0 flex-col gap-1">
+        {#each check.results as { keyId, value } (keyId)}
+          {@const key = endpoint.saved?.keys.find((k) => k.id === keyId)}
+          {#if key}
+            <li class="flex min-w-0 items-start gap-2 text-kit-xs">
+              <span
+                class={cn(
+                  'min-w-0 flex-1 whitespace-pre-line',
+                  value.state === 'ok' ? 'text-success' : 'text-destructive',
+                )}
+                >{value.state === 'ok' ? '✓' : '✕'}
+                {key.label || maskedText(key, t)} — {value.state === 'ok'
+                  ? t('providers.check_ok', { count: value.count })
+                  : value.message}</span
+              >
+              <Switch
+                size="sm"
+                aria-label={t('providers.keys_enable_for', { name: key.label || maskedText(key, t) })}
+                checked={key.enabled}
+                disabled={keySaving}
+                onCheckedChange={(enabled) => void setKeyEnabled(key.id, enabled)}
+              />
+            </li>
+          {/if}
+        {/each}
+      </ul>
+    {:else if check && check.state !== 'running'}
       <p
         role="status"
         class={cn('text-kit-xs whitespace-pre-line', check.state === 'ok' ? 'text-success' : 'text-destructive')}

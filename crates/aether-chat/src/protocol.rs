@@ -22,6 +22,8 @@ pub(crate) const fn path(protocol: Protocol) -> &'static str {
 /// One round's request: auth headers plus the streaming JSON body.
 pub(crate) struct Request<'a> {
     pub(crate) connection: &'a Connection,
+    /// The one key of this attempt; `None` = no auth headers.
+    pub(crate) key: Option<&'a str>,
     pub(crate) model: &'a str,
     pub(crate) system: &'a str,
     pub(crate) history: &'a [Message],
@@ -38,10 +40,10 @@ pub(crate) struct Request<'a> {
 
 impl Request<'_> {
     pub(crate) fn encode(&self, builder: RequestBuilder) -> RequestBuilder {
-        let key = self.connection.api_key.as_deref();
+        let key = self.key;
         let mut builder = builder.header(ACCEPT, "text/event-stream");
         if let Some(key) = key {
-            builder = builder.bearer_auth(key.as_str());
+            builder = builder.bearer_auth(key);
         }
         let protocol = self.connection.protocol;
         let mut messages = Vec::new();
@@ -53,7 +55,7 @@ impl Request<'_> {
         let mut body = match protocol {
             Protocol::AnthropicMessages => {
                 if let Some(key) = key {
-                    builder = builder.header("x-api-key", key.as_str());
+                    builder = builder.header("x-api-key", key);
                 }
                 builder = builder.header("anthropic-version", "2023-06-01");
                 let mut body = json!({
