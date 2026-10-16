@@ -1,5 +1,11 @@
 <script lang="ts">
   // One endpoint: collapsed summary or the edit form (docs/16 §4.1). The parent keeps one card expanded.
+  import EyeIcon from '@lucide/svelte/icons/eye'
+  import BrainIcon from '@lucide/svelte/icons/brain'
+  import WrenchIcon from '@lucide/svelte/icons/wrench'
+  import Globe2Icon from '@lucide/svelte/icons/globe-2'
+  import Settings2Icon from '@lucide/svelte/icons/settings-2'
+  import MinusIcon from '@lucide/svelte/icons/minus'
   import ChevronDownIcon from '@lucide/svelte/icons/chevron-down'
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
   import { Button } from '#lib/components/ui/button/index.js'
@@ -41,6 +47,16 @@
       endpoint.protocol === 'anthropic-messages' ? dialect !== 'openai' : dialect === 'openai',
     ),
   )
+  const modelGroups = $derived(
+    Object.entries(Object.groupBy(endpoint.models, (model) => model.id.split(/[-/:]/)[0] || 'other')),
+  )
+  function chooseModel(id: string) {
+    selectedModelId = id
+  }
+  function removeModel(id: string) {
+    endpoint.models = endpoint.models.filter((model) => model.id !== id)
+    if (selectedModelId === id) selectedModelId = endpoint.models[0]?.id ?? ''
+  }
   function updateModel(update: (model: Model) => void) {
     if (!selectedModel) return
     update(selectedModel)
@@ -58,7 +74,7 @@
   }
 </script>
 
-<div class="flex flex-col gap-3 rounded-kit border p-3">
+<div class="flex flex-col gap-3 rounded-kit border bg-card p-3 shadow-sm">
   <button
     type="button"
     class="flex items-center gap-2 text-left text-kit-base"
@@ -67,8 +83,10 @@
   >
     {#if expanded}<ChevronDownIcon />{:else}<ChevronRightIcon />{/if}
     <span class="font-medium">{endpoint.slug || '—'}</span>
-    <span class="text-muted-foreground flex-1 truncate">{endpoint.baseUrl}</span>
-    <span class="text-muted-foreground">{t('providers.model_count', { count: endpoint.models.length })}</span>
+    <span class="text-muted-foreground min-w-0 flex-1 truncate">{endpoint.baseUrl}</span>
+    <span class="text-muted-foreground shrink-0 text-kit-xs"
+      >{t('providers.model_count', { count: endpoint.models.length })}</span
+    >
   </button>
   {#if expanded}
     <Field.Group>
@@ -103,10 +121,65 @@
         <SecretInput id="{prefix}-key" saved={endpoint.saved} bind:value={endpoint.key} />
       </Field.Field>
       <Field.Field>
-        <Field.Label>{t('providers.models')}</Field.Label>
-        <Field.Description>
-          {endpoint.models.length === 0 ? t('providers.no_models') : endpoint.models.map((m) => m.id).join(', ')}
-        </Field.Description>
+        <div class="flex items-center justify-between">
+          <Field.Label>{t('providers.models')}</Field.Label>
+          <span class="text-muted-foreground text-kit-xs">{endpoint.models.length}</span>
+        </div>
+        <div class="flex flex-col gap-2">
+          {#each modelGroups as [group, models] (group)}
+            <section class="overflow-hidden rounded-kit border bg-muted/10">
+              <h4 class="flex items-center gap-2 border-b px-3 py-2 text-kit-sm font-medium">
+                <ChevronDownIcon class="size-4" />{group}<span class="text-muted-foreground ml-auto"
+                  >{models?.length ?? 0}</span
+                >
+              </h4>
+              <div class="divide-y">
+                {#each models ?? [] as model (model.id)}
+                  <div class="flex min-w-0 items-center gap-2 px-3 py-2">
+                    <button
+                      type="button"
+                      class="min-w-0 flex-1 truncate text-left font-mono text-kit-sm hover:underline"
+                      title={model.id}
+                      onclick={() => chooseModel(model.id)}>{model.id}</button
+                    >
+                    <div class="flex shrink-0 items-center gap-1 text-kit-xs">
+                      {#if model.canVision}<span class="text-chart-2" title={t('providers.cap_vision')}
+                          ><EyeIcon class="size-3.5" /></span
+                        >{/if}
+                      {#if model.reasoning}<span class="text-chart-4" title={t('providers.cap_reasoning')}
+                          ><BrainIcon class="size-3.5" /></span
+                        >{/if}
+                      {#if model.supportsTools}<span class="text-chart-5" title={t('providers.cap_tools')}
+                          ><WrenchIcon class="size-3.5" /></span
+                        >{/if}
+                      {#if model.nativeWebSearch}<span class="text-chart-3" title={t('providers.cap_web')}
+                          ><Globe2Icon class="size-3.5" /></span
+                        >{/if}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={t('providers.model_settings')}
+                      title={t('providers.model_settings')}
+                      onclick={() => chooseModel(model.id)}><Settings2Icon /></Button
+                    >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={t('providers.remove_model', { id: model.id })}
+                      title={t('providers.remove_model', { id: model.id })}
+                      onclick={() => removeModel(model.id)}><MinusIcon /></Button
+                    >
+                  </div>
+                {/each}
+              </div>
+            </section>
+          {:else}
+            <p class="text-muted-foreground py-3 text-kit-sm">{t('providers.no_models')}</p>
+          {/each}
+        </div>
       </Field.Field>
       {#if selectedModel}
         <Field.Field>

@@ -47,11 +47,14 @@ export interface LogsPort {
 }
 
 export interface ProvidersPort {
+  /** Browser asks for the current password; desktop uses its local credential boundary. */
+  readonly revealNeedsPassword: boolean
   list(): Promise<Provider[]>
   save(provider: ProviderSave): Promise<Provider[]>
   remove(id: string): Promise<Provider[]>
   modelOptions(filter?: ModelFilter): Promise<ModelOption[]>
   probe(target: ProbeTarget, options?: CallOptions): Promise<ProbeResult>
+  revealKey(endpointId: string, currentPassword?: string | null): Promise<string>
 }
 
 export interface ChatHistoryPort {

@@ -91,6 +91,7 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
     let saved = store.save(ProviderSave {
         id: existing.as_ref().map(|p| p.id.clone()),
         name: "cli".to_owned(),
+        enabled: None,
         endpoints: vec![EndpointSave {
             id: existing
                 .and_then(|p| p.endpoints.into_iter().next())

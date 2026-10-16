@@ -62,6 +62,8 @@ export function createTauriPorts(options: TauriPortsOptions = {}): KitPorts & { 
           signal?.removeEventListener('abort', cancel)
         }
       },
+      revealNeedsPassword: false,
+      revealKey: (endpointId) => call('providers_key_reveal', { endpointId }),
     }
   }
   if (options.search) {

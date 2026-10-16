@@ -175,6 +175,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       ...options.logs,
     },
     providers: {
+      revealNeedsPassword: false,
+      revealKey: () => Promise.reject(clientError('internal', 'Configure the fake provider reveal method')),
       list: () => Promise.resolve([]),
       save: () => Promise.resolve([]),
       remove: () => Promise.resolve([]),

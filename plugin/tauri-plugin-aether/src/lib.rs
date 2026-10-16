@@ -261,6 +261,8 @@ impl Builder {
                 #[cfg(feature = "providers")]
                 providers::providers_probe,
                 #[cfg(feature = "providers")]
+                providers::providers_key_reveal,
+                #[cfg(feature = "providers")]
                 providers::providers_cancel,
                 #[cfg(feature = "skills")]
                 skills::skills_list,

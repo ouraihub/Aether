@@ -129,6 +129,8 @@ pub struct Provider {
     pub id: String,
     /// Display name.
     pub name: String,
+    /// Off = its models leave every picker and cannot run (Cherry's provider switch).
+    pub enabled: bool,
     /// Endpoints in display order.
     pub endpoints: Vec<Endpoint>,
 }
@@ -167,6 +169,10 @@ pub struct ProviderSave {
     pub id: Option<String>,
     /// Display name, 1–80 characters.
     pub name: String,
+    /// Absent = keep (new providers start enabled).
+    #[serde(default)]
+    #[ts(optional)]
+    pub enabled: Option<bool>,
     /// The complete endpoint list.
     pub endpoints: Vec<EndpointSave>,
 }

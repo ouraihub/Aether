@@ -15,7 +15,7 @@ const endpoint: Endpoint = {
   probeUrl: 'http://127.0.0.1:9/v1/models',
   models: [],
 }
-const stored: Provider = { id: 'p1', name: 'Local', endpoints: [endpoint] }
+const stored: Provider = { id: 'p1', name: 'Local', enabled: true, endpoints: [endpoint] }
 const model = {
   contextWindow: null,
   maxOutput: null,
@@ -86,19 +86,5 @@ describe('ProvidersSettings', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Use 1 models' }))
     await fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
     await waitFor(() => expect(saves[0]?.endpoints[0]?.models.map((m) => m.id)).toEqual(['gpt-4o']))
-  })
-
-  it('clears the key only through the explicit Clear button', async () => {
-    const saves = setup()
-    await fireEvent.click(await screen.findByRole('button', { name: 'Replace' }))
-    const input = document.getElementById('kit-endpoint-0-key') as HTMLInputElement
-    await fireEvent.input(input, { target: { value: 'x' } })
-    await fireEvent.input(input, { target: { value: '' } })
-    // An emptied replace box keeps the stored key: nothing changed.
-    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
-    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(saves[0]?.endpoints[0]?.apiKey).toBe(''))
   })
 })

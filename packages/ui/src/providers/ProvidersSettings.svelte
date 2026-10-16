@@ -5,6 +5,9 @@
   import * as Empty from '#lib/components/ui/empty/index.js'
   import * as Field from '#lib/components/ui/field/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
+  import { Switch } from '#lib/components/ui/switch/index.js'
+  import SearchIcon from '@lucide/svelte/icons/search'
+  import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal'
   import { getKitContext } from '../context'
   import { isKitClientError, type ProbeResult, type Provider } from '../ports'
   import { cn } from '../utils'
@@ -27,6 +30,15 @@
   let probe = $state<{ index: number; result: ProbeResult | null; error: string | null } | null>(null)
   let pickerOpen = $state(false)
   let abort: AbortController | null = null
+  let providerQuery = $state('')
+  let providerFilter = $state<'all' | 'enabled' | 'disabled'>('all')
+  const visibleProviders = $derived(
+    providers.filter((provider) => {
+      const matches = provider.name.toLocaleLowerCase().includes(providerQuery.trim().toLocaleLowerCase())
+      const state = providerFilter === 'all' || (providerFilter === 'enabled' ? provider.enabled : !provider.enabled)
+      return matches && state
+    }),
+  )
 
   const dirty = $derived(draft !== null && JSON.stringify(draft) !== baseline)
 
@@ -59,16 +71,16 @@
   })
 
   function status(p: Provider): string {
+    if (!p.enabled) return 'bg-muted-foreground/40'
     if (p.endpoints.some((e) => !e.hasKey || !e.keyReadable)) return 'bg-chart-4'
     if (p.endpoints.some((e) => e.models.length > 0)) return 'bg-chart-2'
     return 'bg-muted-foreground'
   }
 
   function add() {
-    load({ id: null, name: t('providers.new_name'), endpoints: [newEndpoint(0)] })
+    load({ id: null, name: t('providers.new_name'), enabled: true, endpoints: [newEndpoint(0)] })
     baseline = ''
   }
-
   async function save() {
     if (!draft || !port) return
     saving = true
@@ -137,16 +149,40 @@
 
 {#if port}
   <div class="flex min-h-0 flex-col gap-4 sm:flex-row">
-    <nav class="flex w-full shrink-0 flex-col gap-1 sm:w-52" aria-label={t('providers.title')}>
-      {#each providers as p (p.id)}
+    <nav class="flex w-full shrink-0 flex-col gap-2 sm:w-56" aria-label={t('providers.title')}>
+      <div class="relative">
+        <SearchIcon class="text-muted-foreground pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2" />
+        <Input
+          class="h-9 pl-8"
+          placeholder={t('providers.search')}
+          aria-label={t('providers.search')}
+          bind:value={providerQuery}
+        />
+      </div>
+      <div class="flex gap-1" role="group" aria-label={t('providers.filter')}>
+        {#each ['all', 'enabled', 'disabled'] as filter (filter)}
+          <Button
+            size="sm"
+            variant={providerFilter === filter ? 'secondary' : 'ghost'}
+            aria-pressed={providerFilter === filter}
+            onclick={() => (providerFilter = filter as typeof providerFilter)}
+          >
+            {t(`providers.filter_${filter}`)}
+          </Button>
+        {/each}
+        <SlidersHorizontalIcon class="text-muted-foreground ml-auto mt-1 size-4" aria-hidden="true" />
+      </div>
+      {#each visibleProviders as p (p.id)}
         <Button
           variant={draft?.id === p.id ? 'secondary' : 'ghost'}
           class="justify-start"
           onclick={() => load(toDraft(p))}
         >
           <span class={cn('size-2 shrink-0 rounded-full', status(p))} aria-hidden="true"></span>
-          <span class="truncate">{p.name}</span>
+          <span class={cn('truncate', !p.enabled && 'text-muted-foreground')}>{p.name}</span>
         </Button>
+      {:else}
+        <p class="text-muted-foreground px-2 py-4 text-center text-kit-sm">{t('providers.no_matches')}</p>
       {/each}
       <Button variant="outline" onclick={add}>{t('providers.add')}</Button>
     </nav>
@@ -165,10 +201,17 @@
             </Alert.Description>
           </Alert.Root>
         {/if}
-        <Field.Field>
-          <Field.Label for="kit-provider-name">{t('providers.name')}</Field.Label>
-          <Input id="kit-provider-name" maxlength={80} bind:value={draft.name} />
-        </Field.Field>
+        <div class="flex items-end gap-3">
+          <Field.Field class="min-w-0 flex-1">
+            <Field.Label for="kit-provider-name">{t('providers.name')}</Field.Label>
+            <Input id="kit-provider-name" maxlength={80} bind:value={draft.name} />
+          </Field.Field>
+          <div class="flex h-9 shrink-0 items-center gap-2">
+            <label for="kit-provider-enabled" class="text-kit-sm">{t('providers.enabled')}</label>
+            <Switch id="kit-provider-enabled" bind:checked={draft.enabled} />
+          </div>
+        </div>
+        {#if !draft.enabled}<p class="text-muted-foreground text-kit-sm">{t('providers.disabled_hint')}</p>{/if}
         <h3 class="text-kit-base font-semibold">{t('providers.endpoints')}</h3>
         {#each draft.endpoints as endpoint, index (index)}
           <EndpointCard

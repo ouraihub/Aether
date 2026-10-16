@@ -14,6 +14,10 @@ id?: string,
  */
 name: string, 
 /**
+ * Absent = keep (new providers start enabled).
+ */
+enabled?: boolean, 
+/**
  * The complete endpoint list.
  */
 endpoints: Array<EndpointSave>, };

@@ -126,7 +126,7 @@
     </div>
     <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto" role="region" aria-label={t('providers.models')}>
       {#if shown.length === 0}
-        <p class="text-muted-foreground py-8 text-center text-kit-sm">{t('providers.no_matches')}</p>
+        <p class="text-muted-foreground py-8 text-center text-kit-sm">{t('providers.no_model_matches')}</p>
       {/if}
       {#each groups as [group, items = []] (group)}
         {@const folded = !query.trim() && collapsed[group]}

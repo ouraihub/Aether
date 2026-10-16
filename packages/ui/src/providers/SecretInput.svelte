@@ -1,73 +1,131 @@
 <script lang="ts">
-  // Write-only key field: shows the masked stored value with explicit Replace / Clear (docs/16 §4.1, docs/11 陷阱 2).
+  import CopyIcon from '@lucide/svelte/icons/copy'
+  import EditIcon from '@lucide/svelte/icons/pencil'
+  import EyeIcon from '@lucide/svelte/icons/eye'
+  import EyeOffIcon from '@lucide/svelte/icons/eye-off'
+  import TrashIcon from '@lucide/svelte/icons/trash-2'
   import { Button } from '#lib/components/ui/button/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
   import { getKitContext } from '../context'
   import type { Endpoint } from '../ports'
 
-  let {
-    id,
-    saved,
-    value = $bindable(),
-  }: {
-    id: string
-    /** Stored endpoint, `null` for a new one. */
-    saved: Endpoint | null
-    /** `null` = keep, `''` = clear, else the new key. */
-    value: string | null
-  } = $props()
+  let { id, saved, value = $bindable() }: { id: string; saved: Endpoint | null; value: string | null } = $props()
+  const { ports, i18n, notify } = getKitContext()
+  const { t } = i18n
+  let replacing = $state(false),
+    askingPassword = $state(false),
+    password = $state(''),
+    revealed = $state<string | null>(null),
+    text = $state(''),
+    busy = $state(false)
+  const shown = $derived(
+    revealed ??
+      (saved?.keyReadable
+        ? (saved.keyMasked ?? t('providers.key_none'))
+        : saved
+          ? t('providers.key_unreadable')
+          : t('providers.key_none')),
+  )
 
-  const { t } = getKitContext().i18n
-  let replacing = $state(false)
-  let text = $state('')
-  const editing = $derived(saved === null || !saved.hasKey || replacing)
-
+  async function reveal() {
+    if (!ports.providers || !saved?.hasKey || busy) return
+    if (ports.providers.revealNeedsPassword && !password) {
+      askingPassword = true
+      return
+    }
+    busy = true
+    try {
+      revealed = await ports.providers.revealKey(saved.id, password)
+    } catch (error) {
+      notify.toast('error', error instanceof Error ? error.message : t('providers.key_reveal_failed'))
+    } finally {
+      busy = false
+      password = ''
+    }
+  }
+  async function copy() {
+    if (revealed === null) return
+    try {
+      await navigator.clipboard.writeText(revealed)
+      notify.toast('success', t('providers.key_copied'))
+    } catch {
+      notify.toast('error', t('providers.key_copy_failed'))
+    }
+  }
+  function edit() {
+    replacing = true
+    askingPassword = false
+    revealed = null
+    text = ''
+  }
   function input(next: string) {
     text = next
-    // An emptied box keeps the stored key; only the Clear button clears it.
-    value = next === '' ? null : next
+    value = next === '' ? '' : next
   }
-
-  function reset() {
+  function clear() {
     replacing = false
+    askingPassword = false
+    revealed = null
     text = ''
-    value = null
+    value = ''
   }
 </script>
 
-<div class="flex min-w-0 items-center gap-2">
-  {#if value === ''}
-    <span class="text-muted-foreground min-w-0 flex-1 text-kit-sm">{t('providers.key_cleared')}</span>
-    <Button class="shrink-0" variant="outline" size="sm" onclick={reset}>{t('providers.key_undo')}</Button>
-  {:else if editing}
-    <Input
-      {id}
+{#if value === ''}
+  <div class="flex min-w-0 flex-1 items-center rounded-kit border bg-muted/20 px-3 py-2 font-mono text-kit-sm">
+    <span class="truncate">{t('providers.key_cleared')}</span>
+  </div>
+{:else if replacing || saved === null || !saved.hasKey}
+  <Input
+    {id}
+    type="password"
+    autocomplete="off"
+    class="min-w-0 flex-1 font-mono"
+    placeholder={t('providers.key_none')}
+    value={text}
+    oninput={(event) => input(event.currentTarget.value)}
+  />
+{:else}
+  <div class="flex min-w-0 flex-1 items-center rounded-kit border bg-muted/20 px-3 py-2 font-mono text-kit-sm">
+    <span class="truncate">{shown}</span>
+    <div class="ml-auto flex shrink-0 items-center gap-0.5">
+      {#if revealed !== null}<Button
+          variant="ghost"
+          size="icon-xs"
+          title={t('providers.key_copy')}
+          aria-label={t('providers.key_copy')}
+          onclick={() => void copy()}><CopyIcon /></Button
+        >{/if}
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        title={t('providers.key_edit')}
+        aria-label={t('providers.key_edit')}
+        onclick={edit}><EditIcon /></Button
+      >
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        title={t('providers.key_delete')}
+        aria-label={t('providers.key_delete')}
+        onclick={clear}><TrashIcon /></Button
+      >
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        title={revealed === null ? t('providers.key_show') : t('providers.key_hide')}
+        aria-label={revealed === null ? t('providers.key_show') : t('providers.key_hide')}
+        disabled={busy}
+        onclick={() => void (revealed === null ? reveal() : (revealed = null))}
+        >{#if revealed === null}<EyeIcon />{:else}<EyeOffIcon />{/if}</Button
+      >
+    </div>
+  </div>
+  {#if askingPassword}<Input
       type="password"
-      autocomplete="off"
-      class="min-w-0 flex-1"
-      value={text}
-      oninput={(event) => input(event.currentTarget.value)}
-    />
-    {#if replacing}
-      <Button class="shrink-0" variant="outline" size="sm" onclick={reset}>{t('common.cancel')}</Button>
-    {/if}
-  {:else}
-    {@const shown = saved?.keyReadable ? (saved.keyMasked ?? '') : t('providers.key_unreadable')}
-    <!-- Long masks shrink in the middle so the head/tail stay legible and the buttons never overflow. -->
-    <span {id} class="flex min-w-0 flex-1 whitespace-nowrap font-mono text-kit-sm">
-      {#if saved?.keyReadable && shown.length > 8}
-        <span class="sr-only">{shown}</span>
-        <span aria-hidden="true" class="shrink-0">{shown.slice(0, 4)}</span>
-        <span aria-hidden="true" class="min-w-0 truncate">{shown.slice(4, -4)}</span>
-        <span aria-hidden="true" class="shrink-0">{shown.slice(-4)}</span>
-      {:else}
-        <span class="truncate">{shown}</span>
-      {/if}
-    </span>
-    <Button class="shrink-0" variant="outline" size="sm" onclick={() => (replacing = true)}
-      >{t('providers.key_replace')}</Button
-    >
-    <Button class="shrink-0" variant="outline" size="sm" onclick={() => (value = '')}>{t('providers.key_clear')}</Button
-    >
-  {/if}
-</div>
+      class="mt-2"
+      placeholder={t('providers.key_current_password')}
+      bind:value={password}
+      onkeydown={(event) => event.key === 'Enter' && void reveal()}
+    />{/if}
+{/if}

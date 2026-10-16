@@ -14,6 +14,10 @@ id: string,
  */
 name: string, 
 /**
+ * Off = its models leave every picker and cannot run (Cherry's provider switch).
+ */
+enabled: boolean, 
+/**
  * Endpoints in display order.
  */
 endpoints: Array<Endpoint>, };

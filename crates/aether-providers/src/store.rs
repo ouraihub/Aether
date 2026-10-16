@@ -96,6 +96,10 @@ impl Store {
                     "ALTER TABLE models ADD COLUMN native_web_search INTEGER NOT NULL DEFAULT 0;"
                 },
             },
+            Migration {
+                version: 4,
+                sql: "ALTER TABLE providers ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;",
+            },
         ];
         let db = db::open(&path, &steps)?;
         Ok(Self { db: Mutex::new(db) })
@@ -152,6 +156,7 @@ impl Store {
         let mut stmt = db.prepare_cached(
             "SELECT p.name, e.slug, m.endpoint_id, m.model_id, m.model_type, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, e.protocol, m.can_vision
              FROM models m JOIN endpoints e ON e.id = m.endpoint_id JOIN providers p ON p.id = e.provider_id
+             WHERE p.enabled = 1
              ORDER BY p.position, p.id, e.position, m.position",
         )?;
         let rows = stmt
@@ -229,7 +234,8 @@ impl Store {
         let db = self.lock()?;
         let row = db.query_row(
             "SELECT e.base_url, e.protocol, e.key_ciphertext, m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, m.can_vision
-             FROM models m JOIN endpoints e ON e.id = m.endpoint_id WHERE m.endpoint_id = ?1 AND m.model_id = ?2",
+             FROM models m JOIN endpoints e ON e.id = m.endpoint_id JOIN providers p ON p.id = e.provider_id
+             WHERE m.endpoint_id = ?1 AND m.model_id = ?2 AND p.enabled = 1",
             params![model.endpoint_id, model.model_id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<Vec<u8>>>(2)?,
                 row.get::<_, String>(3)?, row.get::<_, Option<u32>>(4)?, row.get::<_, Option<u32>>(5)?, row.get::<_, Option<bool>>(6)?, row.get::<_, Option<String>>(7)?, row.get::<_, bool>(8)?, row.get::<_, bool>(9)?)),
@@ -323,17 +329,17 @@ impl Store {
         let tx = db.transaction()?;
         let now = now_millis();
         let provider_id = if let Some(id) = &input.id {
-            let sql = "UPDATE providers SET name = ?2, updated_at = ?3 WHERE id = ?1";
-            if tx.execute(sql, params![id, input.name, now])? == 0 {
+            let sql = "UPDATE providers SET name = ?2, updated_at = ?3, enabled = COALESCE(?4, enabled) WHERE id = ?1";
+            if tx.execute(sql, params![id, input.name, now, input.enabled])? == 0 {
                 return Err(KitError::not_found("provider"));
             }
             id.clone()
         } else {
             let id = new_id()?;
             tx.execute(
-                "INSERT INTO providers (id, name, position, created_at, updated_at)
-                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM providers), ?3, ?3)",
-                params![id, input.name, now],
+                "INSERT INTO providers (id, name, position, created_at, updated_at, enabled)
+                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM providers), ?3, ?3, ?4)",
+                params![id, input.name, now, input.enabled.unwrap_or(true)],
             )?;
             id
         };
@@ -572,15 +578,21 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
             id,
         });
     }
-    let mut stmt = db.prepare_cached("SELECT id, name FROM providers ORDER BY position, id")?;
+    let mut stmt =
+        db.prepare_cached("SELECT id, name, enabled FROM providers ORDER BY position, id")?;
     let providers = stmt
         .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, bool>(2)?,
+            ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(providers
         .into_iter()
-        .map(|(id, name)| Provider {
+        .map(|(id, name, enabled)| Provider {
+            enabled,
             endpoints: endpoints.remove(&id).unwrap_or_default(),
             id,
             name,
@@ -783,11 +795,49 @@ mod tests {
                 assert_eq!(
                     db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                         .unwrap(),
-                    3
+                    4
                 );
             }
             assert!(path.with_file_name("providers.db.bak-v2").is_file());
         }
+    }
+
+    #[test]
+    fn disabled_provider_leaves_pickers_and_cannot_resolve_until_re_enabled() {
+        let (_dir, store) = store();
+        let saved = store
+            .save(request(
+                json!({"name":"Relay","endpoints":[endpoint(None, "a", &["m1"])]}),
+            ))
+            .unwrap();
+        let (id, endpoint_id) = (saved[0].id.clone(), saved[0].endpoints[0].id.clone());
+        assert!(saved[0].enabled);
+        let reference = ModelRef {
+            endpoint_id: endpoint_id.clone(),
+            model_id: "m1".to_owned(),
+        };
+        let off = json!({"id": id, "name":"Relay","enabled":false,"endpoints":[endpoint(Some(&endpoint_id), "a", &["m1"])]});
+        assert!(!store.save(request(off)).unwrap()[0].enabled);
+        assert!(
+            store
+                .model_options(ModelFilter::default())
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store.resolve(&reference).unwrap_err().code(),
+            KitError::not_found("model").code()
+        );
+        // Omitting `enabled` keeps it off; only an explicit `true` turns it back on.
+        let keep = json!({"id": id, "name":"Relay 2","endpoints":[endpoint(Some(&endpoint_id), "a", &["m1"])]});
+        assert!(!store.save(request(keep)).unwrap()[0].enabled);
+        let on = json!({"id": id, "name":"Relay","enabled":true,"endpoints":[endpoint(Some(&endpoint_id), "a", &["m1"])]});
+        assert!(store.save(request(on)).unwrap()[0].enabled);
+        assert_eq!(
+            store.model_options(ModelFilter::default()).unwrap().len(),
+            1
+        );
+        assert!(store.resolve(&reference).is_ok());
     }
 
     #[test]

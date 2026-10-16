@@ -51,9 +51,9 @@ interface Model { id: string; modelType: ModelType; typeSource: 'inferred' | 'us
   maxOutput: number | null; canVision: boolean; supportsTools: boolean | null; reasoning: ReasoningConfig | null; nativeWebSearch: boolean }
 interface Endpoint { id: string; slug: string; baseUrl: string; protocol: Protocol; hasKey: boolean; keyMasked: string | null;
   keyReadable: boolean; probeUrl: string; models: Model[] }
-interface Provider { id: string; name: string; endpoints: Endpoint[] }
+interface Provider { id: string; name: string; enabled: boolean /* 关闭 = 模型不出现在选择器且不能运行 */; endpoints: Endpoint[] }
 interface EndpointSave { id?: string; slug: string; baseUrl: string; protocol: Protocol; apiKey?: string; models: Model[] }
-interface ProviderSave { id?: string; name: string; endpoints: EndpointSave[] }
+interface ProviderSave { id?: string; name: string; enabled?: boolean /* 缺省 = 保持；新建默认 true */; endpoints: EndpointSave[] }
 interface ModelRef { endpointId: string; modelId: string }
 interface ModelOption extends ModelRef { label: string /* "服务商 · 线路 · 模型" */; modelType: ModelType; supportsTools: boolean | null; reasoning: ReasoningConfig | null; nativeWebSearch: boolean }
 interface ProbeResult { probeUrl: string; models: (Model & { group: string | null })[]; error: ProbeError | null }
