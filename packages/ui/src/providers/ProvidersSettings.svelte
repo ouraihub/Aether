@@ -369,7 +369,6 @@
             <Empty.Title>{t('providers.empty')}</Empty.Title>
             <Empty.Description>{t('providers.empty_hint')}</Empty.Description>
           </Empty.Header>
-          <Button onclick={() => (addOpen = true)}><PlusIcon />{t('providers.add')}</Button>
         </Empty.Root>
       {/if}
     </section>
