@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Search and filter fetched models; +/- changes the draft until Apply.
+  // Search and filter fetched models; every +/- (Cherry onAddModels/onRemoveModels) applies at once.
   import { untrack } from 'svelte'
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import Plus from '@lucide/svelte/icons/plus'
@@ -15,13 +15,14 @@
     open = $bindable(false),
     result,
     selected,
-    onapply,
+    onchange,
   }: {
     open: boolean
     result: ProbeResult | null
     /** Currently selected models; preselected and their user-set types kept. */
     selected: Model[]
-    onapply: (models: Model[]) => void
+    /** Called after every change with the endpoint's full model list. */
+    onchange: (models: Model[]) => void
   } = $props()
 
   const TYPES: ModelType[] = ['chat', 'image', 'video', 'tts', 'stt', 'embedding', 'rerank', 'unknown']
@@ -53,35 +54,41 @@
   function bulk() {
     const on = !bulkRemoves
     for (const model of shown) checked[model.id] = on
+    emit()
+  }
+  function toggle(id: string) {
+    checked[id] = !checked[id]
+    emit()
+  }
+  function setType(id: string, type: ModelType) {
+    types[id] = type
+    if (checked[id]) emit()
   }
 
-  function apply() {
-    onapply(
-      models
-        .filter((m) => checked[m.id])
-        .map((m): Model => {
-          const existing = selected.find((item) => item.id === m.id)
-          const modelType = types[m.id] ?? m.modelType
-          // Keep user-edited metadata (including reasoning/context) when a probe refreshes it.
-          return {
-            id: m.id,
-            modelType,
-            typeSource:
-              existing?.modelType === modelType
-                ? existing.typeSource
-                : modelType === m.modelType
-                  ? m.typeSource
-                  : 'user',
-            contextWindow: existing ? existing.contextWindow : m.contextWindow,
-            maxOutput: existing ? existing.maxOutput : m.maxOutput,
-            reasoning: existing ? existing.reasoning : m.reasoning,
-            nativeWebSearch: modelType === 'chat' && (existing ? existing.nativeWebSearch : m.nativeWebSearch),
-            canVision: existing ? existing.canVision : m.canVision,
-            supportsTools: m.supportsTools,
-          }
-        }),
-    )
-    open = false
+  /** Models outside this probe (added by hand, or no longer listed) are kept untouched. */
+  function emit() {
+    const probed = new Set(models.map((m) => m.id))
+    const kept = selected.filter((m) => !probed.has(m.id))
+    const picked = models
+      .filter((m) => checked[m.id])
+      .map((m): Model => {
+        const existing = selected.find((item) => item.id === m.id)
+        const modelType = types[m.id] ?? m.modelType
+        // Keep user-edited metadata (including reasoning/context) when a probe refreshes it.
+        return {
+          id: m.id,
+          modelType,
+          typeSource:
+            existing?.modelType === modelType ? existing.typeSource : modelType === m.modelType ? m.typeSource : 'user',
+          contextWindow: existing ? existing.contextWindow : m.contextWindow,
+          maxOutput: existing ? existing.maxOutput : m.maxOutput,
+          reasoning: existing ? existing.reasoning : m.reasoning,
+          nativeWebSearch: modelType === 'chat' && (existing ? existing.nativeWebSearch : m.nativeWebSearch),
+          canVision: existing ? existing.canVision : m.canVision,
+          supportsTools: m.supportsTools,
+        }
+      })
+    onchange([...kept, ...picked])
   }
 </script>
 
@@ -150,7 +157,7 @@
                   <Select.Root
                     type="single"
                     value={types[model.id] ?? model.modelType}
-                    onValueChange={(value) => (types[model.id] = value as ModelType)}
+                    onValueChange={(value) => setType(model.id, value as ModelType)}
                   >
                     <Select.Trigger
                       size="sm"
@@ -180,7 +187,7 @@
                     aria-label={t(checked[model.id] ? 'providers.remove_model' : 'providers.add_model', {
                       id: model.id,
                     })}
-                    onclick={() => (checked[model.id] = !checked[model.id])}
+                    onclick={() => toggle(model.id)}
                   >
                     {#if checked[model.id]}<Minus />{:else}<Plus />{/if}
                   </Button>
@@ -191,12 +198,10 @@
         </section>
       {/each}
     </div>
-    <Dialog.Footer class="shrink-0 flex-row flex-wrap items-center gap-2 sm:justify-between">
+    <Dialog.Footer class="shrink-0">
       <p class="text-muted-foreground mr-auto text-kit-xs" aria-live="polite">
         {t('providers.picked_count', { count })}
       </p>
-      <Button variant="outline" size="sm" onclick={() => (open = false)}>{t('common.cancel')}</Button>
-      <Button size="sm" onclick={apply}>{t('providers.apply', { count })}</Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

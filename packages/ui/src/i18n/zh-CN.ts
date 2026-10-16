@@ -273,7 +273,6 @@ export const zhCN: Messages = {
   'providers.type.unknown': '未知',
   'providers.probe.missing_key': '需要密钥',
   'providers.probe.unauthorized': '认证失败',
-  'providers.apply': '使用 {count} 个模型',
   'providers.probe.not_found': '找不到模型列表（404）',
   'providers.probe.rate_limited': '请求过于频繁',
   'providers.probe.status': '上游返回 HTTP {status}',

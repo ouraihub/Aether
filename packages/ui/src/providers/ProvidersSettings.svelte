@@ -378,7 +378,7 @@
     bind:open={pickerOpen}
     result={probe?.result ?? null}
     selected={probed?.models ?? []}
-    onapply={(models) => {
+    onchange={(models) => {
       if (!probed) return
       probed.models = models
       void commit()

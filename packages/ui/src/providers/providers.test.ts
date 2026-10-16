@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from '../i18n'
 import { createFakePorts, type Endpoint, type Provider, type ProviderSave } from '../ports'
@@ -59,18 +59,18 @@ function setup(overrides: NonNullable<Parameters<typeof createFakePorts>[0]>['pr
   return { saves, notify }
 }
 
-async function syncAndApply() {
+async function openPicker() {
   await fireEvent.click(await screen.findByRole('button', { name: 'Sync models' }))
-  await screen.findByRole('dialog', { name: 'Pick models' })
+  return within(await screen.findByRole('dialog', { name: 'Pick models' }))
 }
 
 describe('ProvidersSettings', () => {
-  it('saves picked models at once with the endpoint id and without touching the key', async () => {
+  it('saves each +/- at once with the endpoint id and without touching the key', async () => {
     const { saves } = setup()
-    await syncAndApply()
-    await fireEvent.click(screen.getByRole('button', { name: 'Add gpt-4o' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Use 1 models' }))
+    const picker = await openPicker()
+    await fireEvent.click(picker.getByRole('button', { name: 'Add gpt-4o' }))
     await waitFor(() => expect(saves).toHaveLength(1))
+    expect(screen.queryByRole('button', { name: /Use \d+ models/ })).toBeNull()
     const saved = saves[0]?.endpoints[0]
     expect(saved?.id).toBe('e1')
     expect(saved && 'apiKey' in saved).toBe(false)
@@ -79,16 +79,17 @@ describe('ProvidersSettings', () => {
 
   it('bulk changes only search results and preserves picks outside the filter', async () => {
     const { saves } = setup()
-    await syncAndApply()
-    await fireEvent.click(screen.getByRole('button', { name: 'Add gpt-4o' }))
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Search model ID' }), { target: { value: 'embedding' } })
-    await fireEvent.click(screen.getByRole('button', { name: 'Add all' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Remove all' }))
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Search model ID' }), { target: { value: '' } })
-    expect(screen.getByRole('button', { name: 'Remove gpt-4o' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Add text-embedding-3' })).toBeTruthy()
-    await fireEvent.click(screen.getByRole('button', { name: 'Use 1 models' }))
-    await waitFor(() => expect(saves[0]?.endpoints[0]?.models.map((m) => m.id)).toEqual(['gpt-4o']))
+    const picker = await openPicker()
+    await fireEvent.click(picker.getByRole('button', { name: 'Add gpt-4o' }))
+    await fireEvent.input(picker.getByRole('textbox', { name: 'Search model ID' }), { target: { value: 'embedding' } })
+    await fireEvent.click(picker.getByRole('button', { name: 'Add all' }))
+    await fireEvent.click(picker.getByRole('button', { name: 'Remove all' }))
+    await fireEvent.input(picker.getByRole('textbox', { name: 'Search model ID' }), { target: { value: '' } })
+    expect(picker.getByRole('button', { name: 'Remove gpt-4o' })).toBeTruthy()
+    expect(picker.getByRole('button', { name: 'Add text-embedding-3' })).toBeTruthy()
+    await waitFor(() => expect(saves.at(-1)?.endpoints[0]?.models.map((m) => m.id)).toEqual(['gpt-4o']))
+    await fireEvent.click(picker.getByRole('button', { name: 'Remove gpt-4o' }))
+    await waitFor(() => expect(saves.at(-1)?.endpoints[0]?.models).toEqual([]))
   })
 
   it('toggles enabled immediately without a whole-provider save', async () => {

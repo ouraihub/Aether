@@ -268,7 +268,6 @@ export const en: Messages = {
   'providers.type_for': 'Model type for {id}',
   'providers.vision': 'Vision',
   'providers.no_group': 'Other',
-  'providers.apply': 'Use {count} models',
   'providers.model_settings': 'Model settings',
   'providers.reasoning_dialect': 'Reasoning dialect',
   'providers.reasoning_efforts': 'Allowed reasoning efforts',
