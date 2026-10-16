@@ -40,7 +40,14 @@
     }),
   )
 
-  const dirty = $derived(draft !== null && JSON.stringify(draft) !== baseline)
+  function formSnapshot(value: ProviderDraft | null): string {
+    return value ? JSON.stringify({ ...value, enabled: true }) : ''
+  }
+
+  const dirty = $derived(
+    draft !== null &&
+      (baseline === '' ? true : formSnapshot(draft) !== formSnapshot(JSON.parse(baseline) as ProviderDraft)),
+  )
 
   function load(next: ProviderDraft | null) {
     abort?.abort()
@@ -82,10 +89,11 @@
     baseline = ''
   }
   async function setEnabled(enabled: boolean) {
-    const providerId = draft?.id
-    if (!providerId || !port || enabledSaving) return
-    const previous = draft.enabled
-    draft.enabled = enabled
+    const currentDraft = draft
+    const providerId = currentDraft?.id
+    if (!currentDraft || !providerId || !port || enabledSaving) return
+    const previous = currentDraft.enabled
+    currentDraft.enabled = enabled
     enabledSaving = true
     try {
       providers = await port.setEnabled(providerId, enabled)
@@ -237,6 +245,7 @@
           <Switch
             id="kit-provider-enabled"
             size="default"
+            class="data-checked:bg-control-enabled data-unchecked:bg-control-disabled"
             aria-label={t('providers.enabled')}
             checked={draft.enabled}
             disabled={enabledSaving}
