@@ -87,7 +87,7 @@ setKitContext(ctx)  // 宿主根组件调用一次；未自带通知实现的宿
 
 ### 4.1 providers
 
-- `ProvidersSettings`（Cherry 交互，详见 AutoNote docs/33）：左栏搜索 + 筛选图标 + 服务商行（首字母头像、名称、状态点：启用且有可读密钥=success、启用但缺密钥=warning、停用=无点）+ 添加服务商。右栏标题（名称、齿轮=服务商设置对话框：改名/删除；启用 Switch 走 `setEnabled` 立即生效）→ API 密钥（`SecretInput`：打码、显示/复制/编辑/删除，失焦或 Enter 提交）+ 检测（探测只报告结果）→ API 地址（失焦提交，非法地址就地提示；“添加端点”；齿轮=线路设置：协议、删除线路；多线路时出现线路选择）→ 模型（`EndpointPanel`：全部折叠、搜索、能力筛选、同步模型=探测后打开 `ModelPickerDialog`（每次 +/− 立即保存，无确认按钮）、手动添加；按 id 前缀分组，组可移除；行=头像、名称、能力胶囊、设置=`ModelSettingsDialog`、移除）。**没有保存按钮**：每个字段提交即整份保存，并发提交合并为最后一次；失败保留本地值并提供重试，切换服务商前确认。**不含角色区。**
+- `ProvidersSettings`（Cherry 交互，详见 AutoNote docs/33）：左栏搜索 + 筛选图标 + 服务商行（首字母头像、名称、状态点：启用且有可读密钥=success、启用但缺密钥=warning、停用=无点）+ 添加服务商。右栏标题（名称、齿轮=服务商设置对话框：改名/删除；启用 Switch 走 `setEnabled` 立即生效）→ API 密钥（`SecretInput`：打码（中段压成 `****`）；常驻只有眼睛，复制/编辑/删除在悬停或键盘聚焦时出现；未显示时复制会先取明文；失焦或 Enter 提交）+ 检测（探测只报告结果）→ API 地址（失焦提交，非法地址就地提示；“添加端点”；齿轮=线路设置：协议、删除线路；多线路时出现线路选择）→ 模型（`EndpointPanel`：全部折叠、搜索、能力筛选、同步模型=探测后打开 `ModelPickerDialog`（每次 +/− 立即保存，无确认按钮）、手动添加；按 id 前缀分组，组可移除；行=头像、名称、能力胶囊、设置=`ModelSettingsDialog`、移除）。**没有保存按钮**：每个字段提交即整份保存，并发提交合并为最后一次；失败保留本地值并提供重试，切换服务商前确认。**不含角色区。**
 - `ModelSelect`：`<ModelSelect value={ModelRef|null} filter={{ modelType: 'chat' }} onchange={...} placeholder? onOpenSettings? />`。应用用它做自己的"对话模型""写作模型"设置，值由应用保存；模型已被删除时显示"已失效，请重新选择"。外观对标 Cherry：触发器显示 `modelId | 服务商 · 线路`；弹层（bits-ui Popover + Command）含搜索框（匹配 modelId 与分组名）、能力筛选（推理/工具/联网，只列出现有模型具备的能力，多选取交集）、按 `label` 去掉 ` · modelId` 分组、行尾能力标签、当前模型左侧竖条；传了 `onOpenSettings` 时底部显示"配置模型"。视觉/音频/视频标签不做：`ModelOption` 未携带这些能力。
 - 获取模型失败：按 `ProbeError.kind` 翻译 + `hint` + 上游原文。
 
