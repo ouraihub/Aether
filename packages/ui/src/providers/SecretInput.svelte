@@ -29,6 +29,7 @@
     askingPassword = $state(false),
     password = $state(''),
     revealed = $state<string | null>(null),
+    copyAfterReveal = false,
     text = $state(''),
     busy = $state(false)
   const hasKey = $derived(pending ? true : pending === '' ? false : (saved?.hasKey ?? false))
@@ -37,7 +38,7 @@
       (pending
         ? '••••••••'
         : saved?.keyReadable
-          ? (saved.keyMasked ?? t('providers.key_none'))
+          ? (saved.keyMasked?.replace(/\*{4,}/, '****') ?? t('providers.key_none'))
           : t('providers.key_unreadable')),
   )
 
@@ -51,15 +52,21 @@
     try {
       revealed = await ports.providers.revealKey(saved.id, password)
       askingPassword = false
+      if (copyAfterReveal) await copy()
     } catch (error) {
       notify.toast('error', error instanceof Error ? error.message : t('providers.key_reveal_failed'))
     } finally {
       busy = false
       password = ''
+      copyAfterReveal = false
     }
   }
+  /** Copy needs the plaintext; without it the reveal (and its password prompt on the web) runs first. */
   async function copy() {
-    if (revealed === null) return
+    if (revealed === null) {
+      copyAfterReveal = true
+      return reveal()
+    }
     try {
       await navigator.clipboard.writeText(revealed)
       notify.toast('success', t('providers.key_copied'))
@@ -106,25 +113,19 @@
   {:else}
     <div
       {id}
-      class="flex h-kit-control min-w-0 flex-1 items-center rounded-kit border bg-muted/30 pr-1 pl-2.5 font-mono text-kit-sm"
+      class="group/key flex h-kit-control min-w-0 flex-1 items-center gap-1 rounded-kit border bg-muted/30 pr-1.5 pl-2.5 font-mono text-kit-sm transition-colors hover:border-ring/60 focus-within:border-ring"
     >
       <span class="min-w-0 flex-1 truncate">{shown}</span>
-      <div class="flex shrink-0 items-center">
-        {#if revealed !== null}<Button
+      <div
+        class="pointer-events-none flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/key:pointer-events-auto group-hover/key:opacity-100 group-focus-within/key:pointer-events-auto group-focus-within/key:opacity-100"
+      >
+        {#if saved?.hasKey && pending === null}<Button
             variant="ghost"
             size="icon-xs"
             title={t('providers.key_copy')}
             aria-label={t('providers.key_copy')}
-            onclick={() => void copy()}><CopyIcon /></Button
-          >{/if}
-        {#if saved?.hasKey && pending === null}<Button
-            variant="ghost"
-            size="icon-xs"
-            title={revealed === null ? t('providers.key_show') : t('providers.key_hide')}
-            aria-label={revealed === null ? t('providers.key_show') : t('providers.key_hide')}
             disabled={busy}
-            onclick={() => void (revealed === null ? reveal() : (revealed = null))}
-            >{#if revealed === null}<EyeIcon />{:else}<EyeOffIcon />{/if}</Button
+            onclick={() => void copy()}><CopyIcon /></Button
           >{/if}
         <Button
           variant="ghost"
@@ -139,11 +140,26 @@
         <Button
           variant="ghost"
           size="icon-xs"
+          class="hover:bg-destructive/10 hover:text-destructive"
           title={t('providers.key_delete')}
           aria-label={t('providers.key_delete')}
           onclick={() => void clear()}><TrashIcon /></Button
         >
       </div>
+      {#if saved?.hasKey && pending === null}<Button
+          variant="ghost"
+          size="icon-xs"
+          class="text-muted-foreground"
+          title={revealed === null ? t('providers.key_show') : t('providers.key_hide')}
+          aria-label={revealed === null ? t('providers.key_show') : t('providers.key_hide')}
+          disabled={busy}
+          onclick={() => {
+            copyAfterReveal = false
+            if (revealed === null) void reveal()
+            else revealed = null
+          }}
+          >{#if revealed === null}<EyeIcon />{:else}<EyeOffIcon />{/if}</Button
+        >{/if}
     </div>
   {/if}
   {#if askingPassword}

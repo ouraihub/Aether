@@ -100,6 +100,16 @@ describe('ProvidersSettings', () => {
     expect(saves).toHaveLength(0)
   })
 
+  it('copies the key by revealing it first when it is still masked', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const revealKey = vi.fn(() => Promise.resolve('sk-plain-key'))
+    setup({ revealKey })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Copy key' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('sk-plain-key'))
+    expect(revealKey).toHaveBeenCalledWith('e1', '')
+  })
+
   it('commits a changed address on blur and rejects an invalid one without a request', async () => {
     const { saves } = setup()
     const url = await screen.findByRole('textbox', { name: 'API URL' })
