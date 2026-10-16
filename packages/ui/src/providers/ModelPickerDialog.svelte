@@ -170,7 +170,7 @@
                   {#if model.canVision}<span class="text-muted-foreground hidden shrink-0 text-kit-xs sm:inline"
                       >{t('providers.vision')}</span
                     >{/if}
-                  <span class="text-chart-2 w-8 shrink-0 text-right text-kit-xs"
+                  <span class="text-success w-8 shrink-0 text-right text-kit-xs"
                     >{checked[model.id] ? t('providers.picked') : ''}</span
                   >
                   <Button

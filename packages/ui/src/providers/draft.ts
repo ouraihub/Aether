@@ -35,8 +35,44 @@ export function toDraft(provider: Provider): ProviderDraft {
   }
 }
 
-export function newEndpoint(index: number): EndpointDraft {
-  return { saved: null, slug: `ep-${index + 1}`, baseUrl: '', protocol: 'openai-chat', key: null, models: [] }
+export function newEndpoint(taken: readonly EndpointDraft[]): EndpointDraft {
+  return { saved: null, slug: nextSlug(taken), baseUrl: '', protocol: 'openai-chat', key: null, models: [] }
+}
+
+/** First free `ep-N`; slugs are unique per provider and hidden from users. */
+export function nextSlug(taken: readonly EndpointDraft[]): string {
+  const used = new Set(taken.map((endpoint) => endpoint.slug))
+  let n = taken.length + 1
+  while (used.has(`ep-${n}`)) n++
+  return `ep-${n}`
+}
+
+export const validUrl = (url: string): boolean => /^https?:\/\/\S+$/.test(url.trim())
+
+/** New endpoints without a usable address stay local; the backend would reject them. */
+export function savable(draft: ProviderDraft): ProviderDraft {
+  return { ...draft, endpoints: draft.endpoints.filter((e) => e.saved !== null || validUrl(e.baseUrl)) }
+}
+
+/**
+ * Takes the stored provider after a save without discarding what the user typed meanwhile:
+ * sent endpoints get their stored record (new ones matched by slug), keys that were sent
+ * return to "keep", and edits made after `sent` was taken stay in the draft.
+ */
+export function adopt(current: ProviderDraft, sent: ProviderDraft, stored: Provider): ProviderDraft {
+  const sentKeys = new Map(sent.endpoints.map((e) => [e.slug, e.key]))
+  return {
+    ...current,
+    id: stored.id,
+    endpoints: current.endpoints.map((endpoint) => {
+      const record =
+        stored.endpoints.find((e) => e.id === endpoint.saved?.id) ??
+        (sentKeys.has(endpoint.slug) ? stored.endpoints.find((e) => e.slug === endpoint.slug) : undefined)
+      if (!record) return endpoint
+      const key = sentKeys.get(endpoint.slug) === endpoint.key ? null : endpoint.key
+      return { ...endpoint, saved: record, key }
+    }),
+  }
 }
 
 export function toSave(draft: ProviderDraft): ProviderSave {
