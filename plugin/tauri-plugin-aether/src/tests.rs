@@ -99,7 +99,7 @@ fn local_model(
     let saved = providers
         .save(
             serde_json::from_value(json!({ "name": "Local", "endpoints": [{
-                "slug": "main", "baseUrl": base_url, "protocol": "openai-chat", "apiKey": "sk-test",
+                "slug": "main", "baseUrl": base_url, "protocol": "openai-chat",
                 "models": [{ "id": "m1", "modelType": "chat", "typeSource": "user",
                     "contextWindow": null, "maxOutput": null, "canVision": false, "supportsTools": null }]
             }] }))
