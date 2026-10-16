@@ -937,9 +937,9 @@ describe('ChatPanel', () => {
     runs[0]?.emit({ kind: 'end', status: 'completed' })
     await screen.findByText('reply')
     expect(screen.queryByRole('button', { name: 'Insert' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Save as note' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Use as context' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Delete reply' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save to note' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Set as context' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull()
     expect(screen.queryByRole('combobox', { name: 'Reasoning effort' })).toBeNull()
   })
 
@@ -982,7 +982,7 @@ describe('ChatPanel', () => {
     }
   }
 
-  it('renders full same-question candidates once and selects context without forking', async () => {
+  it('renders full same-question candidates once and sets context via 👍 without forking', async () => {
     const conversation = candidates()
     const selectTurn = vi.fn<ChatHistoryPort['selectTurn']>((_id, turnId) =>
       Promise.resolve({ ...conversation, summary: { ...conversation.summary, selectedTurnId: turnId } }),
@@ -996,10 +996,10 @@ describe('ChatPanel', () => {
     expect(screen.getAllByText('Shared question')).toHaveLength(1)
     expect(screen.getByText('reply', { selector: 'strong' })).toBeTruthy()
     expect(screen.getAllByText('Local · main · m1')).toHaveLength(2)
-    const useContext = screen.getAllByRole('button', { name: 'Use as context' })
-    expect(useContext[0]?.hasAttribute('disabled')).toBe(true)
+    const setContext = screen.getAllByRole('button', { name: 'Set as context' })
+    expect(setContext.map((button) => button.getAttribute('aria-pressed'))).toEqual(['true', 'false'])
     await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Keep my draft' } })
-    await fireEvent.click(required(useContext[1]))
+    await fireEvent.click(required(setContext[1]))
     await waitFor(() => expect(selectTurn).toHaveBeenCalledWith('saved', 'b'))
     expect(fork).not.toHaveBeenCalled()
     expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Keep my draft')
@@ -1023,8 +1023,8 @@ describe('ChatPanel', () => {
       history: { get: () => Promise.resolve(conversation), editTurn },
     })
     await screen.findByText('Alternative reply')
-    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
-    await fireEvent.click(required(screen.getAllByText('Edit reply')[1]))
+    await fireEvent.click(required(screen.getAllByLabelText('More actions')[1]))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Edit' }))
     const editor = (await screen.findByRole('textbox', { name: 'Reply Markdown' })) as HTMLTextAreaElement
     await fireEvent.input(editor, { target: { value: 'Edited local draft' } })
     await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
@@ -1105,29 +1105,28 @@ describe('ChatPanel', () => {
     expect(screen.getByText('Alternative reply')).toBeTruthy()
   })
 
-  it('disables selected and ancestor deletion and confirms deletion of only the target candidate', async () => {
+  it('hides set-as-context for an only reply and deletes it after confirmation', async () => {
     const conversation = candidates()
+    conversation.turns = [required(conversation.turns[0])]
     const removeTurn = vi.fn<ChatHistoryPort['removeTurn']>(() =>
-      Promise.resolve({ ...conversation, turns: [required(conversation.turns[0])] }),
+      Promise.resolve({ ...conversation, summary: { ...conversation.summary, selectedTurnId: null }, turns: [] }),
     )
     const { notify } = setup(true, null, {
       props: { conversationId: 'saved' },
       history: { get: () => Promise.resolve(conversation), removeTurn },
     })
-    await screen.findByText('Alternative reply')
-    const buttons = screen.getAllByRole('button', { name: 'Delete reply' })
-    expect(buttons[0]?.hasAttribute('disabled')).toBe(true)
-    expect(buttons[0]?.getAttribute('title')).toContain('Choose another reply')
-    await fireEvent.click(required(buttons[1]))
-    await waitFor(() => expect(removeTurn).toHaveBeenCalledWith('saved', 'b'))
-    expect(notify.confirm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        danger: true,
-        body: expect.stringContaining('question and other replies will remain'),
-      }),
-    )
-    expect(screen.getByText('Shared question')).toBeTruthy()
-    expect(screen.queryByText('Alternative reply')).toBeNull()
+    await screen.findByText('reply', { selector: 'strong' })
+    expect(screen.queryByRole('button', { name: 'Set as context' })).toBeNull()
+    const remove = screen.getByRole('button', { name: 'Delete' })
+    expect(remove.hasAttribute('disabled')).toBe(false)
+    notify.confirm.mockResolvedValueOnce(false)
+    await fireEvent.click(remove)
+    await waitFor(() => expect(notify.confirm).toHaveBeenCalledOnce())
+    expect(removeTurn).not.toHaveBeenCalled()
+    await fireEvent.click(remove)
+    await waitFor(() => expect(removeTurn).toHaveBeenCalledWith('saved', 'a'))
+    expect(notify.confirm).toHaveBeenLastCalledWith({ title: 'Delete this message?', body: '', danger: true })
+    await waitFor(() => expect(screen.queryByText('Shared question')).toBeNull())
   })
 
   it('branches and copies via the selected ancestor chain and only shows save-note for a host callback', async () => {
@@ -1145,21 +1144,19 @@ describe('ChatPanel', () => {
       history: { get: () => Promise.resolve(conversation), fork, selectTurn },
     })
     const card = required((await screen.findByText('Alternative reply')).closest('li'))
-    const saveNote = within(card)
-      .getAllByRole('button', { name: 'Save as note' })
-      .find((button) => !button.closest('.more-actions'))
-    await fireEvent.click(required(saveNote))
+    const saveNote = within(card).getByRole('button', { name: 'Save to note' })
+    await fireEvent.click(saveNote)
     await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Could not save the note'))
     expect(onSaveNote).toHaveBeenCalledWith('Alternative reply')
     await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Discard for branch' } })
-    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
-    await fireEvent.click(required(screen.getAllByText('Branch from this reply')[1]))
+    await fireEvent.click(required(screen.getAllByLabelText('More actions')[1]))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Branch' }))
     await waitFor(() => expect(selectTurn).toHaveBeenCalledWith('saved', 'b'))
     expect(fork).not.toHaveBeenCalled()
     expect(onConversationChange).not.toHaveBeenCalled()
     expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('')
-    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[0]))
-    await fireEvent.click(required(screen.getAllByText('Copy as new conversation')[0]))
+    await fireEvent.click(required(screen.getAllByLabelText('More actions')[0]))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy as new conversation' }))
     await waitFor(() => expect(fork).toHaveBeenLastCalledWith('saved', 'a'))
     await waitFor(() => expect(onConversationChange).toHaveBeenCalledWith('forked'))
   })
@@ -1176,8 +1173,9 @@ describe('ChatPanel', () => {
       history: { get: () => Promise.resolve(conversation) },
     })
     await screen.findByText('Alternative reply')
-    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
-    await fireEvent.click(required(screen.getAllByText('Download Markdown')[1]))
+    await fireEvent.click(required(screen.getAllByLabelText('More actions')[1]))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Save' }))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Save to local file' }))
     expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob))
     const blob = createObjectURL.mock.calls[0]?.[0] as Blob | undefined
     expect(blob?.type).toBe('text/markdown;charset=utf-8')
@@ -1193,8 +1191,9 @@ describe('ChatPanel', () => {
     createObjectURL.mockImplementationOnce(() => {
       throw new Error('unavailable')
     })
-    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
-    await fireEvent.click(required(screen.getAllByText('Download Markdown')[1]))
+    await fireEvent.click(required(screen.getAllByLabelText('More actions')[1]))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Export' }))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Export as Markdown' }))
     expect(notify.toast).toHaveBeenCalledWith('error', 'Could not download Markdown')
     click.mockRestore()
   })
@@ -1215,16 +1214,29 @@ describe('ChatPanel', () => {
     expect(screen.getByText('Alternative reply')).toBeTruthy()
   })
 
-  it('disables editing and deletion on reply ancestors even when not selected', async () => {
+  it('keeps deletion of a reply ancestor enabled with a reparent warning but disables editing it', async () => {
     const conversation = candidates()
     conversation.summary.selectedTurnId = 'b'
     required(conversation.turns[1]).parentId = 'a'
-    setup(true, null, { props: { conversationId: 'saved' }, history: { get: () => Promise.resolve(conversation) } })
+    const removeTurn = vi.fn<ChatHistoryPort['removeTurn']>(() =>
+      Promise.resolve({ ...conversation, turns: [{ ...required(conversation.turns[1]), parentId: null }] }),
+    )
+    const { notify } = setup(true, null, {
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation), removeTurn },
+    })
     await screen.findByText('Alternative reply')
-    const deletion = required(screen.getAllByRole('button', { name: 'Delete reply' })[0])
-    expect(deletion.hasAttribute('disabled')).toBe(true)
-    expect(deletion.getAttribute('title')).toContain('descendants')
-    expect((screen.getAllByText('Edit reply')[0] as HTMLButtonElement).disabled).toBe(true)
+    await fireEvent.click(required(screen.getAllByLabelText('More actions')[0]))
+    const edit = await screen.findByRole('menuitem', { name: 'Edit' })
+    expect(edit.getAttribute('aria-disabled')).toBe('true')
+    await fireEvent.keyDown(edit, { key: 'Escape' })
+    const deletion = required(screen.getAllByRole('button', { name: 'Delete' })[0])
+    expect(deletion.hasAttribute('disabled')).toBe(false)
+    await fireEvent.click(deletion)
+    await waitFor(() => expect(removeTurn).toHaveBeenCalledWith('saved', 'a'))
+    expect(notify.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.stringContaining('Later turns will attach') }),
+    )
   })
 
   it('keeps reply dialogs keyboard-dismissable without closing the host and disables mutations while running', async () => {
@@ -1235,15 +1247,15 @@ describe('ChatPanel', () => {
       history: { get: () => Promise.resolve(conversation) },
     })
     await screen.findByText('Alternative reply')
-    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
-    await fireEvent.click(required(screen.getAllByText('Edit reply')[1]))
+    await fireEvent.click(required(screen.getAllByLabelText('More actions')[1]))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Edit' }))
     const editor = await screen.findByRole('textbox', { name: 'Reply Markdown' })
     await fireEvent.keyDown(editor, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(onClose).not.toHaveBeenCalled()
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Regenerate' })[0]))
     expect(runs[0]?.request.retryTurnId).toBe('a')
-    for (const label of ['Switch model', 'Translate', 'Delete reply', 'Use as context']) {
+    for (const label of ['Switch model', 'Translate', 'Delete', 'Set as context']) {
       expect(screen.getAllByRole('button', { name: label }).every((button) => button.hasAttribute('disabled'))).toBe(
         true,
       )
@@ -1283,11 +1295,11 @@ describe('ChatPanel', () => {
     })
     await screen.findByText('Alternative reply')
     await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Keep on failure' } })
-    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
-    await fireEvent.click(required(screen.getAllByText('Branch from this reply')[1]))
+    await fireEvent.click(required(screen.getAllByLabelText('More actions')[1]))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Branch' }))
     await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Network connection failed'))
     expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Keep on failure')
-    expect(screen.getAllByRole('button', { name: 'Use as context' })[0]?.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getAllByRole('button', { name: 'Set as context' })[0]?.getAttribute('aria-pressed')).toBe('true')
   })
 
   it('awaits native Markdown export and reports host failure without using a browser download', async () => {
@@ -1298,31 +1310,12 @@ describe('ChatPanel', () => {
       history: { get: () => Promise.resolve(conversation) },
     })
     await screen.findByText('Alternative reply')
-    await fireEvent.click(required(screen.getAllByLabelText('More reply actions')[1]))
-    await fireEvent.click(required(screen.getAllByText('Download Markdown')[1]))
+    await fireEvent.click(required(screen.getAllByLabelText('More actions')[1]))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Export' }))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Export as Markdown' }))
     await waitFor(() => expect(onExportMarkdown).toHaveBeenCalledWith('Alternative reply'))
     await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Could not download Markdown'))
     expect(screen.getByText('Alternative reply')).toBeTruthy()
-  })
-
-  it('explains removal of the question when deleting its only unselected reply', async () => {
-    const conversation = candidates()
-    required(conversation.turns[1]).questionId = 'another-question'
-    required(conversation.turns[1]).input = 'Only question'
-    const removeTurn = vi.fn<ChatHistoryPort['removeTurn']>(() =>
-      Promise.resolve({ ...conversation, turns: [required(conversation.turns[0])] }),
-    )
-    const { notify } = setup(true, null, {
-      props: { conversationId: 'saved' },
-      history: { get: () => Promise.resolve(conversation), removeTurn },
-    })
-    await screen.findByText('Only question')
-    await fireEvent.click(required(screen.getAllByRole('button', { name: 'Delete reply' })[1]))
-    await waitFor(() => expect(removeTurn).toHaveBeenCalledWith('saved', 'b'))
-    expect(notify.confirm).toHaveBeenCalledWith(
-      expect.objectContaining({ body: expect.stringContaining('Both the question and reply will disappear') }),
-    )
-    expect(screen.queryByText('Only question')).toBeNull()
   })
 })
 

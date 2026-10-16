@@ -1,6 +1,7 @@
 <script lang="ts">
   // Full reply candidate; the panel groups shared user input by questionId.
   import { Button } from '#lib/components/ui/button/index.js'
+  import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js'
   import { getKitContext } from '../context'
   import { renderMarkdown } from '../markdown'
   import ApprovalCard from './ApprovalCard.svelte'
@@ -14,11 +15,17 @@
   import FileInputIcon from '@lucide/svelte/icons/file-input'
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
   import ToolCallItem from './ToolCallItem.svelte'
-  import MoreHorizontalIcon from '@lucide/svelte/icons/ellipsis'
+  import MenuIcon from '@lucide/svelte/icons/menu'
   import LanguagesIcon from '@lucide/svelte/icons/languages'
   import TrashIcon from '@lucide/svelte/icons/trash-2'
-  import SaveIcon from '@lucide/svelte/icons/file-plus'
+  import FilePlusIcon from '@lucide/svelte/icons/file-plus'
   import AtSignIcon from '@lucide/svelte/icons/at-sign'
+  import ThumbsUpIcon from '@lucide/svelte/icons/thumbs-up'
+  import FilePenLineIcon from '@lucide/svelte/icons/file-pen-line'
+  import SplitIcon from '@lucide/svelte/icons/split'
+  import CopyPlusIcon from '@lucide/svelte/icons/copy-plus'
+  import SaveIcon from '@lucide/svelte/icons/save'
+  import UploadIcon from '@lucide/svelte/icons/upload'
 
   let {
     turn,
@@ -30,8 +37,6 @@
     showInput = true,
     busy = false,
     editable = false,
-    deletable = false,
-    deleteReason,
     onEdit,
     onBranch,
     onCopyConversation,
@@ -53,8 +58,6 @@
     showInput?: boolean
     busy?: boolean
     editable?: boolean
-    deletable?: boolean
-    deleteReason?: string | undefined
     onEdit?: (() => void) | undefined
     onBranch?: (() => void) | undefined
     onCopyConversation?: (() => void) | undefined
@@ -106,11 +109,6 @@
     copied = true
     clearTimeout(copyTimer)
     copyTimer = setTimeout(() => (copied = false), 1500)
-  }
-  function menuAction(event: MouseEvent, action: () => void) {
-    const details = event.currentTarget instanceof Element ? event.currentTarget.closest('details') : null
-    if (details) details.open = false
-    action()
   }
 
   async function saveNote() {
@@ -176,9 +174,7 @@
   {/if}
   {#if showInput}<p class="user-message">{turn.input}</p>{/if}
   <div class="assistant-message" class:chosen>
-    {#if modelLabel}<div class="reply-source">
-        <span>{modelLabel}</span>{#if chosen}<span>{t('chat.chosenReply')}</span>{/if}
-      </div>{/if}
+    {#if modelLabel}<div class="reply-source">{modelLabel}</div>{/if}
     {#if turn.reasoningText}
       <details class="thinking text-muted-foreground text-kit-sm">
         <summary class="cursor-pointer">{t('chat.reasoning')}</summary>
@@ -214,7 +210,7 @@
         node.innerHTML = html
       }}
     ></div>
-    {#if turn.text !== '' || (onRetry && turn.status !== 'running') || onUseContext}
+    {#if turn.text !== '' || (onRetry && turn.status !== 'running') || onUseContext || onDelete}
       <div class="message-actions">
         {#if turn.text !== ''}
           <Button
@@ -226,49 +222,6 @@
           >
             {#if copied}<CheckIcon />{:else}<CopyIcon />{/if}
           </Button>
-        {/if}
-        {#if turn.text || onEdit || onBranch || onCopyConversation}
-          <details class="reply-more">
-            <summary aria-label={t('chat.more')} title={t('chat.more')}><MoreHorizontalIcon /></summary>
-            <div class="more-actions">
-              {#if onEdit}<Button
-                  variant="ghost"
-                  size="sm"
-                  title={t('chat.editReply')}
-                  disabled={busy || !editable}
-                  onclick={(event) => menuAction(event, () => onEdit?.())}>{t('chat.editReply')}</Button
-                >{/if}
-              {#if onBranch}<Button
-                  variant="ghost"
-                  size="sm"
-                  title={t('chat.branch')}
-                  disabled={busy}
-                  onclick={(event) => menuAction(event, () => onBranch?.())}>{t('chat.branch')}</Button
-                >{/if}
-              {#if onCopyConversation}<Button
-                  variant="ghost"
-                  size="sm"
-                  title={t('chat.copyConversation')}
-                  disabled={busy}
-                  onclick={(event) => menuAction(event, () => onCopyConversation?.())}
-                  >{t('chat.copyConversation')}</Button
-                >{/if}
-              {#if onSaveNote}<Button
-                  variant="ghost"
-                  size="sm"
-                  title={t('chat.saveNote')}
-                  disabled={busy || turn.status === 'running' || !turn.text}
-                  onclick={(event) => menuAction(event, () => void saveNote())}>{t('chat.saveNote')}</Button
-                >{/if}
-              <Button
-                variant="ghost"
-                size="sm"
-                title={t('chat.exportMarkdown')}
-                disabled={!turn.text}
-                onclick={(event) => menuAction(event, () => void download())}>{t('chat.exportMarkdown')}</Button
-              >
-            </div>
-          </details>
         {/if}
         {#if onRetry && turn.status !== 'running'}
           {@const label = t(turn.status === 'failed' ? 'chat.retry' : 'chat.regenerate')}
@@ -298,13 +251,14 @@
             disabled={busy || !turn.text}
             onclick={onTranslate}><LanguagesIcon /></Button
           >{/if}
-        {#if onDelete}<Button
+        {#if onUseContext}<Button
             variant="ghost"
             size="icon-xs"
-            title={deleteReason ?? t('chat.deleteReply')}
-            aria-label={t('chat.deleteReply')}
-            disabled={busy || !deletable}
-            onclick={onDelete}><TrashIcon /></Button
+            title={t('chat.useContext')}
+            aria-label={t('chat.useContext')}
+            aria-pressed={chosen}
+            disabled={busy || turn.status !== 'completed'}
+            onclick={onUseContext}><ThumbsUpIcon class={chosen ? 'fill-primary text-primary' : ''} /></Button
           >{/if}
         {#if onSaveNote && turn.text}<Button
             variant="ghost"
@@ -312,7 +266,15 @@
             title={t('chat.saveNote')}
             aria-label={t('chat.saveNote')}
             disabled={busy || turn.status === 'running'}
-            onclick={() => void saveNote()}><SaveIcon /></Button
+            onclick={() => void saveNote()}><FilePlusIcon /></Button
+          >{/if}
+        {#if onDelete}<Button
+            variant="ghost"
+            size="icon-xs"
+            title={t('chat.deleteReply')}
+            aria-label={t('chat.deleteReply')}
+            disabled={busy || turn.status === 'running'}
+            onclick={onDelete}><TrashIcon /></Button
           >{/if}
         {#if onInsert}
           <Button
@@ -326,14 +288,57 @@
             <FileInputIcon />
           </Button>
         {/if}
-        {#if onUseContext}<Button
-            class="use-context"
-            variant={chosen ? 'secondary' : 'ghost'}
-            size="sm"
-            aria-pressed={chosen}
-            disabled={busy || turn.status !== 'completed' || chosen}
-            onclick={onUseContext}>{t('chat.useContext')}</Button
-          >{/if}
+        {#if turn.text || onEdit || onBranch || onCopyConversation}
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              {#snippet child({ props })}<Button
+                  {...props}
+                  variant="ghost"
+                  size="icon-xs"
+                  title={t('chat.more')}
+                  aria-label={t('chat.more')}><MenuIcon /></Button
+                >{/snippet}
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content class="w-auto">
+              {#if onEdit || onBranch || onCopyConversation}
+                <DropdownMenu.Group>
+                  {#if onEdit}<DropdownMenu.Item disabled={busy || !editable} onSelect={() => onEdit?.()}
+                      ><FilePenLineIcon />{t('chat.editReply')}</DropdownMenu.Item
+                    >{/if}
+                  {#if onBranch}<DropdownMenu.Item disabled={busy} onSelect={() => onBranch?.()}
+                      ><SplitIcon />{t('chat.branch')}</DropdownMenu.Item
+                    >{/if}
+                  {#if onCopyConversation}<DropdownMenu.Item disabled={busy} onSelect={() => onCopyConversation?.()}
+                      ><CopyPlusIcon />{t('chat.copyConversation')}</DropdownMenu.Item
+                    >{/if}
+                </DropdownMenu.Group>
+                <DropdownMenu.Separator />
+              {/if}
+              <DropdownMenu.Sub>
+                <DropdownMenu.SubTrigger disabled={!turn.text}><SaveIcon />{t('chat.save')}</DropdownMenu.SubTrigger>
+                <DropdownMenu.SubContent>
+                  <DropdownMenu.Item disabled={!turn.text} onSelect={() => void download()}
+                    >{t('chat.saveFile')}</DropdownMenu.Item
+                  >
+                  {#if onSaveNote}<DropdownMenu.Item
+                      disabled={busy || turn.status === 'running' || !turn.text}
+                      onSelect={() => void saveNote()}>{t('chat.saveNote')}</DropdownMenu.Item
+                    >{/if}
+                </DropdownMenu.SubContent>
+              </DropdownMenu.Sub>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Sub>
+                <DropdownMenu.SubTrigger disabled={!turn.text}><UploadIcon />{t('chat.export')}</DropdownMenu.SubTrigger
+                >
+                <DropdownMenu.SubContent>
+                  <DropdownMenu.Item disabled={!turn.text} onSelect={() => void download()}
+                    >{t('chat.exportMarkdown')}</DropdownMenu.Item
+                  >
+                </DropdownMenu.SubContent>
+              </DropdownMenu.Sub>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+        {/if}
         <span class="text-muted-foreground text-kit-sm" role="status">{copied ? t('chat.copied') : ''}</span>
       </div>
     {/if}
@@ -457,61 +462,9 @@
     outline: 1px solid var(--color-primary);
   }
   .reply-source {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    gap: 0.5rem;
     font-size: var(--kit-text-sm);
     color: var(--color-muted-foreground);
     overflow-wrap: anywhere;
-  }
-  .reply-more {
-    min-width: 0;
-    max-width: 100%;
-  }
-  .reply-more[open] {
-    flex-basis: 100%;
-    width: 100%;
-  }
-  .reply-more summary {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.5rem;
-    height: 1.5rem;
-    padding: 0.25rem;
-    border-radius: var(--kit-radius);
-    cursor: pointer;
-    list-style: none;
-  }
-  .reply-more summary:focus-visible {
-    outline: 2px solid var(--color-ring);
-  }
-  .reply-more summary :global(svg) {
-    width: 1rem;
-    height: 1rem;
-  }
-  .more-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-  }
-  .more-actions :global(button) {
-    width: 100%;
-    max-width: 100%;
-    height: auto;
-    min-height: 2rem;
-    justify-content: flex-start;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-align: left;
-  }
-  .message-actions :global(.use-context) {
-    margin-left: auto;
   }
   .thinking {
     min-width: 0;

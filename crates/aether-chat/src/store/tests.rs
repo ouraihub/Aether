@@ -458,7 +458,7 @@ fn edit_compare_and_swap_preserves_usage_and_invalidates_native_context() {
 }
 
 #[test]
-fn running_foreign_selected_and_dependent_targets_are_rejected_atomically() {
+fn running_foreign_and_dependent_targets_are_rejected_atomically() {
     let dir = TempDir::new().unwrap();
     let store = SqliteStore::open(dir.path()).unwrap();
     let first = store.begin_turn(None, None, "first").unwrap();
@@ -500,14 +500,6 @@ fn running_foreign_selected_and_dependent_targets_are_rejected_atomically() {
             KitErrorCode::NotFound
         );
     }
-    assert_eq!(
-        store
-            .remove_turn(id, &first.turn_id)
-            .unwrap_err()
-            .details()
-            .reason(),
-        Some("turn_selected")
-    );
     let candidate = store.regenerate(id).unwrap();
     let before = store.load(id).unwrap();
     for result in [
@@ -538,16 +530,6 @@ fn running_foreign_selected_and_dependent_targets_are_rejected_atomically() {
             .reason(),
         Some("turn_has_dependents")
     );
-    store.select_turn(id, &candidate.turn_id).unwrap();
-    assert_eq!(
-        store
-            .remove_turn(id, &first.turn_id)
-            .unwrap_err()
-            .details()
-            .reason(),
-        Some("turn_has_dependents")
-    );
-    store.select_turn(id, &first.turn_id).unwrap();
     let removed = store.remove_turn(id, &candidate.turn_id).unwrap();
     assert_eq!(removed.turns.len(), 1);
     assert_eq!(removed.turns[0].input, "first");
@@ -563,14 +545,101 @@ fn running_foreign_selected_and_dependent_targets_are_rejected_atomically() {
             .reason(),
         Some("turn_has_dependents")
     );
-    store.select_turn(id, &child.turn_id).unwrap();
+    let reparented = store.remove_turn(id, &first.turn_id).unwrap();
+    assert_eq!(reparented.summary.selected_turn_id, Some(child.turn_id));
+    assert_eq!(reparented.turns.len(), 1);
+    assert_eq!(reparented.turns[0].parent_id, None);
+}
+
+fn finished(store: &SqliteStore, conversation: Option<&str>, input: &str) -> String {
+    let turn = store.begin_turn(conversation, None, input).unwrap();
+    let id = turn.turn_id.clone();
+    store.finish_turn(turn, completed(answer(input))).unwrap();
+    id
+}
+
+#[test]
+fn deleting_selected_only_reply_returns_context_to_previous_turn() {
+    let dir = TempDir::new().unwrap();
+    let store = SqliteStore::open(dir.path()).unwrap();
+    let start = store.begin_turn(None, None, "q1").unwrap();
+    let (id, first) = (start.conversation_id.clone(), start.turn_id.clone());
+    store.finish_turn(start, completed(answer("a1"))).unwrap();
+    let second = finished(&store, Some(&id), "q2");
+    let c = store.remove_turn(&id, &second).unwrap();
+    assert_eq!(c.summary.selected_turn_id, Some(first.clone()));
+    assert_eq!(c.turns.len(), 1);
+    let c = store.remove_turn(&id, &first).unwrap();
+    assert_eq!(c.summary.selected_turn_id, None);
+    assert!(c.turns.is_empty());
+}
+
+#[test]
+fn deleting_selected_candidate_moves_context_to_next_candidate() {
+    let dir = TempDir::new().unwrap();
+    let store = SqliteStore::open(dir.path()).unwrap();
+    let first = store.begin_turn(None, None, "q").unwrap();
+    let id = first.conversation_id.clone();
+    store
+        .finish_turn(first.clone(), completed(answer("a")))
+        .unwrap();
+    let second = store.regenerate(&id).unwrap();
+    store
+        .finish_turn(second.clone(), completed(answer("b")))
+        .unwrap();
+    let third = store.regenerate(&id).unwrap();
+    store
+        .finish_turn(third.clone(), completed(answer("c")))
+        .unwrap();
+    store.select_turn(&id, &second.turn_id).unwrap();
+    let fourth = store.regenerate(&id).unwrap();
+    store
+        .finish_turn(fourth.clone(), completed(answer("d")))
+        .unwrap();
+    let c = store.remove_turn(&id, &second.turn_id).unwrap();
+    assert_eq!(c.summary.selected_turn_id, Some(third.turn_id.clone()));
+    assert_eq!(c.turns[2].supersedes_id, Some(third.turn_id.clone()));
+    let c = store.remove_turn(&id, &third.turn_id).unwrap();
+    assert_eq!(c.summary.selected_turn_id, Some(fourth.turn_id));
+    assert_eq!(c.turns.len(), 2);
+    assert_eq!(c.turns[1].supersedes_id, None);
+    assert_eq!(c.turns[1].question_id, first.question_id);
+}
+
+#[test]
+fn deleting_reply_reparents_later_turns_and_drops_its_translations() {
+    let dir = TempDir::new().unwrap();
+    let store = SqliteStore::open(dir.path()).unwrap();
+    let first = store.begin_turn(None, None, "q1").unwrap();
+    let id = first.conversation_id.clone();
+    store
+        .finish_turn(first.clone(), completed(answer("a1")))
+        .unwrap();
+    let second = finished(&store, Some(&id), "q2");
+    let translation = store
+        .begin_action(
+            Some(&id),
+            None,
+            "ignored",
+            &[],
+            None,
+            None,
+            Some(&second),
+            Some("French"),
+        )
+        .unwrap();
+    store
+        .finish_turn(translation, completed(answer("t2")))
+        .unwrap();
+    store.select_turn(&id, &second).unwrap();
+    let third = finished(&store, Some(&id), "q3");
+    let c = store.remove_turn(&id, &second).unwrap();
+    assert_eq!(c.summary.selected_turn_id, Some(third.clone()));
+    assert_eq!(c.turns.len(), 2);
+    let path = super::history_path(&c.turns, Some(&third)).unwrap();
     assert_eq!(
-        store
-            .remove_turn(id, &first.turn_id)
-            .unwrap_err()
-            .details()
-            .reason(),
-        Some("turn_has_dependents")
+        path.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+        [first.turn_id.as_str(), third.as_str()]
     );
 }
 

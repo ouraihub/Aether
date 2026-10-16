@@ -96,13 +96,41 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       return snapshot(conversation)
     },
     removeTurn: async (conversationId: string, turnId: string) => {
+      // Same rule as both hosts (AutoNote docs/35 §3.3): reparent onto the successor, then delete.
       const conversation = getConversation(conversationId)
       const turn = getTurn(conversationId, turnId)
-      if (conversation.summary.selectedTurnId === turnId)
-        throw clientError('conflict', 'selected turn', { reason: 'selected_turn' })
-      if (conversation.turns.some((candidate) => candidate.parentId === turnId || candidate.supersedesId === turnId))
-        throw clientError('conflict', 'turn has children', { reason: 'has_children' })
-      conversation.turns = conversation.turns.filter((candidate) => candidate !== turn)
+      if (turn.status === 'running') throw clientError('conflict', 'turn running', { reason: 'turn_running' })
+      // Turns are stored in creation order, which stands in for `seq`.
+      const at = conversation.turns.indexOf(turn)
+      const group = conversation.turns.filter(
+        (t) => t.kind === 'reply' && t.questionId === turn.questionId && t !== turn,
+      )
+      const sibling = group.find((t) => conversation.turns.indexOf(t) > at) ?? group.at(-1)
+      const successor = sibling?.id ?? turn.parentId
+      const removed = new Set([turnId])
+      for (const t of conversation.turns)
+        if (t.kind === 'translation' && removed.has(t.parentId ?? '')) removed.add(t.id)
+      conversation.turns = conversation.turns
+        .filter((t) => !removed.has(t.id))
+        .map((t) => ({
+          ...t,
+          parentId: removed.has(t.parentId ?? '') ? successor : t.parentId,
+          supersedesId: removed.has(t.supersedesId ?? '')
+            ? sibling && sibling.id !== t.id
+              ? sibling.id
+              : null
+            : t.supersedesId,
+        }))
+      if (removed.has(conversation.summary.selectedTurnId ?? '')) {
+        const rest = conversation.turns.filter((t) => t.kind === 'reply')
+        let head = successor ?? rest.filter((t) => t.parentId === null).at(-1)?.id ?? null
+        for (;;) {
+          const child = head === null ? undefined : rest.filter((t) => t.parentId === head).at(-1)
+          if (!child) break
+          head = child.id
+        }
+        conversation.summary.selectedTurnId = head
+      }
       conversation.summary.updatedAt = Date.now()
       return snapshot(conversation)
     },

@@ -236,7 +236,7 @@ describe('createFakePorts', () => {
     expect(seed.turns[0]?.text).toBe('Original answer')
   })
 
-  it('rejects selected or dependent deletion and removes only an unselected candidate', async () => {
+  it('deletes a selected or dependent reply by reparenting onto its successor', async () => {
     const history = required(
       createFakePorts({
         conversations: [
@@ -246,17 +246,19 @@ describe('createFakePorts', () => {
               turn('candidate', { questionId: 'source', supersedesId: 'source' }),
               turn('child', { parentId: 'candidate' }),
             ],
-            'candidate',
+            'child',
           ),
         ],
       }).chat?.history,
     )
-    expect(await code(history.removeTurn('stored', 'candidate'))).toBe('conflict')
-    expect(await code(history.removeTurn('stored', 'source'))).toBe('conflict')
     expect(await code(history.editTurn('stored', 'source', 'changed', 'Original answer'))).toBe('conflict')
-    expect((await history.removeTurn('stored', 'child')).turns.map(({ id }) => id)).toEqual(['source', 'candidate'])
-    await history.selectTurn('stored', 'source')
-    expect((await history.removeTurn('stored', 'candidate')).turns.map(({ id }) => id)).toEqual(['source'])
+    const afterCandidate = await history.removeTurn('stored', 'candidate')
+    expect(afterCandidate.turns.map(({ id }) => id)).toEqual(['source', 'child'])
+    expect(afterCandidate.turns.find(({ id }) => id === 'child')?.parentId).toBe('source')
+    expect(afterCandidate.summary.selectedTurnId).toBe('child')
+    const afterChild = await history.removeTurn('stored', 'child')
+    expect(afterChild.summary.selectedTurnId).toBe('source')
+    expect((await history.removeTurn('stored', 'source')).summary.selectedTurnId).toBeNull()
   })
 
   it('forks only chosen ancestry with fresh IDs, remapped selection and independent storage', async () => {

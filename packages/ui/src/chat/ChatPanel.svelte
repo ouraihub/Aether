@@ -338,16 +338,6 @@
   function canEdit(turn: ChatTurn) {
     return turn.status !== 'running' && !hasChildren(turn)
   }
-  function canDelete(turn: ChatTurn) {
-    return canEdit(turn) && session?.selectedTurnId !== turn.id
-  }
-  function deletionReason(turn: ChatTurn) {
-    return session?.selectedTurnId === turn.id
-      ? t('chat.deleteSelectedDisabled')
-      : hasChildren(turn)
-        ? t('chat.deleteChildrenDisabled')
-        : undefined
-  }
   function editReply(turn: ChatTurn) {
     sourceReply = turn
     editDraft = turn.text
@@ -375,12 +365,12 @@
     historyBusy = true
     try {
       if (action === 'remove') {
-        if (!canDelete(turn)) return
-        const siblings = session.turns.filter((candidate) => candidate.questionId === turn.questionId).length > 1
+        if (turn.status === 'running') return
+        const reparent = session.turns.some((child) => child.parentId === turn.id)
         if (
           !(await notify.confirm({
             title: t('chat.deleteReplyTitle'),
-            body: t(siblings ? 'chat.deleteCandidateBody' : 'chat.deleteOnlyReplyBody'),
+            body: reparent ? t('chat.deleteReparentBody') : '',
             danger: true,
           }))
         )
@@ -687,6 +677,7 @@
       {#if session.turns.length > 0}
         <ol class="turns">
           {#each groups as [questionId, replies] (questionId)}
+            {@const candidates = replies.filter((reply) => reply.kind === 'reply').length > 1}
             {#each replies as turn, i (turn.id)}
               <MessageItem
                 {turn}
@@ -697,11 +688,9 @@
                   ? `${t('chat.translationReply')} · ${sourceLabel(turn)}`
                   : sourceLabel(turn)}
                 showInput={i === 0 && turn.kind !== 'translation'}
-                chosen={session.selectedTurnId === turn.id}
+                chosen={candidates && session.selectedTurnId === turn.id}
                 busy={actionBusy}
                 editable={canEdit(turn)}
-                deletable={canDelete(turn)}
-                deleteReason={deletionReason(turn)}
                 onRetry={purpose === 'chat' && !restoreBlocked && (turn.persisted || capability !== null)
                   ? () => void retryReply(turn)
                   : undefined}
@@ -727,7 +716,7 @@
                 onDelete={purpose === 'chat' && history && session.conversationId && turn.persisted
                   ? () => void mutateReply(turn, 'remove')
                   : undefined}
-                onUseContext={purpose === 'chat' && history && session.conversationId && turn.persisted
+                onUseContext={candidates && purpose === 'chat' && history && session.conversationId && turn.persisted
                   ? () => void mutateReply(turn, 'select')
                   : undefined}
                 onApprove={(tool, allow) => session.approve(tool, allow)}

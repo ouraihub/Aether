@@ -108,9 +108,11 @@ pub trait ConversationStore: Send + Sync {
         text: &str,
         expected_text: &str,
     ) -> Result<Conversation, KitError>;
-    /// Deletes only an unselected terminal leaf candidate.
+    /// Deletes a turn and its translations, reparenting dependents onto the successor
+    /// (next/previous candidate, else parent) and moving a deleted selection to the
+    /// successor's newest reply leaf (docs/35 §3.3).
     /// # Errors
-    /// Missing, selected, running or dependent turn; storage failure.
+    /// Missing turn, running conversation or storage failure.
     fn remove_turn(&self, conversation_id: &str, turn_id: &str) -> Result<Conversation, KitError>;
     /// Copies exactly the target's ancestor path into an independent conversation.
     /// # Errors
@@ -761,18 +763,57 @@ impl ConversationStore for SqliteStore {
         let tx = db.transaction()?;
         let c = load_conversation(&tx, conversation_id)?;
         ensure_idle(&tx, conversation_id)?;
-        target_turn(&c, turn_id)?;
-        if c.summary.selected_turn_id.as_deref() == Some(turn_id) {
-            return Err(KitError::conflict("turn_selected"));
+        let target = target_turn(&c, turn_id)?;
+        // Successor (docs/35 §3.3): next sibling reply of the same question, else the
+        // previous one, else the parent.
+        let siblings: Vec<&Turn> = c
+            .turns
+            .iter()
+            .filter(|t| t.kind == "reply" && t.question_id == target.question_id && t.id != turn_id)
+            .collect();
+        let sibling = siblings
+            .iter()
+            .find(|t| t.seq > target.seq)
+            .or(siblings.last());
+        let successor = sibling
+            .map(|t| t.id.clone())
+            .or_else(|| target.parent_id.clone());
+        let deleted: Vec<&str> = c
+            .turns
+            .iter()
+            .filter(|t| {
+                t.id == turn_id
+                    || (t.kind == "translation" && t.parent_id.as_deref() == Some(turn_id))
+            })
+            .map(|t| t.id.as_str())
+            .collect();
+        let supersedes = sibling.map(|t| t.id.as_str());
+        // Reparent before deleting: parent_id/supersedes_id are foreign keys.
+        for id in &deleted {
+            tx.execute(
+                "UPDATE turns SET parent_id=?1 WHERE parent_id=?2 AND conversation_id=?3",
+                params![successor, id, conversation_id],
+            )?;
+            tx.execute(
+                "UPDATE turns SET supersedes_id=CASE WHEN id=?1 THEN NULL ELSE ?1 END WHERE supersedes_id=?2 AND conversation_id=?3",
+                params![supersedes, id, conversation_id],
+            )?;
         }
-        ensure_leaf(&c, turn_id)?;
+        for id in &deleted {
+            tx.execute(
+                "DELETE FROM turns WHERE id=?1 AND conversation_id=?2",
+                params![id, conversation_id],
+            )?;
+        }
+        let selected = c.summary.selected_turn_id.as_deref();
+        let selected = if selected.is_some_and(|s| deleted.contains(&s)) {
+            latest_leaf(&load_conversation(&tx, conversation_id)?, successor)
+        } else {
+            selected.map(str::to_owned)
+        };
         tx.execute(
-            "DELETE FROM turns WHERE id=?1 AND conversation_id=?2",
-            params![turn_id, conversation_id],
-        )?;
-        tx.execute(
-            "UPDATE conversations SET updated_at=?1 WHERE id=?2",
-            params![now_millis(), conversation_id],
+            "UPDATE conversations SET selected_turn_id=?1, updated_at=?2 WHERE id=?3",
+            params![selected, now_millis(), conversation_id],
         )?;
         let result = load_conversation(&tx, conversation_id)?;
         tx.commit()?;
@@ -962,6 +1003,22 @@ fn target_turn<'a>(c: &'a Conversation, id: &str) -> Result<&'a Turn, KitError> 
         .iter()
         .find(|t| t.id == id && t.conversation_id == c.summary.id)
         .ok_or_else(|| KitError::not_found("turn"))
+}
+
+/// Newest reply leaf below `start` (or below the newest root reply when `None`).
+fn latest_leaf(c: &Conversation, start: Option<String>) -> Option<String> {
+    let newest_child = |parent: Option<&str>| {
+        c.turns
+            .iter()
+            .filter(|t| t.kind == "reply" && t.parent_id.as_deref() == parent)
+            .max_by_key(|t| t.seq)
+            .map(|t| t.id.clone())
+    };
+    let mut current = start.or_else(|| newest_child(None))?;
+    while let Some(next) = newest_child(Some(&current)) {
+        current = next;
+    }
+    Some(current)
 }
 
 fn ensure_leaf(c: &Conversation, id: &str) -> Result<(), KitError> {
