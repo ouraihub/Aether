@@ -3,7 +3,6 @@
   import * as Alert from '#lib/components/ui/alert/index.js'
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Empty from '#lib/components/ui/empty/index.js'
-  import * as Field from '#lib/components/ui/field/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
   import { Switch } from '#lib/components/ui/switch/index.js'
   import SearchIcon from '@lucide/svelte/icons/search'
@@ -201,11 +200,14 @@
             </Alert.Description>
           </Alert.Root>
         {/if}
-        <div class="flex items-end gap-3">
-          <Field.Field class="min-w-0 flex-1">
-            <Field.Label for="kit-provider-name">{t('providers.name')}</Field.Label>
-            <Input id="kit-provider-name" maxlength={80} bind:value={draft.name} />
-          </Field.Field>
+        <div class="flex min-w-0 items-center gap-3">
+          <Input
+            id="kit-provider-name"
+            class="h-8 min-w-0 flex-1 border-0 bg-transparent px-0 text-[15px] font-semibold shadow-none focus-visible:ring-0"
+            maxlength={80}
+            aria-label={t('providers.name')}
+            bind:value={draft.name}
+          />
           <Switch
             id="kit-provider-enabled"
             size="default"

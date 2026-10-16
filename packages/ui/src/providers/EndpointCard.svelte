@@ -82,33 +82,27 @@
     onclick={ontoggle}
   >
     {#if expanded}<ChevronDownIcon />{:else}<ChevronRightIcon />{/if}
-    <span class="font-medium">{endpoint.slug || '—'}</span>
-    <span class="text-muted-foreground min-w-0 flex-1 truncate">{endpoint.baseUrl}</span>
+    <span class="text-muted-foreground min-w-0 flex-1 truncate">{endpoint.baseUrl || t('providers.base_url')}</span>
+    <span class="text-muted-foreground shrink-0 text-kit-xs">{endpoint.protocol}</span>
     <span class="text-muted-foreground shrink-0 text-kit-xs"
       >{t('providers.model_count', { count: endpoint.models.length })}</span
     >
   </button>
   {#if expanded}
     <Field.Group>
-      <div class="flex gap-3">
-        <Field.Field class="w-32">
-          <Field.Label for="{prefix}-slug">{t('providers.slug')}</Field.Label>
-          <Input id="{prefix}-slug" bind:value={endpoint.slug} />
-        </Field.Field>
-        <Field.Field class="flex-1">
-          <Field.Label for="{prefix}-protocol">{t('providers.protocol')}</Field.Label>
-          <Select.Root type="single" bind:value={endpoint.protocol}>
-            <Select.Trigger id="{prefix}-protocol" class="w-full">{endpoint.protocol}</Select.Trigger>
-            <Select.Content>
-              <Select.Group>
-                {#each PROTOCOLS as protocol (protocol)}
-                  <Select.Item value={protocol} label={protocol} />
-                {/each}
-              </Select.Group>
-            </Select.Content>
-          </Select.Root>
-        </Field.Field>
-      </div>
+      <Field.Field>
+        <Field.Label for="{prefix}-protocol">{t('providers.protocol')}</Field.Label>
+        <Select.Root type="single" bind:value={endpoint.protocol}>
+          <Select.Trigger id="{prefix}-protocol" class="w-full">{endpoint.protocol}</Select.Trigger>
+          <Select.Content>
+            <Select.Group>
+              {#each PROTOCOLS as protocol (protocol)}
+                <Select.Item value={protocol} label={protocol} />
+              {/each}
+            </Select.Group>
+          </Select.Content>
+        </Select.Root>
+      </Field.Field>
       <Field.Field>
         <Field.Label for="{prefix}-url">{t('providers.base_url')}</Field.Label>
         <Input id="{prefix}-url" placeholder="https://api.example.com/v1" bind:value={endpoint.baseUrl} />
@@ -181,137 +175,141 @@
           {/each}
         </div>
       </Field.Field>
-      {#if selectedModel}
-        <Field.Field>
-          <Field.Label for="{prefix}-model">{t('providers.model_settings')}</Field.Label>
-          <Select.Root type="single" value={selectedModel.id} onValueChange={(value) => (selectedModelId = value)}>
-            <Select.Trigger id="{prefix}-model" class="w-full">{selectedModel.id}</Select.Trigger>
-            <Select.Content
-              ><Select.Group
-                >{#each endpoint.models as model (model.id)}<Select.Item
-                    value={model.id}
-                    label={model.id}
-                  />{/each}</Select.Group
-              ></Select.Content
-            >
-          </Select.Root>
-        </Field.Field>
-        {#if selectedModel.modelType === 'chat'}
-          <Field.Field
-            ><label class="flex items-center gap-2"
-              ><input
-                type="checkbox"
-                checked={selectedModel.canVision}
-                onchange={(event) => updateModel((model) => (model.canVision = event.currentTarget.checked))}
-              />{t('providers.vision')}</label
-            ></Field.Field
-          >
-          {#if endpoint.protocol !== 'openai-chat'}
+      <details class="rounded-kit border bg-muted/10 px-3 py-2">
+        <summary class="cursor-pointer text-kit-sm font-medium">{t('providers.model_settings')}</summary>
+        {#if selectedModel}
+          <Field.Field>
+            <Field.Label for="{prefix}-model">{t('providers.model_settings')}</Field.Label>
+            <Select.Root type="single" value={selectedModel.id} onValueChange={(value) => (selectedModelId = value)}>
+              <Select.Trigger id="{prefix}-model" class="w-full">{selectedModel.id}</Select.Trigger>
+              <Select.Content
+                ><Select.Group
+                  >{#each endpoint.models as model (model.id)}<Select.Item
+                      value={model.id}
+                      label={model.id}
+                    />{/each}</Select.Group
+                ></Select.Content
+              >
+            </Select.Root>
+          </Field.Field>
+          {#if selectedModel.modelType === 'chat'}
             <Field.Field
               ><label class="flex items-center gap-2"
                 ><input
                   type="checkbox"
-                  checked={selectedModel.nativeWebSearch}
-                  onchange={(event) => updateModel((model) => (model.nativeWebSearch = event.currentTarget.checked))}
-                />{t('providers.nativeWebSearch')}</label
+                  checked={selectedModel.canVision}
+                  onchange={(event) => updateModel((model) => (model.canVision = event.currentTarget.checked))}
+                />{t('providers.vision')}</label
               ></Field.Field
             >
-          {/if}
-          <Field.Field>
-            <Field.Label for="{prefix}-dialect">{t('providers.reasoning_dialect')}</Field.Label>
-            <Select.Root
-              type="single"
-              value={selectedReasoning?.dialect ?? 'unknown'}
-              onValueChange={(value) =>
-                updateModel(
-                  (model) => (model.reasoning = value === 'unknown' ? null : emptyReasoning(value as ReasoningDialect)),
-                )}
-            >
-              <Select.Trigger id="{prefix}-dialect" class="w-full"
-                >{selectedReasoning?.dialect ?? t('chat.unknown')}</Select.Trigger
+            {#if endpoint.protocol !== 'openai-chat'}
+              <Field.Field
+                ><label class="flex items-center gap-2"
+                  ><input
+                    type="checkbox"
+                    checked={selectedModel.nativeWebSearch}
+                    onchange={(event) => updateModel((model) => (model.nativeWebSearch = event.currentTarget.checked))}
+                  />{t('providers.nativeWebSearch')}</label
+                ></Field.Field
               >
-              <Select.Content
-                ><Select.Group>
-                  <Select.Item value="unknown" label={t('chat.unknown')} />
-                  {#each dialects as dialect (dialect)}<Select.Item value={dialect} label={dialect} />{/each}
-                </Select.Group></Select.Content
+            {/if}
+            <Field.Field>
+              <Field.Label for="{prefix}-dialect">{t('providers.reasoning_dialect')}</Field.Label>
+              <Select.Root
+                type="single"
+                value={selectedReasoning?.dialect ?? 'unknown'}
+                onValueChange={(value) =>
+                  updateModel(
+                    (model) =>
+                      (model.reasoning = value === 'unknown' ? null : emptyReasoning(value as ReasoningDialect)),
+                  )}
               >
-            </Select.Root>
-          </Field.Field>
-          {#if selectedReasoning}
-            <Field.Set>
-              <Field.Legend>{t('providers.reasoning_efforts')}</Field.Legend>
-              <div class="flex flex-wrap gap-3">
-                {#each REASONING_EFFORTS as effort (effort)}
-                  <label class="flex items-center gap-1"
-                    ><input
-                      type="checkbox"
-                      checked={selectedReasoning.efforts.includes(effort)}
-                      onchange={() => toggleEffort(effort)}
-                    />{t(`chat.effort.${effort}`)}</label
-                  >
-                {/each}
-              </div>
-            </Field.Set>
-            {#if selectedReasoning.dialect === 'anthropic-budget'}
-              <Field.Field>
-                <Field.Label for="{prefix}-budget">{t('providers.reasoning_budget')}</Field.Label>
-                <Input
-                  id="{prefix}-budget"
-                  type="number"
-                  min="1024"
-                  step="1"
-                  value={selectedReasoning.budgetTokens ?? ''}
-                  onchange={(event) =>
-                    updateModel((model) => {
-                      if (model.reasoning) {
-                        const next = event.currentTarget.valueAsNumber
-                        if (Number.isNaN(next)) {
-                          model.reasoning = { ...model.reasoning }
-                          delete model.reasoning.budgetTokens
-                        } else model.reasoning = { ...model.reasoning, budgetTokens: next }
-                      }
-                    })}
-                />
-              </Field.Field>
+                <Select.Trigger id="{prefix}-dialect" class="w-full"
+                  >{selectedReasoning?.dialect ?? t('chat.unknown')}</Select.Trigger
+                >
+                <Select.Content
+                  ><Select.Group>
+                    <Select.Item value="unknown" label={t('chat.unknown')} />
+                    {#each dialects as dialect (dialect)}<Select.Item value={dialect} label={dialect} />{/each}
+                  </Select.Group></Select.Content
+                >
+              </Select.Root>
+            </Field.Field>
+            {#if selectedReasoning}
+              <Field.Set>
+                <Field.Legend>{t('providers.reasoning_efforts')}</Field.Legend>
+                <div class="flex flex-wrap gap-3">
+                  {#each REASONING_EFFORTS as effort (effort)}
+                    <label class="flex items-center gap-1"
+                      ><input
+                        type="checkbox"
+                        checked={selectedReasoning.efforts.includes(effort)}
+                        onchange={() => toggleEffort(effort)}
+                      />{t(`chat.effort.${effort}`)}</label
+                    >
+                  {/each}
+                </div>
+              </Field.Set>
+              {#if selectedReasoning.dialect === 'anthropic-budget'}
+                <Field.Field>
+                  <Field.Label for="{prefix}-budget">{t('providers.reasoning_budget')}</Field.Label>
+                  <Input
+                    id="{prefix}-budget"
+                    type="number"
+                    min="1024"
+                    step="1"
+                    value={selectedReasoning.budgetTokens ?? ''}
+                    onchange={(event) =>
+                      updateModel((model) => {
+                        if (model.reasoning) {
+                          const next = event.currentTarget.valueAsNumber
+                          if (Number.isNaN(next)) {
+                            model.reasoning = { ...model.reasoning }
+                            delete model.reasoning.budgetTokens
+                          } else model.reasoning = { ...model.reasoning, budgetTokens: next }
+                        }
+                      })}
+                  />
+                </Field.Field>
+              {/if}
             {/if}
           {/if}
+          <Field.Field>
+            <Field.Label for="{prefix}-context">{t('providers.context_window')}</Field.Label>
+            <Input
+              id="{prefix}-context"
+              type="number"
+              min="1"
+              step="1"
+              value={selectedModel.contextWindow ?? ''}
+              onchange={(event) =>
+                updateModel(
+                  (model) =>
+                    (model.contextWindow = Number.isNaN(event.currentTarget.valueAsNumber)
+                      ? null
+                      : event.currentTarget.valueAsNumber),
+                )}
+            />
+          </Field.Field>
+          <Field.Field>
+            <Field.Label for="{prefix}-output">{t('providers.max_output')}</Field.Label>
+            <Input
+              id="{prefix}-output"
+              type="number"
+              min="1"
+              step="1"
+              value={selectedModel.maxOutput ?? ''}
+              onchange={(event) =>
+                updateModel(
+                  (model) =>
+                    (model.maxOutput = Number.isNaN(event.currentTarget.valueAsNumber)
+                      ? null
+                      : event.currentTarget.valueAsNumber),
+                )}
+            />
+          </Field.Field>
         {/if}
-        <Field.Field>
-          <Field.Label for="{prefix}-context">{t('providers.context_window')}</Field.Label>
-          <Input
-            id="{prefix}-context"
-            type="number"
-            min="1"
-            step="1"
-            value={selectedModel.contextWindow ?? ''}
-            onchange={(event) =>
-              updateModel(
-                (model) =>
-                  (model.contextWindow = Number.isNaN(event.currentTarget.valueAsNumber)
-                    ? null
-                    : event.currentTarget.valueAsNumber),
-              )}
-          />
-        </Field.Field>
-        <Field.Field>
-          <Field.Label for="{prefix}-output">{t('providers.max_output')}</Field.Label>
-          <Input
-            id="{prefix}-output"
-            type="number"
-            min="1"
-            step="1"
-            value={selectedModel.maxOutput ?? ''}
-            onchange={(event) =>
-              updateModel(
-                (model) =>
-                  (model.maxOutput = Number.isNaN(event.currentTarget.valueAsNumber)
-                    ? null
-                    : event.currentTarget.valueAsNumber),
-              )}
-          />
-        </Field.Field>
-      {/if}
+      </details>
     </Field.Group>
     <div class="flex gap-2">
       <Button size="sm" disabled={fetching || !endpoint.baseUrl.trim()} onclick={onfetch}>
