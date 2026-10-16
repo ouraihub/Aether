@@ -12,6 +12,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test",
+    "ci": "node scripts/ci.mjs",
     "kit:check-deps": "node scripts/check-deps.mjs",
     "kit:dto": "node scripts/dto-check.mjs --write",
     "kit:dto-check": "node scripts/dto-check.mjs",

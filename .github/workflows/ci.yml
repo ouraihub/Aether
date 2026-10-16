@@ -34,32 +34,8 @@ jobs:
       - name: Enforce runner compiler ownership
         shell: cmd
         run: call scripts\msvc-env.bat
-      - run: pnpm run check
-      # tauri::generate_context! in the examples needs each `frontendDist` to exist.
-      - name: Build example frontends
-        run: pnpm -r --filter "./examples/*/ui" run build
-      - name: Crate dependency rules (docs/00 §3)
-        run: pnpm run kit:check-deps
-      - name: DTO contract check
-        run: pnpm run kit:dto-check
-      - name: i18n contract check
-        run: pnpm run kit:i18n
-      - name: Rust formatting
-        shell: cmd
-        run: call scripts\cargo-msvc.bat fmt --all -- --check
-      - name: Rust clippy
-        shell: cmd
-        run: call scripts\cargo-msvc.bat clippy --workspace --all-targets --all-features -- -D warnings
-      - name: Rust tests
-        shell: cmd
-        run: call scripts\cargo-msvc.bat test --workspace --all-features
-      - name: Each plugin feature builds on its own
-        shell: pwsh
-        run: |
-          foreach ($feature in @('providers', 'chat', 'skills', 'mcp-client', 'mcp-server')) {
-            & cmd /d /c "scripts\cargo-msvc.bat check -p tauri-plugin-aether --no-default-features --features $feature"
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+      # Every check lives in scripts/ci.mjs; locally run the same `pnpm run ci` before pushing.
+      - run: pnpm run ci
 
   # Decision D3: Windows first, macOS later. Keep the core crates compiling on macOS
   # from day one so platform-specific code stays behind cfg gates.
