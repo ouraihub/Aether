@@ -141,7 +141,8 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
             },
             Migration {
                 version: 9,
-                sql: "ALTER TABLE providers ADD COLUMN preset_id TEXT;",
+                sql: "ALTER TABLE providers ADD COLUMN preset_id TEXT;
+CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id IS NOT NULL;",
             },
         ];
         let db = db::open(&path, &steps)?;
