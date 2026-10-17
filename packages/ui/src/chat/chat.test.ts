@@ -1147,7 +1147,7 @@ describe('ChatPanel', () => {
     const saveNote = within(card).getByRole('button', { name: 'Save to note' })
     await fireEvent.click(saveNote)
     await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Could not save the note'))
-    expect(onSaveNote).toHaveBeenCalledWith('Alternative reply')
+    expect(onSaveNote).toHaveBeenCalledWith('Alternative reply', [])
     await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Discard for branch' } })
     await fireEvent.click(required(screen.getAllByLabelText('More actions')[1]))
     await fireEvent.click(await screen.findByRole('menuitem', { name: 'Branch' }))
@@ -1475,5 +1475,37 @@ describe('ChatPanel images', () => {
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Switch model' })[0]))
     await screen.findByRole('option', { name: /v1/ })
     expect(screen.queryByRole('option', { name: /m1/ })).toBeNull()
+  })
+
+  it('saves an image-only reply to a note together with its generated images', async () => {
+    const generated = [{ mime: 'image/png', url: 'data:image/png;base64,AAAA' }]
+    const conversation: Conversation = {
+      summary: { id: 'saved', title: 'Painting', scope: null, selectedTurnId: 'a', createdAt: 0, updatedAt: 0 },
+      turns: [
+        {
+          id: 'a',
+          parentId: null,
+          questionId: 'q',
+          supersedesId: null,
+          kind: 'reply',
+          ...model,
+          input: 'Draw a cat',
+          text: '',
+          status: 'completed',
+          errorCode: null,
+          reasoningEffort: 'default',
+          reasoningText: null,
+          images: [],
+          generated,
+        },
+      ],
+    }
+    const onSaveNote = vi.fn()
+    visionSetup({
+      props: { conversationId: 'saved', onSaveNote },
+      history: { get: () => Promise.resolve(conversation) },
+    })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Save to note' }))
+    expect(onSaveNote).toHaveBeenCalledWith('', generated)
   })
 })

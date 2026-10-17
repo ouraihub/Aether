@@ -33,6 +33,7 @@
     type SkillRef,
     type ModelOption,
     type ImagePart,
+    type ImageRef,
     type ReasoningEffort,
   } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
@@ -69,7 +70,7 @@
     onSkillsChange?: (refs: SkillRef[]) => void
     skillsBudget?: number
     onInsert?: (markdown: string) => void
-    onSaveNote?: (markdown: string) => Promise<void> | void
+    onSaveNote?: (markdown: string, images: ImageRef[]) => Promise<void> | void
     onExportMarkdown?: (markdown: string) => Promise<void> | void
     onOpenSettings?: () => void
     /** A failed restore stays visible until retried or explicitly replaced with a new conversation. */

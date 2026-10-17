@@ -6,7 +6,7 @@
   import { renderMarkdown } from '../markdown'
   import ApprovalCard from './ApprovalCard.svelte'
   import type { ChatTurn, ToolItem } from './run-session.svelte'
-  import type { ModelOption, ModelRef } from '../ports'
+  import type { ImageRef, ModelOption, ModelRef } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
   import ExternalLinkIcon from '@lucide/svelte/icons/external-link'
   import { onDestroy } from 'svelte'
@@ -68,12 +68,13 @@
     onTranslate?: (() => void) | undefined
     onDelete?: (() => void) | undefined
     onUseContext?: (() => void) | undefined
-    onSaveNote?: ((markdown: string) => Promise<void> | void) | undefined
+    onSaveNote?: ((markdown: string, images: ImageRef[]) => Promise<void> | void) | undefined
     onExportMarkdown?: ((markdown: string) => Promise<void> | void) | undefined
   } = $props()
   const { i18n, notify } = getKitContext()
   const { t } = i18n
   const html = $derived(renderMarkdown(turn.text))
+  const savable = $derived(turn.text !== '' || turn.generated.length > 0)
   function safeUrl(value: string): string | null {
     try {
       const protocol = new URL(value).protocol
@@ -113,7 +114,7 @@
 
   async function saveNote() {
     try {
-      await onSaveNote?.(turn.text)
+      await onSaveNote?.(turn.text, turn.generated)
     } catch {
       notify.toast('error', t('chat.saveNoteFailed'))
     }
@@ -210,7 +211,7 @@
         node.innerHTML = html
       }}
     ></div>
-    {#if turn.text !== '' || (onRetry && turn.status !== 'running') || onUseContext || onDelete}
+    {#if savable || (onRetry && turn.status !== 'running') || onUseContext || onDelete}
       <div class="message-actions">
         {#if turn.text !== ''}
           <Button
@@ -260,7 +261,7 @@
             disabled={busy || turn.status !== 'completed'}
             onclick={onUseContext}><ThumbsUpIcon class={chosen ? 'fill-primary text-primary' : ''} /></Button
           >{/if}
-        {#if onSaveNote && turn.text}<Button
+        {#if onSaveNote && savable}<Button
             variant="ghost"
             size="icon-xs"
             title={t('chat.saveNote')}
@@ -288,7 +289,7 @@
             <FileInputIcon />
           </Button>
         {/if}
-        {#if turn.text || onEdit || onBranch || onCopyConversation}
+        {#if savable || onEdit || onBranch || onCopyConversation}
           <DropdownMenu.Root>
             <DropdownMenu.Trigger>
               {#snippet child({ props })}<Button
@@ -315,13 +316,13 @@
                 <DropdownMenu.Separator />
               {/if}
               <DropdownMenu.Sub>
-                <DropdownMenu.SubTrigger disabled={!turn.text}><SaveIcon />{t('chat.save')}</DropdownMenu.SubTrigger>
+                <DropdownMenu.SubTrigger disabled={!savable}><SaveIcon />{t('chat.save')}</DropdownMenu.SubTrigger>
                 <DropdownMenu.SubContent>
                   <DropdownMenu.Item disabled={!turn.text} onSelect={() => void download()}
                     >{t('chat.saveFile')}</DropdownMenu.Item
                   >
                   {#if onSaveNote}<DropdownMenu.Item
-                      disabled={busy || turn.status === 'running' || !turn.text}
+                      disabled={busy || turn.status === 'running' || !savable}
                       onSelect={() => void saveNote()}>{t('chat.saveNote')}</DropdownMenu.Item
                     >{/if}
                 </DropdownMenu.SubContent>
