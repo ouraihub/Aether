@@ -45,6 +45,41 @@ pub struct Connection {
     pub native_web_search: bool,
     /// User-declared image input support (docs/19 §1).
     pub can_vision: bool,
+    /// Custom request headers of the endpoint, applied before system headers.
+    pub headers: Vec<(String, String)>,
+    /// Normalised image generation base URL; `None` = use `base_url`.
+    pub image_base_url: Option<String>,
+}
+
+/// Header names only the system sets; saves reject them (docs/11 §3).
+pub const RESERVED_HEADERS: [&str; 10] = [
+    "authorization",
+    "x-api-key",
+    "anthropic-version",
+    "host",
+    "content-type",
+    "content-length",
+    "accept",
+    "connection",
+    "transfer-encoding",
+    "cookie",
+];
+
+/// Adds custom `headers` to `builder`; call before setting system headers. Reserved
+/// names are skipped again here, so system headers can never be doubled or replaced.
+pub fn custom_headers(
+    mut builder: reqwest::RequestBuilder,
+    headers: &[(String, String)],
+) -> reqwest::RequestBuilder {
+    for (name, value) in headers {
+        if !RESERVED_HEADERS
+            .iter()
+            .any(|r| name.eq_ignore_ascii_case(r))
+        {
+            builder = builder.header(name, value);
+        }
+    }
+    builder
 }
 
 impl fmt::Debug for Connection {
@@ -60,6 +95,11 @@ impl fmt::Debug for Connection {
             .field("supports_tools", &self.supports_tools)
             .field("reasoning", &self.reasoning)
             .field("can_vision", &self.can_vision)
+            .field("headers", &self.headers.len())
+            .field(
+                "image_base_url",
+                &self.image_base_url.as_deref().map(crate::mask::mask_url),
+            )
             .finish()
     }
 }
@@ -81,10 +121,14 @@ mod tests {
             reasoning: None,
             native_web_search: false,
             can_vision: false,
+            headers: vec![("X-Trace".to_owned(), "secret-header".to_owned())],
+            image_base_url: None,
         };
         let printed = format!("{connection:?}");
         assert!(
-            !printed.contains("sk-live") && !printed.contains("leak-me"),
+            !printed.contains("sk-live")
+                && !printed.contains("leak-me")
+                && !printed.contains("secret-header"),
             "{printed}"
         );
         assert!(printed.contains("gpt-x"));

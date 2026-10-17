@@ -21,10 +21,11 @@
   import { Input } from '#lib/components/ui/input/index.js'
   import * as Select from '#lib/components/ui/select/index.js'
   import { getKitContext } from '../context'
-  import type { Model, Protocol, Provider } from '../ports'
+  import type { Model, Provider } from '../ports'
   import { cn } from '../utils'
   import { keyError, maskedText, probeUrl, validUrl, type EndpointDraft } from './draft'
   import ModelSettingsDialog from './ModelSettingsDialog.svelte'
+  import RequestConfigDialog from './RequestConfigDialog.svelte'
   import SecretInput from './SecretInput.svelte'
 
   type Outcome = { state: 'ok'; count: number } | { state: 'error'; message: string }
@@ -55,7 +56,6 @@
     onsync: () => void
   } = $props()
 
-  const PROTOCOLS: Protocol[] = ['openai-chat', 'openai-responses', 'anthropic-messages']
   const CAPS = ['vision', 'reasoning', 'tools', 'web'] as const
   type Cap = (typeof CAPS)[number]
   const CAP_STYLE: Record<Cap, string> = {
@@ -226,8 +226,8 @@
         variant="outline"
         size="icon"
         class="shrink-0"
-        title={t('providers.endpoint_settings')}
-        aria-label={t('providers.endpoint_settings')}
+        title={t('providers.request_config_tip')}
+        aria-label={t('providers.request_config_tip')}
         onclick={() => (settingsOpen = true)}><Settings2Icon /></Button
       >
     </div>
@@ -383,44 +383,7 @@
   onsave={(saved) => setModels(endpoint.models.map((model) => (model.id === saved.id ? saved : model)))}
 />
 
-<Dialog.Root bind:open={settingsOpen}>
-  <Dialog.Content class="sm:max-w-md">
-    <Dialog.Header>
-      <Dialog.Title>{t('providers.endpoint_settings')}</Dialog.Title>
-    </Dialog.Header>
-    <Field.Group>
-      <Field.Field>
-        <Field.Label for="kit-endpoint-protocol">{t('providers.protocol')}</Field.Label>
-        <Select.Root
-          type="single"
-          value={endpoint.protocol}
-          onValueChange={(value) => {
-            endpoint.protocol = value as Protocol
-            oncommit()
-          }}
-        >
-          <Select.Trigger id="kit-endpoint-protocol" class="w-full">{endpoint.protocol}</Select.Trigger>
-          <Select.Content>
-            <Select.Group>
-              {#each PROTOCOLS as protocol (protocol)}<Select.Item value={protocol} label={protocol} />{/each}
-            </Select.Group>
-          </Select.Content>
-        </Select.Root>
-      </Field.Field>
-    </Field.Group>
-    <Dialog.Footer class="sm:justify-between">
-      <Button
-        variant="ghost"
-        class="text-destructive"
-        onclick={() => {
-          settingsOpen = false
-          onremove()
-        }}>{t('providers.remove_endpoint')}</Button
-      >
-      <Button variant="outline" onclick={() => (settingsOpen = false)}>{t('common.confirm')}</Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
+<RequestConfigDialog bind:open={settingsOpen} bind:endpoint {onaddendpoint} {onremove} {oncommit} />
 
 <Dialog.Root bind:open={addOpen}>
   <Dialog.Content class="sm:max-w-md">

@@ -1,5 +1,7 @@
 //! Configuration DTOs (docs/11 §3). Requests reject unknown fields.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -131,6 +133,10 @@ pub struct Endpoint {
     pub probe_url: String,
     /// Selected models in display order.
     pub models: Vec<Model>,
+    /// Image generation base URL; `None` = use `base_url`.
+    pub image_base_url: Option<String>,
+    /// Custom request headers, applied before system headers.
+    pub headers: BTreeMap<String, String>,
 }
 
 /// A provider with its endpoints in display order.
@@ -165,6 +171,23 @@ pub struct EndpointSave {
     pub protocol: Protocol,
     /// Selected models in display order.
     pub models: Vec<ModelSave>,
+    /// Image generation base URL: empty/null = use `baseUrl`; absent = keep.
+    #[serde(default, deserialize_with = "present")]
+    #[ts(optional = nullable)]
+    pub image_base_url: Option<Option<String>>,
+    /// Custom request headers; absent = keep.
+    #[serde(default)]
+    #[ts(optional)]
+    pub headers: Option<BTreeMap<String, String>>,
+}
+
+/// Present field (even `null`) = `Some`, so `null` clears while absence keeps.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::deserialize(deserializer).map(Some)
 }
 
 /// Adds (no `id`) or patches (with `id`) one key of an endpoint; omitted fields keep.

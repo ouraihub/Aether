@@ -3,6 +3,7 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
+use aether_support::connection::custom_headers;
 use aether_support::error::upstream_excerpt;
 use aether_support::net::{self, AddressPolicy};
 use aether_support::{KitError, Protocol};
@@ -36,23 +37,29 @@ impl Store {
         target: ProbeTarget,
         cancel: &CancellationToken,
     ) -> Result<ProbeResult, KitError> {
-        let (base_url, protocol, keys) = match target {
-            ProbeTarget::Saved { endpoint_id } => self.endpoint(&endpoint_id)?,
-            // The address may be edited and unsaved while the keys stay stored (docs/11 §4).
+        let (base_url, protocol, keys, headers) = match target {
+            ProbeTarget::Saved { endpoint_id } => {
+                let row = self.endpoint(&endpoint_id)?;
+                (row.base_url, row.protocol, row.keys, row.headers)
+            }
+            // The address may be edited and unsaved while keys and headers stay stored (docs/11 §4).
             ProbeTarget::Draft {
                 base_url,
                 protocol,
                 endpoint_id,
                 key_id,
-            } => {
-                let keys = match (endpoint_id, key_id) {
-                    (Some(endpoint), Some(key)) => vec![self.endpoint_key(&endpoint, &key)?],
-                    (Some(endpoint), None) => self.endpoint(&endpoint)?.2,
-                    (None, Some(_)) => return Err(KitError::not_found("key")),
-                    (None, None) => Vec::new(),
-                };
-                (base_url, protocol, keys)
-            }
+            } => match (endpoint_id, key_id) {
+                (Some(endpoint), Some(key)) => {
+                    let keys = vec![self.endpoint_key(&endpoint, &key)?];
+                    (base_url, protocol, keys, self.endpoint_headers(&endpoint)?)
+                }
+                (Some(endpoint), None) => {
+                    let row = self.endpoint(&endpoint)?;
+                    (base_url, protocol, row.keys, row.headers)
+                }
+                (None, Some(_)) => return Err(KitError::not_found("key")),
+                (None, None) => (base_url, protocol, Vec::new(), Vec::new()),
+            },
         };
         let probe_url = format!("{}/models", api_base(&base_url));
         let known: Vec<&str> = keys.iter().map(|key| key.as_str()).collect();
@@ -66,6 +73,7 @@ impl Store {
                     protocol,
                     keys.get(attempt),
                     &known,
+                    &headers,
                 ))
                 .await
                 .ok_or_else(KitError::cancelled)??;
@@ -92,6 +100,7 @@ async fn fetch(
     protocol: Protocol,
     key: Option<&Zeroizing<String>>,
     known: &[&str],
+    headers: &[(String, String)],
 ) -> Result<Outcome, KitError> {
     let policy = AddressPolicy::default();
     let url = match net::check_url(probe_url, &policy) {
@@ -108,9 +117,10 @@ async fn fetch(
         return Ok(Err(failure(ProbeErrorKind::MissingKey)));
     }
 
-    let mut request = net::client(policy, CONNECT_TIMEOUT)?
+    let request = net::client(policy, CONNECT_TIMEOUT)?
         .get(url)
         .timeout(TOTAL_TIMEOUT);
+    let mut request = custom_headers(request, headers);
     if protocol == Protocol::AnthropicMessages {
         request = request.header("anthropic-version", "2023-06-01");
     }

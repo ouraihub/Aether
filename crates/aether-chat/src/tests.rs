@@ -193,6 +193,8 @@ fn input(protocol: Protocol, base_url: String) -> RunInput {
         reasoning: None,
         native_web_search: false,
         can_vision: true,
+        headers: Vec::new(),
+        image_base_url: None,
     };
     RunInput {
         run_id: "r1".to_owned(),
@@ -264,6 +266,28 @@ async fn native_search_keeps_citations_and_does_not_execute_server_calls_locally
 
 fn request_body(raw: &str) -> serde_json::Value {
     serde_json::from_str(raw.split("\r\n\r\n").nth(1).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn custom_headers_are_sent_and_never_replace_auth() {
+    for protocol in PROTOCOLS {
+        let (base, seen) = upstream(sse(fixture(protocol, "text"))).await;
+        let mut req = input(protocol, base);
+        req.connection.headers = vec![
+            ("X-Relay-Tag".to_owned(), "team-a".to_owned()),
+            // Rejected at save; skipped here too so the key always wins.
+            ("Authorization".to_owned(), "Bearer forged".to_owned()),
+        ];
+        let (summary, _) = run(&runner(5_000, 5_000), req, false).await;
+        assert_eq!(summary.status, EndStatus::Completed);
+        let raw = seen.lock().await[0].to_ascii_lowercase();
+        assert!(raw.contains("x-relay-tag: team-a"), "{raw}");
+        assert!(raw.contains(&format!(
+            "authorization: bearer {}",
+            KEY.to_ascii_lowercase()
+        )));
+        assert!(!raw.contains("forged"), "{raw}");
+    }
 }
 
 #[tokio::test]

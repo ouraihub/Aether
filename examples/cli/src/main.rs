@@ -110,6 +110,8 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
                 reasoning: None,
                 native_web_search: false,
             }],
+            image_base_url: None,
+            headers: None,
         }],
     })?;
     let endpoint = saved

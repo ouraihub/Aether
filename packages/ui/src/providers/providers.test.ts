@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from '../i18n'
 import { createFakePorts, type Endpoint, type Provider, type ProviderSave } from '../ports'
-import { adopt, primaryKey, savable, toDraft } from './draft'
+import { adopt, checkHeaders, newEndpoint, primaryKey, savable, toDraft } from './draft'
 import Harness from './Harness.test.svelte'
 
 const endpoint: Endpoint = {
@@ -12,6 +12,8 @@ const endpoint: Endpoint = {
   protocol: 'openai-chat',
   keys: [{ id: 'k1', label: '', enabled: true, masked: 'sk-a****wxyz', readable: true }],
   probeUrl: 'http://127.0.0.1:9/v1/models',
+  imageBaseUrl: null,
+  headers: { 'X-Team': 'a' },
   models: [],
 }
 const stored: Provider = { id: 'p1', name: 'Local', enabled: true, endpoints: [endpoint] }
@@ -164,12 +166,76 @@ describe('ProvidersSettings', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(save).toHaveBeenCalledTimes(2)
   })
+
+  async function openConfig() {
+    await fireEvent.click(await screen.findByRole('button', { name: 'Configure API URL and custom headers' }))
+    return within(await screen.findByRole('dialog', { name: 'Request configuration' }))
+  }
+
+  it('discards request config edits on cancel', async () => {
+    const { saves } = setup()
+    let dialog = await openConfig()
+    await fireEvent.input(dialog.getByRole('textbox', { name: 'Image generation base URL' }), {
+      target: { value: 'https://img.example.com' },
+    })
+    await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(saves).toHaveLength(0)
+    dialog = await openConfig()
+    expect((dialog.getByRole('textbox', { name: 'Image generation base URL' }) as HTMLInputElement).value).toBe('')
+  })
+
+  it('saves image base URL and headers with the provider', async () => {
+    const { saves } = setup()
+    const dialog = await openConfig()
+    await fireEvent.input(dialog.getByRole('textbox', { name: 'Image generation base URL' }), {
+      target: { value: ' https://img.example.com ' },
+    })
+    await fireEvent.click(dialog.getByRole('button', { name: 'Add header' }))
+    const [, name = document.body] = dialog.getAllByRole('textbox', { name: 'Header name' })
+    const [, value = document.body] = dialog.getAllByRole('textbox', { name: 'Header value' })
+    await fireEvent.input(name, { target: { value: 'X-Trace' } })
+    await fireEvent.input(value, { target: { value: '1' } })
+    await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0]?.endpoints[0]).toMatchObject({
+      id: 'e1',
+      imageBaseUrl: 'https://img.example.com',
+      headers: { 'X-Team': 'a', 'X-Trace': '1' },
+    })
+  })
+
+  it('blocks a reserved header with a message', async () => {
+    const { saves } = setup()
+    const dialog = await openConfig()
+    await fireEvent.input(dialog.getByRole('textbox', { name: 'Header name' }), { target: { value: 'Authorization' } })
+    await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    expect(dialog.getByRole('alert').textContent).toContain('Authorization is set by the system')
+    expect(saves).toHaveLength(0)
+  })
+
+  it('round-trips header rows through JSON and blocks invalid JSON', async () => {
+    const { saves } = setup()
+    const dialog = await openConfig()
+    await fireEvent.click(dialog.getByRole('button', { name: 'Switch to JSON editing' }))
+    const text = dialog.getByRole('textbox', { name: 'Custom headers' }) as HTMLTextAreaElement
+    expect(JSON.parse(text.value)).toEqual({ 'X-Team': 'a' })
+    await fireEvent.input(text, { target: { value: '{"X-Team":"b","X-New":"c"}' } })
+    await fireEvent.click(dialog.getByRole('button', { name: 'Switch to key-value list' }))
+    const names = dialog.getAllByRole('textbox', { name: 'Header name' }) as HTMLInputElement[]
+    expect(names.map((input) => input.value)).toEqual(['X-Team', 'X-New'])
+    await fireEvent.click(dialog.getByRole('button', { name: 'Switch to JSON editing' }))
+    await fireEvent.input(dialog.getByRole('textbox', { name: 'Custom headers' }), { target: { value: '[1' } })
+    await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    expect(dialog.getByRole('alert').textContent).toBe('Invalid JSON')
+    expect(saves).toHaveLength(0)
+  })
 })
 
 describe('draft helpers', () => {
   it('keeps endpoints without an address, drops malformed new ones and adopts stored ids by slug', () => {
     const draft = toDraft(stored)
-    const added = { saved: null, slug: 'ep-2', baseUrl: '', protocol: 'openai-chat' as const, models: [] }
+    const added = { ...newEndpoint(draft.endpoints), slug: 'ep-2' }
     draft.endpoints.push(added)
     expect(savable(draft).endpoints.map((e) => e.slug)).toEqual(['main', 'ep-2'])
     added.baseUrl = 'nope'
@@ -188,5 +254,27 @@ describe('draft helpers', () => {
     expect(primaryKey([k1, k2])?.id).toBe('k2')
     expect(primaryKey([k1])?.id).toBe('k1')
     expect(primaryKey([])).toBeNull()
+  })
+
+  it('mirrors the backend header rules', () => {
+    expect(
+      checkHeaders([
+        { name: ' X-A ', value: '1' },
+        { name: '', value: '' },
+      ]),
+    ).toEqual({ headers: { 'X-A': '1' } })
+    expect(checkHeaders([{ name: 'x-api-key', value: 'k' }])).toEqual({
+      error: { key: 'headers_reserved', name: 'x-api-key' },
+    })
+    expect(
+      checkHeaders([
+        { name: 'X-A', value: '1' },
+        { name: 'x-a', value: '2' },
+      ]),
+    ).toEqual({ error: { key: 'headers_invalid' } })
+    expect(checkHeaders([{ name: 'bad name', value: '1' }])).toEqual({ error: { key: 'headers_invalid' } })
+    expect(checkHeaders([{ name: 'X-A', value: 'a\nb' }])).toEqual({ error: { key: 'headers_invalid' } })
+    const many = Array.from({ length: 21 }, (_, i) => ({ name: `X-${i}`, value: '' }))
+    expect(checkHeaders(many)).toEqual({ error: { key: 'headers_too_many' } })
   })
 })

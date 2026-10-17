@@ -375,3 +375,30 @@ async fn saved_and_draft_targets_send_the_stored_key() {
     assert!(openai.contains(&format!("authorization: bearer {}", KEY.to_lowercase())));
     assert!(!openai.contains("x-api-key"));
 }
+
+#[tokio::test]
+async fn saved_and_draft_targets_send_the_stored_custom_headers() {
+    let (_dir, store) = store();
+    let (base, seen) = upstream(http("200 OK", r#"["m"]"#)).await;
+    let saved = store
+        .save(
+            serde_json::from_value(serde_json::json!({ "name": "Acme", "endpoints": [{
+                "slug": "main", "baseUrl": base, "protocol": "openai-chat", "models": [],
+                "headers": { "X-Relay-Tag": "team-a" } }] }))
+            .unwrap(),
+        )
+        .unwrap();
+    let endpoint_id = saved[0].endpoints[0].id.clone();
+    let saved_target = ProbeTarget::Saved {
+        endpoint_id: endpoint_id.clone(),
+    };
+    assert_eq!(ids(&probe(&store, saved_target).await), ["m"]);
+    let reuse = draft(&base, Protocol::OpenaiChat, Some(&endpoint_id));
+    assert_eq!(ids(&probe(&store, reuse).await), ["m"]);
+    let fresh = draft(&base, Protocol::OpenaiChat, None);
+    assert_eq!(ids(&probe(&store, fresh).await), ["m"]);
+    let seen = seen.lock().await;
+    assert!(seen[0].contains("x-relay-tag: team-a"), "{}", seen[0]);
+    assert!(seen[1].contains("x-relay-tag: team-a"), "{}", seen[1]);
+    assert!(!seen[2].contains("x-relay-tag"), "{}", seen[2]);
+}

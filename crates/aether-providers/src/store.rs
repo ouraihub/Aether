@@ -1,10 +1,11 @@
 //! `providers.db`: whole-provider save, per-endpoint keys and connection snapshots (docs/11 §2–§4, docs/34).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use aether_support::connection::RESERVED_HEADERS;
 use aether_support::db::{self, Migration};
 use aether_support::id::new_id;
 use aether_support::mask::mask_secret;
@@ -58,9 +59,18 @@ const MAX_BASE_URL: usize = 2048;
 const MAX_KEYS: i64 = 16;
 const MAX_LABEL_CHARS: usize = 40;
 const MAX_KEY_BYTES: usize = 4096;
+const MAX_HEADERS: usize = 20;
+const MAX_HEADER_VALUE_CHARS: usize = 2048;
 
-/// Stored base URL, protocol and rotated plaintext keys of one endpoint.
-pub(crate) type EndpointRow = (String, Protocol, Vec<Zeroizing<String>>);
+/// One stored endpoint as requests need it: the stored (not normalised) base URL,
+/// protocol, rotated plaintext keys, custom headers and normalised image base URL.
+pub(crate) struct EndpointRow {
+    pub(crate) base_url: String,
+    pub(crate) protocol: Protocol,
+    pub(crate) keys: Vec<Zeroizing<String>>,
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) image_base_url: Option<String>,
+}
 
 /// Provider configuration stored in `<root>/providers.db`.
 pub struct Store {
@@ -113,6 +123,11 @@ CREATE TABLE endpoint_keys (
   key_ciphertext BLOB NOT NULL, position INTEGER NOT NULL
 );
 CREATE INDEX idx_endpoint_keys ON endpoint_keys(endpoint_id, position, id);",
+            },
+            Migration {
+                version: 6,
+                sql: "ALTER TABLE endpoints ADD COLUMN image_base_url TEXT;
+ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
             },
         ];
         let db = db::open(&path, &steps)?;
@@ -440,16 +455,13 @@ CREATE INDEX idx_endpoint_keys ON endpoint_keys(endpoint_id, position, id);",
     pub fn resolve(&self, model: &ModelRef) -> Result<Connection, KitError> {
         let db = self.lock()?;
         let row = db.query_row(
-            "SELECT e.base_url, e.protocol, m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, m.can_vision
+            "SELECT m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, m.can_vision
              FROM models m JOIN endpoints e ON e.id = m.endpoint_id JOIN providers p ON p.id = e.provider_id
              WHERE m.endpoint_id = ?1 AND m.model_id = ?2 AND p.enabled = 1",
             params![model.endpoint_id, model.model_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?, row.get::<_, Option<u32>>(3)?, row.get::<_, Option<u32>>(4)?, row.get::<_, Option<bool>>(5)?, row.get::<_, Option<String>>(6)?, row.get::<_, bool>(7)?, row.get::<_, bool>(8)?)),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<u32>>(1)?, row.get::<_, Option<u32>>(2)?, row.get::<_, Option<bool>>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, bool>(5)?, row.get::<_, bool>(6)?)),
         ).optional()?;
         let (
-            base_url,
-            protocol,
             model_type,
             context_window,
             max_output,
@@ -458,11 +470,11 @@ CREATE INDEX idx_endpoint_keys ON endpoint_keys(endpoint_id, position, id);",
             native_web_search,
             can_vision,
         ) = row.ok_or_else(|| KitError::not_found("model"))?;
-        if base_url.trim().is_empty() {
+        let row = self.endpoint_row(&db, &model.endpoint_id)?;
+        if row.base_url.trim().is_empty() {
             return Err(KitError::needs_config("missing_url"));
         }
-        let api_keys = self.keys(&db, &model.endpoint_id)?;
-        let protocol = parse_protocol(&protocol)?;
+        let protocol = row.protocol;
         let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
         let reasoning = reasoning
             .as_deref()
@@ -475,9 +487,9 @@ CREATE INDEX idx_endpoint_keys ON endpoint_keys(endpoint_id, position, id);",
                     .flatten()
             });
         Ok(Connection {
-            base_url: api_base(&base_url),
+            base_url: api_base(&row.base_url),
             protocol,
-            api_keys,
+            api_keys: row.keys,
             model_id: Some(model.model_id.clone()),
             endpoint_id: Some(model.endpoint_id.clone()),
             context_window,
@@ -486,6 +498,8 @@ CREATE INDEX idx_endpoint_keys ON endpoint_keys(endpoint_id, position, id);",
             reasoning,
             native_web_search,
             can_vision,
+            headers: row.headers,
+            image_base_url: row.image_base_url,
         })
     }
 
@@ -493,11 +507,11 @@ CREATE INDEX idx_endpoint_keys ON endpoint_keys(endpoint_id, position, id);",
     /// # Errors
     /// Reports missing endpoints, unreadable credentials or storage failures.
     pub fn endpoint_connection(&self, endpoint_id: &str) -> Result<Connection, KitError> {
-        let (base_url, protocol, api_keys) = self.endpoint(endpoint_id)?;
+        let row = self.endpoint(endpoint_id)?;
         Ok(Connection {
-            base_url: api_base(&base_url),
-            protocol,
-            api_keys,
+            base_url: api_base(&row.base_url),
+            protocol: row.protocol,
+            api_keys: row.keys,
             model_id: None,
             endpoint_id: Some(endpoint_id.to_owned()),
             context_window: None,
@@ -506,22 +520,57 @@ CREATE INDEX idx_endpoint_keys ON endpoint_keys(endpoint_id, position, id);",
             reasoning: None,
             native_web_search: false,
             can_vision: false,
+            headers: row.headers,
+            image_base_url: row.image_base_url,
         })
     }
 
-    /// The stored (not normalised) base URL, protocol and rotated keys of one endpoint.
+    /// One stored endpoint with its rotated keys.
     pub(crate) fn endpoint(&self, endpoint_id: &str) -> Result<EndpointRow, KitError> {
-        let db = self.lock()?;
+        self.endpoint_row(&*self.lock()?, endpoint_id)
+    }
+
+    /// Custom headers of one endpoint, without touching its keys.
+    pub(crate) fn endpoint_headers(
+        &self,
+        endpoint_id: &str,
+    ) -> Result<Vec<(String, String)>, KitError> {
+        let json: String = self
+            .lock()?
+            .query_row(
+                "SELECT headers FROM endpoints WHERE id = ?1",
+                [endpoint_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| KitError::not_found("endpoint"))?;
+        Ok(parse_headers(&json)?.into_iter().collect())
+    }
+
+    fn endpoint_row(&self, db: &Db, endpoint_id: &str) -> Result<EndpointRow, KitError> {
         let row = db
             .query_row(
-                "SELECT base_url, protocol FROM endpoints WHERE id = ?1",
+                "SELECT base_url, protocol, headers, image_base_url FROM endpoints WHERE id = ?1",
                 [endpoint_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
             )
             .optional()?;
-        let (base_url, protocol) = row.ok_or_else(|| KitError::not_found("endpoint"))?;
-        let keys = self.keys(&db, endpoint_id)?;
-        Ok((base_url, parse_protocol(&protocol)?, keys))
+        let (base_url, protocol, headers, image_base_url) =
+            row.ok_or_else(|| KitError::not_found("endpoint"))?;
+        Ok(EndpointRow {
+            protocol: parse_protocol(&protocol)?,
+            keys: self.keys(db, endpoint_id)?,
+            headers: parse_headers(&headers)?.into_iter().collect(),
+            image_base_url: image_base_url.as_deref().map(api_base),
+            base_url,
+        })
     }
 
     /// One stored key of `endpoint_id`, for a probe of that key alone.
@@ -607,6 +656,18 @@ fn validate(input: &ProviderSave) -> Result<(), KitError> {
         if !(url.is_empty() || url.starts_with("http://") || url.starts_with("https://")) {
             return Err(KitError::bad_request("baseUrl", "invalid_url"));
         }
+        if let Some(Some(image)) = &endpoint.image_base_url {
+            let image = image.trim();
+            if !image.is_empty()
+                && (image.len() > MAX_BASE_URL
+                    || !(image.starts_with("http://") || image.starts_with("https://")))
+            {
+                return Err(KitError::bad_request("imageBaseUrl", "invalid_url"));
+            }
+        }
+        if let Some(headers) = &endpoint.headers {
+            validate_headers(headers)?;
+        }
         if endpoint.models.len() > MAX_MODELS {
             return Err(too_long("models", MAX_MODELS));
         }
@@ -643,6 +704,31 @@ fn too_long(field: &str, limit: usize) -> KitError {
         .with_limit(u64::try_from(limit).unwrap_or(u64::MAX))
 }
 
+fn validate_headers(headers: &BTreeMap<String, String>) -> Result<(), KitError> {
+    if headers.len() > MAX_HEADERS {
+        return Err(KitError::bad_request("headers", "too_many"));
+    }
+    let mut names = HashSet::new();
+    for (name, value) in headers {
+        let name = name.trim().to_ascii_lowercase();
+        let token = (1..=100).contains(&name.len())
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+.^_`|~-".contains(&b));
+        if !token
+            || !names.insert(name.clone())
+            || value.chars().count() > MAX_HEADER_VALUE_CHARS
+            || value.contains(['\r', '\n'])
+        {
+            return Err(KitError::bad_request("headers", "invalid"));
+        }
+        if RESERVED_HEADERS.contains(&name.as_str()) {
+            return Err(KitError::bad_request("headers", "reserved"));
+        }
+    }
+    Ok(())
+}
+
 fn write_endpoint(
     tx: &Db,
     provider_id: &str,
@@ -652,12 +738,39 @@ fn write_endpoint(
     let position = i64::try_from(position).unwrap_or(i64::MAX);
     let base_url = endpoint.base_url.trim();
     let protocol = protocol_str(endpoint.protocol);
+    // `None` = keep the stored value (new endpoints: null / `{}`).
+    let image = endpoint.image_base_url.as_ref().map(|image| {
+        image
+            .as_deref()
+            .map(str::trim)
+            .filter(|image| !image.is_empty())
+    });
+    let headers = endpoint
+        .headers
+        .as_ref()
+        .map(|headers| {
+            let trimmed: BTreeMap<&str, &str> = headers
+                .iter()
+                .map(|(name, value)| (name.trim(), value.as_str()))
+                .collect();
+            serde_json::to_string(&trimmed)
+        })
+        .transpose()
+        .map_err(KitError::internal)?;
     let id = if let Some(id) = &endpoint.id {
-        tx.execute("UPDATE endpoints SET slug = ?2, base_url = ?3, protocol = ?4, position = ?5 WHERE id = ?1", params![id, endpoint.slug, base_url, protocol, position])?;
+        tx.execute(
+            "UPDATE endpoints SET slug = ?2, base_url = ?3, protocol = ?4, position = ?5,
+             image_base_url = CASE WHEN ?6 THEN ?7 ELSE image_base_url END, headers = COALESCE(?8, headers) WHERE id = ?1",
+            params![id, endpoint.slug, base_url, protocol, position, image.is_some(), image.flatten(), headers],
+        )?;
         id.clone()
     } else {
         let id = new_id()?;
-        tx.execute("INSERT INTO endpoints (id, provider_id, slug, base_url, protocol, position) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![id, provider_id, endpoint.slug, base_url, protocol, position])?;
+        tx.execute(
+            "INSERT INTO endpoints (id, provider_id, slug, base_url, protocol, position, image_base_url, headers)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(?8, '{}'))",
+            params![id, provider_id, endpoint.slug, base_url, protocol, position, image.flatten(), headers],
+        )?;
         id
     };
     let old: HashMap<String, Option<String>> = tx
@@ -738,7 +851,7 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
         });
     }
     let mut endpoints: HashMap<String, Vec<Endpoint>> = HashMap::new();
-    let mut stmt = db.prepare_cached("SELECT provider_id, id, slug, base_url, protocol FROM endpoints ORDER BY provider_id, position")?;
+    let mut stmt = db.prepare_cached("SELECT provider_id, id, slug, base_url, protocol, image_base_url, headers FROM endpoints ORDER BY provider_id, position")?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(1)?;
@@ -750,6 +863,8 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
             keys: keys.remove(&id).unwrap_or_default(),
             probe_url: format!("{}/models", api_base(&base_url)),
             models: models.remove(&id).unwrap_or_default(),
+            image_base_url: row.get(5)?,
+            headers: parse_headers(&row.get::<_, String>(6)?)?,
             base_url,
             id,
         });
@@ -774,6 +889,10 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
             name,
         })
         .collect())
+}
+
+fn parse_headers(json: &str) -> Result<BTreeMap<String, String>, KitError> {
+    serde_json::from_str(json).map_err(|_| corrupt("headers"))
 }
 
 /// Ciphertexts of `endpoint_keys` rows matching `filter`, to `forget` after they are deleted.
@@ -996,7 +1115,7 @@ mod tests {
                 assert_eq!(
                     db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                         .unwrap(),
-                    5
+                    6
                 );
             }
             assert!(path.with_file_name("providers.db.bak-v2").is_file());
@@ -1457,5 +1576,163 @@ mod tests {
         assert!(store.list().unwrap().is_empty());
         let unknown = json!({ "name": "P", "endpoints": [], "roles": [] });
         assert!(serde_json::from_value::<ProviderSave>(unknown).is_err());
+    }
+
+    #[test]
+    fn version_five_db_upgrades_to_six_with_empty_request_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(dir.path().join("providers.db")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE providers (id TEXT PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+             CREATE TABLE endpoints (id TEXT PRIMARY KEY, provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE, slug TEXT NOT NULL, base_url TEXT NOT NULL, protocol TEXT NOT NULL, position INTEGER NOT NULL, UNIQUE(provider_id, slug));
+             CREATE TABLE models (endpoint_id TEXT NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE, model_id TEXT NOT NULL, model_type TEXT NOT NULL, type_source TEXT NOT NULL, context_window INTEGER, max_output INTEGER, can_vision INTEGER NOT NULL DEFAULT 0, supports_tools INTEGER, position INTEGER NOT NULL, reasoning TEXT, native_web_search INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(endpoint_id, model_id));
+             CREATE TABLE endpoint_keys (id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE, label TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1, key_ciphertext BLOB NOT NULL, position INTEGER NOT NULL);
+             INSERT INTO providers VALUES ('p', 'Saved', 0, 1, 1, 1);
+             INSERT INTO endpoints VALUES ('e', 'p', 'saved', 'https://example.com', 'openai-chat', 0);
+             PRAGMA user_version = 5;",
+        )
+        .unwrap();
+        drop(db);
+        let store = Store::open(dir.path()).unwrap();
+        let endpoint = &store.list().unwrap()[0].endpoints[0];
+        assert_eq!(endpoint.image_base_url, None);
+        assert!(endpoint.headers.is_empty());
+        let connection = store.endpoint_connection("e").unwrap();
+        assert!(connection.headers.is_empty() && connection.image_base_url.is_none());
+        let version: u32 = store
+            .lock()
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 6);
+    }
+
+    #[test]
+    fn request_config_round_trips_and_omitted_fields_keep() {
+        let (_dir, store) = store();
+        let mut first = endpoint(None, "a", &["m1"]);
+        first["imageBaseUrl"] = json!("  https://img.example.com/  ");
+        first["headers"] = json!({ " X-Relay-Tag ": "team-a", "X-Two": "2" });
+        let saved = store
+            .save(request(json!({ "name": "P", "endpoints": [first] })))
+            .unwrap();
+        let (provider, ep) = (saved[0].id.clone(), saved[0].endpoints[0].id.clone());
+        let expected = BTreeMap::from([
+            ("X-Relay-Tag".to_owned(), "team-a".to_owned()),
+            ("X-Two".to_owned(), "2".to_owned()),
+        ]);
+        let check = |store: &Store| {
+            let listed = &store.list().unwrap()[0].endpoints[0];
+            assert_eq!(
+                listed.image_base_url.as_deref(),
+                Some("https://img.example.com/")
+            );
+            assert_eq!(listed.headers, expected);
+            let resolved = store
+                .resolve(&ModelRef {
+                    endpoint_id: ep.clone(),
+                    model_id: "m1".to_owned(),
+                })
+                .unwrap();
+            assert_eq!(
+                resolved.image_base_url.as_deref(),
+                Some("https://img.example.com/v1")
+            );
+            assert_eq!(resolved.headers.len(), 2);
+        };
+        check(&store);
+        // Omitted = keep.
+        let kept = endpoint(Some(&ep), "a", &["m1"]);
+        store
+            .save(request(
+                json!({ "id": provider, "name": "P", "endpoints": [kept] }),
+            ))
+            .unwrap();
+        check(&store);
+        // null / "" and {} clear.
+        for image in [json!(null), json!("  ")] {
+            let mut cleared = endpoint(Some(&ep), "a", &["m1"]);
+            cleared["imageBaseUrl"] = image;
+            cleared["headers"] = json!({});
+            let listed = store
+                .save(request(
+                    json!({ "id": provider, "name": "P", "endpoints": [cleared] }),
+                ))
+                .unwrap();
+            assert_eq!(listed[0].endpoints[0].image_base_url, None);
+            assert!(listed[0].endpoints[0].headers.is_empty());
+        }
+    }
+
+    #[test]
+    fn invalid_request_config_is_rejected() {
+        let (_dir, store) = store();
+        let many: serde_json::Map<String, Value> =
+            (0..21).map(|i| (format!("x-{i}"), json!("v"))).collect();
+        let cases = [
+            (
+                json!({ "imageBaseUrl": "ftp://x" }),
+                "imageBaseUrl",
+                "invalid_url",
+            ),
+            (
+                json!({ "imageBaseUrl": format!("https://{}", "a".repeat(2048)) }),
+                "imageBaseUrl",
+                "invalid_url",
+            ),
+            (json!({ "headers": many }), "headers", "too_many"),
+            (
+                json!({ "headers": { "bad name": "v" } }),
+                "headers",
+                "invalid",
+            ),
+            (json!({ "headers": { " ": "v" } }), "headers", "invalid"),
+            (
+                json!({ "headers": { "X-A": "a\r\nb" } }),
+                "headers",
+                "invalid",
+            ),
+            (
+                json!({ "headers": { "X-A": "v".repeat(2049) } }),
+                "headers",
+                "invalid",
+            ),
+            (
+                json!({ "headers": { "X-A": "1", "x-a": "2" } }),
+                "headers",
+                "invalid",
+            ),
+            (
+                json!({ "headers": { "Authorization": "Bearer x" } }),
+                "headers",
+                "reserved",
+            ),
+            (
+                json!({ "headers": { "X-API-Key": "x" } }),
+                "headers",
+                "reserved",
+            ),
+            (
+                json!({ "headers": { "cookie": "x" } }),
+                "headers",
+                "reserved",
+            ),
+        ];
+        for (extra, field, why) in cases {
+            let mut value = endpoint(None, "a", &[]);
+            for (k, v) in extra.as_object().unwrap() {
+                value[k] = v.clone();
+            }
+            let error = store
+                .save(request(json!({ "name": "P", "endpoints": [value] })))
+                .err()
+                .unwrap();
+            assert_eq!(
+                reason(&error),
+                (KitErrorCode::BadRequest, Some(field), Some(why)),
+                "{extra}"
+            );
+        }
+        assert!(store.list().unwrap().is_empty());
     }
 }

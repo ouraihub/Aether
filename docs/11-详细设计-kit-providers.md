@@ -9,7 +9,7 @@
 - 不管：**角色与回落**（"对话用哪个模型""写作没配就用对话模型"是应用策略，由 `KitHost::select_model` 决定，应用自己存偏好）；发起对话；生成第三方 CLI 配置。
 - 协议：`anthropic-messages`、`openai-chat`、`openai-responses`。其他协议名（如某 CLI 的 `openai-completions`）是应用写配置时的映射，不进枚举。
 - 思考能力由 `infer_reasoning(model_id, protocol, max_output)` 在探测、列表、model_options、resolve一致推断；已有null自动生效、不写库迁移，非空手工声明优先。当前保守支持Claude预算/adaptive与OpenAI o系列/GPT5族，协议不兼容或未知模型保持未知；实际强度只在聊天时调整。Cherry的registry补能力是交互依据，不移植整套目录。
-- 不做：代理、自定义请求头、每线路超时、预置服务商、用量统计、无差别重试。
+- 不做：代理、每线路超时、预置服务商、用量统计、无差别重试。
 
 ## 2. 数据模型（`providers.db`，migration 1）
 
@@ -51,6 +51,17 @@ CREATE TABLE endpoint_keys (
 CREATE INDEX idx_endpoint_keys ON endpoint_keys(endpoint_id, position, id);
 ```
 
+migration 6（请求配置，docs/36 of AutoNote）：
+
+```sql
+ALTER TABLE endpoints ADD COLUMN image_base_url TEXT;               -- 绘图 /images/generations 地址；NULL = 用 base_url
+ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}'; -- 自定义请求头 JSON 对象
+```
+
+- `imageBaseUrl`：trim，空 → null；非空须 `http(s)://` 且 ≤ 2048 字节，否则 `bad_request{imageBaseUrl, invalid_url}`；运行时同样经 `api_base`。
+- `headers`：≤ 20 个（`too_many`）；名称 trim 后为 HTTP token 1~100 字符、大小写不敏感去重，值 ≤ 2048 字符且无 `\r\n`（`invalid`）；保留名 `authorization`、`x-api-key`、`anthropic-version`、`host`、`content-type`、`content-length`、`accept`、`connection`、`transfer-encoding`、`cookie`（`reserved`）。字段均为 `bad_request{headers, …}`。
+- 运行时（聊天每轮、绘图、探测 saved / 带 `endpointId` 的 draft）先加自定义头、后加系统头，`custom_headers` 再次跳过保留名，鉴权头不可能被覆盖；`Connection` 的 `Debug` 只打印请求头个数。
+
 - 上限：服务商名 1~80 字符；每服务商 ≤ 20 条线路；每线路 ≤ 1000 个模型、≤ 16 个密钥；`slug` 1~40 个 `[a-z0-9-]`；`base_url` 为空或 `http(s)://` 且 ≤ 2048；密钥 ≤ 4096 字节；标签 ≤ 40 字符。
 - 没有 `roles` 表。应用若要"记住对话默认模型"，自己存一个 `ModelRef`；模型被删后 `resolve` 返回 `not_found`，由应用提示重新选择。
 
@@ -62,9 +73,9 @@ type ModelType = 'chat' | 'image' | 'video' | 'tts' | 'stt' | 'embedding' | 'rer
 interface Model { id: string; modelType: ModelType; typeSource: 'inferred' | 'user'; contextWindow: number | null;
   maxOutput: number | null; canVision: boolean; supportsTools: boolean | null; reasoning: ReasoningConfig | null; nativeWebSearch: boolean }
 interface EndpointKey { id: string; label: string; enabled: boolean; masked: string | null; readable: boolean }
-interface Endpoint { id: string; slug: string; baseUrl: string; protocol: Protocol; keys: EndpointKey[]; probeUrl: string; models: Model[] }
+interface Endpoint { id: string; slug: string; baseUrl: string; protocol: Protocol; keys: EndpointKey[]; probeUrl: string; models: Model[]; imageBaseUrl: string | null; headers: Record<string, string> }
 interface Provider { id: string; name: string; enabled: boolean /* 关闭 = 模型不出现在选择器且不能运行 */; endpoints: Endpoint[] }
-interface EndpointSave { id?: string; slug: string; baseUrl: string /* 可为 '' */; protocol: Protocol; models: Model[] }
+interface EndpointSave { id?: string; slug: string; baseUrl: string /* 可为 '' */; protocol: Protocol; models: Model[]; imageBaseUrl?: string | null; headers?: Record<string, string> /* 省略 = 保持；null/'' 清空 */ }
 interface EndpointKeySave { endpointId: string; id?: string /* 缺省 = 新增 */; key?: string; label?: string; enabled?: boolean }
 interface ProviderSave { id?: string; name: string; enabled?: boolean /* 缺省 = 保持；新建默认 true */; endpoints: EndpointSave[] }
 interface ModelRef { endpointId: string; modelId: string }

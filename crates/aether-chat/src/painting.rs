@@ -59,7 +59,11 @@ pub async fn generate_image(
     let url = net::check_url(
         &format!(
             "{}/images/generations",
-            painting.base_url.trim_end_matches('/')
+            painting
+                .image_base_url
+                .as_deref()
+                .unwrap_or(&painting.base_url)
+                .trim_end_matches('/')
         ),
         policy,
     )?;
@@ -69,8 +73,9 @@ pub async fn generate_image(
     let mut attempt = 0;
     // Same key failover as a chat round (docs/34 §3.4).
     let (status, body) = loop {
-        let mut request = client
-            .post(url.clone())
+        let request =
+            aether_support::connection::custom_headers(client.post(url.clone()), &painting.headers);
+        let mut request = request
             .timeout(TIMEOUT)
             // No `response_format`: gpt-image-* rejects it (always b64); others may answer `url`, handled below.
             .json(&json!({ "model": painting.model_id, "prompt": prompt, "size": size, "n": 1 }));
@@ -161,9 +166,7 @@ mod tests {
                 let mut buf = vec![0_u8; 65_536];
                 let n = socket.read(&mut buf).await.unwrap();
                 let raw = String::from_utf8_lossy(&buf[..n]).into_owned();
-                log.lock()
-                    .await
-                    .push(raw.split("\r\n\r\n").nth(1).unwrap_or_default().to_owned());
+                log.lock().await.push(raw);
                 let reply = format!(
                     "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                     body.len()
@@ -187,6 +190,8 @@ mod tests {
             reasoning: None,
             native_web_search: false,
             can_vision: false,
+            headers: Vec::new(),
+            image_base_url: None,
         }
     }
 
@@ -212,7 +217,8 @@ mod tests {
                 data: PNG.to_owned()
             }
         );
-        let sent: Value = serde_json::from_str(&seen.lock().await[0]).unwrap();
+        let sent = seen.lock().await[0].clone();
+        let sent: Value = serde_json::from_str(sent.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(
             sent,
             json!({"model": "gpt-image-1", "prompt": "a red fox", "size": "1536x1024", "n": 1})
@@ -274,5 +280,22 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(seen.lock().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn image_base_url_and_custom_headers_are_used() {
+        let policy = AddressPolicy::default();
+        let ok = format!(r#"{{"data":[{{"b64_json":"{PNG}"}}]}}"#);
+        let (image_base, seen) = serve(vec![(200, ok)]).await;
+        let mut connection = painting("http://127.0.0.1:9");
+        connection.image_base_url = Some(format!("{image_base}/v1"));
+        connection.headers = vec![("X-Relay-Tag".to_owned(), "team-a".to_owned())];
+        generate_image(&connection, &policy, &json!({"prompt": "x"}))
+            .await
+            .unwrap();
+        let raw = seen.lock().await[0].to_ascii_lowercase();
+        assert!(raw.starts_with("post /v1/images/generations "), "{raw}");
+        assert!(raw.contains("x-relay-tag: team-a"), "{raw}");
+        assert!(raw.contains("authorization: bearer sk-paint"), "{raw}");
     }
 }

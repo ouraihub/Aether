@@ -34,4 +34,12 @@ probeUrl: string,
 /**
  * Selected models in display order.
  */
-models: Array<Model>, };
+models: Array<Model>, 
+/**
+ * Image generation base URL; `None` = use `base_url`.
+ */
+imageBaseUrl: string | null, 
+/**
+ * Custom request headers, applied before system headers.
+ */
+headers: { [key in string]?: string }, };

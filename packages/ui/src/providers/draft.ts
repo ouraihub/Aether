@@ -18,6 +18,9 @@ export interface EndpointDraft {
   slug: string
   baseUrl: string
   protocol: Protocol
+  /** `null` = paint at `baseUrl` (docs/36 §3.4). */
+  imageBaseUrl: string | null
+  headers: Endpoint['headers']
   models: Model[]
 }
 
@@ -38,13 +41,23 @@ export function toDraft(provider: Provider): ProviderDraft {
       slug: saved.slug,
       baseUrl: saved.baseUrl,
       protocol: saved.protocol,
+      imageBaseUrl: saved.imageBaseUrl,
+      headers: saved.headers,
       models: saved.models,
     })),
   }
 }
 
 export function newEndpoint(taken: readonly EndpointDraft[]): EndpointDraft {
-  return { saved: null, slug: nextSlug(taken), baseUrl: '', protocol: 'openai-chat', models: [] }
+  return {
+    saved: null,
+    slug: nextSlug(taken),
+    baseUrl: '',
+    protocol: 'openai-chat',
+    imageBaseUrl: null,
+    headers: {},
+    models: [],
+  }
 }
 
 /** First free `ep-N`; slugs are unique per provider and hidden from users. */
@@ -89,6 +102,8 @@ export function toSave(draft: ProviderDraft): ProviderSave {
       slug: e.slug.trim(),
       baseUrl: e.baseUrl.trim(),
       protocol: e.protocol,
+      imageBaseUrl: e.imageBaseUrl?.trim() || null,
+      headers: e.headers,
       models: e.models.map((model) => ({
         ...model,
         nativeWebSearch: model.modelType === 'chat' && e.protocol !== 'openai-chat' && model.nativeWebSearch,
@@ -110,10 +125,54 @@ export function probeTarget(e: EndpointDraft, keyId?: string): ProbeTarget {
   return target
 }
 
-/** Mirrors `aether_providers::api_base` + `/models` for the `→ GET` line before saving. */
-export function probeUrl(baseUrl: string): string {
+const apiBase = (baseUrl: string): string => {
   const trimmed = baseUrl.trim().replace(/\/+$/, '')
-  return `${trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`}/models`
+  return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`
+}
+
+/** Mirrors `aether_providers::api_base` + `/models` for the `→ GET` line before saving. */
+export const probeUrl = (baseUrl: string): string => `${apiBase(baseUrl)}/models`
+
+const CHAT_PATH: Record<Protocol, string> = {
+  'openai-chat': 'chat/completions',
+  'openai-responses': 'responses',
+  'anthropic-messages': 'messages',
+}
+/** Mirrors `aether_chat::protocol` request paths. */
+export const chatUrl = (baseUrl: string, protocol: Protocol): string => `${apiBase(baseUrl)}/${CHAT_PATH[protocol]}`
+
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,100}$/
+const RESERVED_HEADERS: Record<string, true> = {
+  authorization: true,
+  'x-api-key': true,
+  'anthropic-version': true,
+  host: true,
+  'content-type': true,
+  'content-length': true,
+  accept: true,
+  connection: true,
+  'transfer-encoding': true,
+  cookie: true,
+}
+export type HeadersError = { key: 'headers_too_many' | 'headers_invalid' } | { key: 'headers_reserved'; name: string }
+
+/** Front-end mirror of the backend header rules (docs/36 §3.3); blank rows are dropped. */
+export function checkHeaders(
+  rows: readonly { name: string; value: string }[],
+): { headers: Record<string, string> } | { error: HeadersError } {
+  const kept = rows.map((r) => ({ name: r.name.trim(), value: r.value })).filter((r) => r.name || r.value)
+  if (kept.length > 20) return { error: { key: 'headers_too_many' } }
+  const headers: Record<string, string> = {}
+  const seen = new Set<string>()
+  for (const { name, value } of kept) {
+    const lower = name.toLowerCase()
+    if (Object.hasOwn(RESERVED_HEADERS, lower)) return { error: { key: 'headers_reserved', name } }
+    if (!HEADER_NAME.test(name) || seen.has(lower) || value.length > 2048 || /[\r\n]/.test(value))
+      return { error: { key: 'headers_invalid' } }
+    seen.add(lower)
+    headers[name] = value
+  }
+  return { headers }
 }
 
 /** Cherry's primary key: the first enabled one, else the first. */

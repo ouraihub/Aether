@@ -25,4 +25,12 @@ protocol: Protocol,
 /**
  * Selected models in display order.
  */
-models: Array<ModelSave>, };
+models: Array<ModelSave>, 
+/**
+ * Image generation base URL: empty/null = use `baseUrl`; absent = keep.
+ */
+imageBaseUrl?: string | null | null, 
+/**
+ * Custom request headers; absent = keep.
+ */
+headers?: { [key in string]?: string }, };

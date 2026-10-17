@@ -41,6 +41,7 @@ pub(crate) struct Request<'a> {
 impl Request<'_> {
     pub(crate) fn encode(&self, builder: RequestBuilder) -> RequestBuilder {
         let key = self.key;
+        let builder = aether_support::connection::custom_headers(builder, &self.connection.headers);
         let mut builder = builder.header(ACCEPT, "text/event-stream");
         if let Some(key) = key {
             builder = builder.bearer_auth(key);
