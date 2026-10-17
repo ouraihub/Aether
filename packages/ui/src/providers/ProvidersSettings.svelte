@@ -9,7 +9,7 @@
   import * as Select from '#lib/components/ui/select/index.js'
   import { Switch } from '#lib/components/ui/switch/index.js'
   import { Textarea } from '#lib/components/ui/textarea/index.js'
-  import EllipsisIcon from '@lucide/svelte/icons/ellipsis'
+  import EllipsisIcon from '@lucide/svelte/icons/ellipsis-vertical'
   import SquarePenIcon from '@lucide/svelte/icons/square-pen'
   import Trash2Icon from '@lucide/svelte/icons/trash-2'
   import UserPenIcon from '@lucide/svelte/icons/user-pen'
