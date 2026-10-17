@@ -18,6 +18,10 @@ name: string,
  */
 enabled: boolean, 
 /**
+ * Free-form Markdown notes about this provider's models (Cherry 模型备注).
+ */
+notes: string, 
+/**
  * Endpoints in display order.
  */
 endpoints: Array<Endpoint>, };

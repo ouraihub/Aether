@@ -2,11 +2,17 @@
   // Cherry-style provider settings (docs/33): list on the left, detail on the right, every field saves itself.
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Dialog from '#lib/components/ui/dialog/index.js'
+  import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js'
   import * as Empty from '#lib/components/ui/empty/index.js'
   import * as Field from '#lib/components/ui/field/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
   import * as Select from '#lib/components/ui/select/index.js'
   import { Switch } from '#lib/components/ui/switch/index.js'
+  import { Textarea } from '#lib/components/ui/textarea/index.js'
+  import EllipsisIcon from '@lucide/svelte/icons/ellipsis'
+  import SquarePenIcon from '@lucide/svelte/icons/square-pen'
+  import Trash2Icon from '@lucide/svelte/icons/trash-2'
+  import UserPenIcon from '@lucide/svelte/icons/user-pen'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import SearchIcon from '@lucide/svelte/icons/search'
   import Settings2Icon from '@lucide/svelte/icons/settings-2'
@@ -41,6 +47,10 @@
   let newName = $state('')
   let infoOpen = $state(false)
   let editName = $state('')
+  let notesOpen = $state(false)
+  let editNotes = $state('')
+  /** Provider whose row menu is open (hover ⋯ or right-click). */
+  let menuFor = $state<string | null>(null)
   let abort: AbortController | null = null
   let saving = false
   let again = false
@@ -156,7 +166,7 @@
     if (!name) return
     addOpen = false
     newName = ''
-    load({ id: null, name, enabled: true, endpoints: [newEndpoint([])] })
+    load({ id: null, name, enabled: true, notes: '', endpoints: [newEndpoint([])] })
     await commit()
   }
   function rename() {
@@ -164,6 +174,23 @@
     infoOpen = false
     if (!draft || !name || name === draft.name) return
     draft.name = name
+    void commit()
+  }
+  /** Row menu actions act on that row, so select it first (honours the unsaved-changes prompt). */
+  async function rowAction(p: Provider, action: 'edit' | 'notes' | 'delete') {
+    menuFor = null
+    await select(p)
+    if (draft?.id !== p.id) return
+    if (action === 'delete') return remove()
+    editName = draft.name
+    editNotes = draft.notes
+    if (action === 'edit') infoOpen = true
+    else notesOpen = true
+  }
+  function saveNotes() {
+    notesOpen = false
+    if (!draft || editNotes === draft.notes) return
+    draft.notes = editNotes
     void commit()
   }
   async function remove() {
@@ -293,11 +320,17 @@
       <ul class="flex min-w-0 flex-col gap-0.5">
         {#each visible as p (p.id)}
           {@const dot = status(p)}
-          <li>
+          <li
+            class="group/row relative"
+            oncontextmenu={(event) => {
+              event.preventDefault()
+              menuFor = p.id
+            }}
+          >
             <button
               type="button"
               class={cn(
-                'hover:bg-muted flex h-9 w-full min-w-0 items-center gap-2.5 rounded-kit px-2 text-left text-kit-base',
+                'hover:bg-muted flex h-9 w-full min-w-0 items-center gap-2.5 rounded-kit px-2 pr-8 text-left text-kit-base',
                 draft?.id === p.id && 'bg-muted font-medium',
               )}
               aria-current={draft?.id === p.id ? 'true' : undefined}
@@ -313,6 +346,31 @@
                   >{t(dot === 'bg-success' ? 'providers.filter_enabled' : 'providers.needs_setup')}</span
                 >{/if}
             </button>
+            <DropdownMenu.Root open={menuFor === p.id} onOpenChange={(open) => (menuFor = open ? p.id : null)}>
+              <DropdownMenu.Trigger>
+                {#snippet child({ props })}<button
+                    {...props}
+                    type="button"
+                    class={cn(
+                      'text-muted-foreground hover:text-foreground hover:bg-accent absolute top-1/2 right-1 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100',
+                      menuFor === p.id && 'opacity-100',
+                    )}
+                    aria-label={t('providers.row_menu', { name: p.name })}
+                    title={t('providers.row_menu', { name: p.name })}><EllipsisIcon class="size-4" /></button
+                  >{/snippet}
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content align="start" class="min-w-36">
+                <DropdownMenu.Item onSelect={() => void rowAction(p, 'edit')}
+                  ><SquarePenIcon />{t('providers.edit')}</DropdownMenu.Item
+                >
+                <DropdownMenu.Item onSelect={() => void rowAction(p, 'notes')}
+                  ><UserPenIcon />{t('providers.notes')}</DropdownMenu.Item
+                >
+                <DropdownMenu.Item variant="destructive" onSelect={() => void rowAction(p, 'delete')}
+                  ><Trash2Icon />{t('providers.remove')}</DropdownMenu.Item
+                >
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
           </li>
         {:else}
           <li class="text-muted-foreground px-2 py-4 text-center text-kit-sm">{t('providers.no_matches')}</li>
@@ -456,6 +514,31 @@
             >{t('providers.delete')}</Button
           >
           <Button type="submit" disabled={!editName.trim()}>{t('providers.save')}</Button>
+        </Dialog.Footer>
+      </form>
+    </Dialog.Content>
+  </Dialog.Root>
+
+  <Dialog.Root bind:open={notesOpen}>
+    <Dialog.Content class="sm:max-w-lg">
+      <Dialog.Header><Dialog.Title>{t('providers.notes')}</Dialog.Title></Dialog.Header>
+      <form
+        class="contents"
+        onsubmit={(event) => {
+          event.preventDefault()
+          saveNotes()
+        }}
+      >
+        <Textarea
+          class="min-h-64 font-mono text-kit-sm"
+          aria-label={t('providers.notes')}
+          placeholder={t('providers.notes_placeholder')}
+          maxlength={10000}
+          bind:value={editNotes}
+        />
+        <Dialog.Footer>
+          <Button type="button" variant="outline" onclick={() => (notesOpen = false)}>{t('common.cancel')}</Button>
+          <Button type="submit">{t('providers.save')}</Button>
         </Dialog.Footer>
       </form>
     </Dialog.Content>

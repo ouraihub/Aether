@@ -17,7 +17,7 @@ const endpoint: Endpoint = {
   headers: { 'X-Team': 'a' },
   models: [],
 }
-const stored: Provider = { id: 'p1', name: 'Local', enabled: true, endpoints: [endpoint] }
+const stored: Provider = { id: 'p1', name: 'Local', enabled: true, notes: '', endpoints: [endpoint] }
 const twoKeys: Endpoint = {
   ...endpoint,
   keys: [...endpoint.keys, { id: 'k2', label: 'backup', enabled: true, masked: 'sk-b****1234', readable: true }],
@@ -122,6 +122,23 @@ describe('ProvidersSettings', () => {
     await fireEvent.input(url, { target: { value: '  https://copy.example.com/v1  ' } })
     await fireEvent.click(within(url.parentElement as HTMLElement).getByRole('button', { name: 'Copy' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://copy.example.com/v1'))
+  })
+
+  it('row menu edits model notes and deletes the provider (Cherry context menu)', async () => {
+    const remove = vi.fn(() => Promise.resolve([]))
+    const { saves } = setup({ remove })
+    await fireEvent.click(await screen.findByRole('button', { name: 'More actions for Local' }))
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Model notes' }))
+    await fireEvent.input(await screen.findByRole('textbox', { name: 'Model notes' }), {
+      target: { value: '## 价格\n- 便宜' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saves.at(-1)?.notes).toBe('## 价格\n- 便宜'))
+    await fireEvent.contextMenu(
+      screen.getByRole('button', { name: 'More actions for Local' }).closest('li') as HTMLElement,
+    )
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+    await waitFor(() => expect(remove).toHaveBeenCalledWith('p1'))
   })
 
   it('shows the primary key with +N and offers delete only for a single key', async () => {

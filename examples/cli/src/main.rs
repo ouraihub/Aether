@@ -92,6 +92,7 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
         id: existing.as_ref().map(|p| p.id.clone()),
         name: "cli".to_owned(),
         enabled: None,
+        notes: None,
         endpoints: vec![EndpointSave {
             id: existing
                 .and_then(|p| p.endpoints.into_iter().next())

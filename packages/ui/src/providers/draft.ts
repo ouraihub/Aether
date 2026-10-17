@@ -30,6 +30,7 @@ export interface ProviderDraft {
   id: string | null
   name: string
   enabled: boolean
+  notes: string
   endpoints: EndpointDraft[]
 }
 
@@ -38,6 +39,7 @@ export function toDraft(provider: Provider): ProviderDraft {
     id: provider.id,
     name: provider.name,
     enabled: provider.enabled,
+    notes: provider.notes,
     endpoints: provider.endpoints.map((saved) => ({
       saved,
       slug: saved.slug,
@@ -117,9 +119,8 @@ export function toSave(draft: ProviderDraft): ProviderSave {
     if (e.saved) save.id = e.saved.id
     return save
   })
-  return draft.id === null
-    ? { name: draft.name.trim(), enabled: draft.enabled, endpoints }
-    : { id: draft.id, name: draft.name.trim(), enabled: draft.enabled, endpoints }
+  const save = { name: draft.name.trim(), enabled: draft.enabled, notes: draft.notes, endpoints }
+  return draft.id === null ? save : { id: draft.id, ...save }
 }
 
 /** Always a draft target: with endpointId the backend uses the stored keys on an edited, unsaved address. */

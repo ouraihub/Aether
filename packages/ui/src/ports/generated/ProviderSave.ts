@@ -18,6 +18,10 @@ name: string,
  */
 enabled?: boolean, 
 /**
+ * Markdown notes, at most 10000 characters; absent = keep.
+ */
+notes?: string, 
+/**
  * The complete endpoint list.
  */
 endpoints: Array<EndpointSave>, };

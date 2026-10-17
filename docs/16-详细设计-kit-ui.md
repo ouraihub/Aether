@@ -124,6 +124,7 @@ interface ChatPanelProps {
 - 思考滑块按合法档位绘制等距刻度点，每个点对应一个effort；当前点由圆形thumb替代，其余点保留在轨道中心。原生range仍step=1，刻度不接管鼠标／触摸／键盘事件；主题色进度和背景色刻度沿用现有token。
 - 回复“换模型”（@）对标 Cherry：@ 按钮本身就是 `ModelSelect` 的自定义 `trigger`，弹层与顶部选择器完全相同，当前值为该回复来源模型（竖条标记）；点选即 `session.retry(base, turnId, model)` 生成新候选，原回复保留，不再经过确认 Dialog。末轮重新生成时来源模型失效只 toast 提示“请点 @ 选择其他模型”。Dialog 只保留编辑与翻译。
 - 通用 `CopyInput`（根导出，Input 的替换件，对齐 Cherry ApiHostFields）：非空时在右侧悬停或聚焦才显示复制按钮，复制去掉首尾空白的值并 toast。已用于 API 地址、图像/改图地址、MCP URL 和搜索基础地址。
+- 服务商列表行菜单（对齐 Cherry `ProviderListItemWithContextMenu`）：鼠标悬停时行尾出现 ⋯，右键也能打开同一菜单。菜单有三项：编辑（打开现有服务商设置弹窗）、模型备注、删除（先确认）。执行前会先选中该行，未保存的修改照常提示。模型备注即 `Provider.notes`：Markdown 纯文本，最多 10000 字，`ProviderSave.notes` 省略表示保持不变；只存储，不进入模型请求。桌面 providers.db 用 v8 迁移、Web D1 用 v26 迁移加列。
 - `SkillPicker`：输入框上方的技能选择（列表只含元数据）；显示所选正文合计 / 预算；`end` 或请求错误为 `skill_changed` 时提示"技能已更新，请重新确认"并打开预览。
 - 工具：`tool_call` 显示"正在调用 <name>"（MCP 标服务名）；`approval_required` 显示 `ApprovalCard`（工具名、来源、参数预览、"允许本次 / 拒绝"）；`tool_result` 折叠为一行，`unknown` 标"结果未知，可能已执行"，`denied` 标"已拒绝"。
 - `end`：`completed` + `exhausted` 时显示"已达到工具调用轮数上限"；`failed` 显示错误与"重试"；`cancelled` 显示"已停止"。

@@ -152,6 +152,8 @@ pub struct Provider {
     pub name: String,
     /// Off = its models leave every picker and cannot run (Cherry's provider switch).
     pub enabled: bool,
+    /// Free-form Markdown notes about this provider's models (Cherry 模型备注).
+    pub notes: String,
     /// Endpoints in display order.
     pub endpoints: Vec<Endpoint>,
 }
@@ -236,6 +238,10 @@ pub struct ProviderSave {
     #[serde(default)]
     #[ts(optional)]
     pub enabled: Option<bool>,
+    /// Markdown notes, at most 10000 characters; absent = keep.
+    #[serde(default)]
+    #[ts(optional)]
+    pub notes: Option<String>,
     /// The complete endpoint list.
     pub endpoints: Vec<EndpointSave>,
 }

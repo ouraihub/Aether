@@ -52,6 +52,7 @@ Migration { version: 2, sql: "ALTER TABLE models ADD COLUMN reasoning TEXT;" },
 ];
 
 const MAX_NAME_CHARS: usize = 80;
+const MAX_NOTES_CHARS: usize = 10_000;
 const MAX_ENDPOINTS: usize = 20;
 const MAX_MODELS: usize = 1000;
 const MAX_SLUG: usize = 40;
@@ -134,6 +135,10 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
                 version: 7,
                 sql: "ALTER TABLE endpoints ADD COLUMN image_edit_base_url TEXT;",
             },
+            Migration {
+                version: 8,
+                sql: "ALTER TABLE providers ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
+            },
         ];
         let db = db::open(&path, &steps)?;
         Ok(Self {
@@ -177,17 +182,21 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
         let tx = db.transaction()?;
         let now = now_millis();
         let provider_id = if let Some(id) = &input.id {
-            let sql = "UPDATE providers SET name = ?2, updated_at = ?3, enabled = COALESCE(?4, enabled) WHERE id = ?1";
-            if tx.execute(sql, params![id, input.name, now, input.enabled])? == 0 {
+            let sql = "UPDATE providers SET name = ?2, updated_at = ?3, enabled = COALESCE(?4, enabled), notes = COALESCE(?5, notes) WHERE id = ?1";
+            if tx.execute(
+                sql,
+                params![id, input.name, now, input.enabled, input.notes],
+            )? == 0
+            {
                 return Err(KitError::not_found("provider"));
             }
             id.clone()
         } else {
             let id = new_id()?;
             tx.execute(
-                "INSERT INTO providers (id, name, position, created_at, updated_at, enabled)
-                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM providers), ?3, ?3, ?4)",
-                params![id, input.name, now, input.enabled.unwrap_or(true)],
+                "INSERT INTO providers (id, name, position, created_at, updated_at, enabled, notes)
+                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM providers), ?3, ?3, ?4, ?5)",
+                params![id, input.name, now, input.enabled.unwrap_or(true), input.notes.as_deref().unwrap_or("")],
             )?;
             id
         };
@@ -632,6 +641,13 @@ fn validate(input: &ProviderSave) -> Result<(), KitError> {
     if name_chars == 0 || name_chars > MAX_NAME_CHARS {
         return Err(too_long("name", MAX_NAME_CHARS));
     }
+    if input
+        .notes
+        .as_ref()
+        .is_some_and(|notes| notes.chars().count() > MAX_NOTES_CHARS)
+    {
+        return Err(too_long("notes", MAX_NOTES_CHARS));
+    }
     if input.endpoints.len() > MAX_ENDPOINTS {
         return Err(too_long("endpoints", MAX_ENDPOINTS));
     }
@@ -891,23 +907,25 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
         });
     }
     let mut stmt =
-        db.prepare_cached("SELECT id, name, enabled FROM providers ORDER BY position, id")?;
+        db.prepare_cached("SELECT id, name, enabled, notes FROM providers ORDER BY position, id")?;
     let providers = stmt
         .query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, bool>(2)?,
+                row.get::<_, String>(3)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(providers
         .into_iter()
-        .map(|(id, name, enabled)| Provider {
+        .map(|(id, name, enabled, notes)| Provider {
             enabled,
             endpoints: endpoints.remove(&id).unwrap_or_default(),
             id,
             name,
+            notes,
         })
         .collect())
 }
@@ -1136,7 +1154,7 @@ mod tests {
                 assert_eq!(
                     db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                         .unwrap(),
-                    7
+                    8
                 );
             }
             assert!(path.with_file_name("providers.db.bak-v2").is_file());
@@ -1626,7 +1644,7 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
     }
 
     #[test]
@@ -1665,7 +1683,36 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
+        assert_eq!(store.list().unwrap()[0].notes, "");
+    }
+
+    #[test]
+    fn notes_save_keep_when_omitted_and_reject_oversized() {
+        let (_dir, store) = store();
+        let saved = store
+            .save(request(
+                json!({ "name": "P", "notes": "## 价格\n- 便宜", "endpoints": [] }),
+            ))
+            .unwrap();
+        let id = saved[0].id.clone();
+        assert_eq!(saved[0].notes, "## 价格\n- 便宜");
+        let kept = store
+            .save(request(json!({ "id": id, "name": "P2", "endpoints": [] })))
+            .unwrap();
+        assert_eq!(kept[0].notes, "## 价格\n- 便宜");
+        let cleared = store
+            .save(request(
+                json!({ "id": id, "name": "P2", "notes": "", "endpoints": [] }),
+            ))
+            .unwrap();
+        assert_eq!(cleared[0].notes, "");
+        let error = store
+            .save(request(
+                json!({ "id": id, "name": "P2", "notes": "x".repeat(10_001), "endpoints": [] }),
+            ))
+            .unwrap_err();
+        assert_eq!(reason(&error).1, Some("notes"));
     }
 
     #[test]
