@@ -867,6 +867,31 @@
             title={t('chat.newConversation')}
             onclick={newConversation}><MessageSquarePlusIcon /></Button
           >
+          <input
+            bind:this={fileInput}
+            type="file"
+            accept={IMAGE_MIMES.join(',')}
+            multiple
+            hidden
+            onchange={(e) => {
+              const input = e.currentTarget
+              void attach(input.files).finally(() => (input.value = ''))
+            }}
+          />
+          {#if ports.search && purpose === 'chat'}<Button
+              type="button"
+              variant="ghost"
+              class="search-toggle"
+              size="icon-sm"
+              aria-label={t('chat.network')}
+              aria-pressed={webSearch}
+              disabled={session.running}
+              title={`${t(webSearch ? 'chat.networkOn' : 'chat.networkOff')} · ${t('chat.networkPrivacy')}`}
+              onclick={() => (webSearch = !webSearch)}
+              ><GlobeIcon
+                >{#if !webSearch}<path d="m2 2 20 20" />{/if}</GlobeIcon
+              ></Button
+            >{/if}
           <Popover.Root bind:open={toolsOpen}>
             <Popover.Trigger disabled={session.running}>
               {#snippet child({ props })}<Button
@@ -920,31 +945,6 @@
               aria-label={t('chat.generateImageOff')}
               title={t('chat.generateImageOff')}
               onclick={() => (generateImage = false)}><ImageIcon />{t('chat.generateImage')}<XIcon /></Button
-            >{/if}
-          <input
-            bind:this={fileInput}
-            type="file"
-            accept={IMAGE_MIMES.join(',')}
-            multiple
-            hidden
-            onchange={(e) => {
-              const input = e.currentTarget
-              void attach(input.files).finally(() => (input.value = ''))
-            }}
-          />
-          {#if ports.search && purpose === 'chat'}<Button
-              type="button"
-              variant="ghost"
-              class="search-toggle"
-              size="icon-sm"
-              aria-label={t('chat.network')}
-              aria-pressed={webSearch}
-              disabled={session.running}
-              title={`${t(webSearch ? 'chat.networkOn' : 'chat.networkOff')} · ${t('chat.networkPrivacy')}`}
-              onclick={() => (webSearch = !webSearch)}
-              ><GlobeIcon
-                >{#if !webSearch}<path d="m2 2 20 20" />{/if}</GlobeIcon
-              ></Button
             >{/if}
           {#if ports.skills}<div class="skills-control">
               <SkillPicker
