@@ -154,7 +154,7 @@ pub struct Provider {
     pub enabled: bool,
     /// Free-form Markdown notes about this provider's models (Cherry 模型备注).
     pub notes: String,
-    /// Host preset this provider was seeded from; `None` for user-created providers.
+    /// Host preset this provider belongs to; preset providers cannot be deleted. `None` = user-created.
     pub preset_id: Option<String>,
     /// Endpoints in display order.
     pub endpoints: Vec<Endpoint>,
@@ -244,8 +244,8 @@ pub struct ProviderSave {
     #[serde(default)]
     #[ts(optional)]
     pub notes: Option<String>,
-    /// New providers only: seed from this host preset once per store; a repeat or a
-    /// same-named provider makes the save a no-op that returns the current list.
+    /// New providers only: seed this host preset. A no-op returning the current list when the preset
+    /// is already present; a same-named user provider adopts it instead of a duplicate.
     #[serde(default)]
     #[ts(optional)]
     pub preset_id: Option<String>,

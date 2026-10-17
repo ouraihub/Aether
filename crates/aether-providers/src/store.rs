@@ -141,8 +141,7 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
             },
             Migration {
                 version: 9,
-                sql: "ALTER TABLE providers ADD COLUMN preset_id TEXT;
-CREATE TABLE seeded_presets (id TEXT PRIMARY KEY);",
+                sql: "ALTER TABLE providers ADD COLUMN preset_id TEXT;",
             },
         ];
         let db = db::open(&path, &steps)?;
@@ -198,19 +197,25 @@ CREATE TABLE seeded_presets (id TEXT PRIMARY KEY);",
             id.clone()
         } else {
             if let Some(preset) = &input.preset_id {
-                // Seeded once per store, even after deletion; a same-named provider skips it unrecorded (docs/39 §3).
-                let named: bool = tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM providers WHERE lower(name) = lower(?1))",
-                    [input.name.trim()],
+                // One provider per preset; a same-named user provider adopts it (docs/39 §3).
+                let seeded: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM providers WHERE preset_id = ?1)",
+                    [preset],
                     |row| row.get(0),
                 )?;
-                if named
-                    || tx.execute(
-                        "INSERT OR IGNORE INTO seeded_presets (id) VALUES (?1)",
-                        [preset],
-                    )? == 0
-                {
-                    drop(tx);
+                if !seeded {
+                    tx.execute(
+                        "UPDATE providers SET preset_id = ?1 WHERE rowid = (SELECT rowid FROM providers WHERE preset_id IS NULL AND lower(name) = lower(?2) ORDER BY position LIMIT 1)",
+                        params![preset, input.name.trim()],
+                    )?;
+                }
+                let adopted: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM providers WHERE preset_id = ?1)",
+                    [preset],
+                    |row| row.get(0),
+                )?;
+                if seeded || adopted {
+                    tx.commit()?;
                     return list(&db);
                 }
             }
@@ -396,9 +401,19 @@ CREATE TABLE seeded_presets (id TEXT PRIMARY KEY);",
             "endpoint_id IN (SELECT id FROM endpoints WHERE provider_id = ?1)",
             [id],
         )?;
-        if tx.execute("DELETE FROM providers WHERE id = ?1", [id])? == 0 {
-            return Err(KitError::not_found("provider"));
+        let preset: Option<Option<String>> = tx
+            .query_row(
+                "SELECT preset_id FROM providers WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match preset {
+            None => return Err(KitError::not_found("provider")),
+            Some(Some(_)) => return Err(KitError::conflict("preset_provider")),
+            Some(None) => {}
         }
+        tx.execute("DELETE FROM providers WHERE id = ?1", [id])?;
         tx.commit()?;
         forget_all(&stale)?;
         list(&db)
@@ -1717,7 +1732,7 @@ mod tests {
     }
 
     #[test]
-    fn presets_seed_once_skip_same_name_and_never_return_after_delete() {
+    fn presets_seed_once_adopt_same_name_and_cannot_be_deleted() {
         let (_dir, store) = store();
         let seed = |name: &str, preset: &str| {
             store.save(request(
@@ -1737,20 +1752,24 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(renamed[0].preset_id.as_deref(), Some("qiniu"));
-        store.delete(&id).unwrap();
-        assert!(seed("七牛云", "qiniu").unwrap().is_empty());
-
-        store
-            .save(request(json!({ "name": "Fenno", "endpoints": [] })))
-            .unwrap();
-        let skipped = seed("fenno", "fenno").unwrap();
-        assert_eq!(skipped.len(), 1);
-        assert_eq!(skipped[0].preset_id, None);
-        store.delete(&skipped[0].id).unwrap();
+        let error = store.delete(&id).unwrap_err();
         assert_eq!(
-            seed("Fenno", "fenno").unwrap()[0].preset_id.as_deref(),
-            Some("fenno")
+            reason(&error),
+            (KitErrorCode::Conflict, None, Some("preset_provider"))
         );
+        assert_eq!(store.list().unwrap().len(), 1);
+
+        let own = store
+            .save(request(
+                json!({ "name": "Fenno", "endpoints": [endpoint(None, "mine", &[])] }),
+            ))
+            .unwrap();
+        let fenno = own.iter().find(|p| p.name == "Fenno").unwrap().id.clone();
+        let adopted = seed("fenno", "fenno").unwrap();
+        assert_eq!(adopted.len(), 2);
+        let fenno = adopted.iter().find(|p| p.id == fenno).unwrap();
+        assert_eq!(fenno.preset_id.as_deref(), Some("fenno"));
+        assert_eq!(fenno.endpoints[0].slug, "mine");
     }
 
     #[test]

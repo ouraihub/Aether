@@ -22,7 +22,7 @@ enabled: boolean,
  */
 notes: string, 
 /**
- * Host preset this provider was seeded from; `None` for user-created providers.
+ * Host preset this provider belongs to; preset providers cannot be deleted. `None` = user-created.
  */
 presetId: string | null, 
 /**

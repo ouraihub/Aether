@@ -22,8 +22,8 @@ enabled?: boolean,
  */
 notes?: string, 
 /**
- * New providers only: seed from this host preset once per store; a repeat or a
- * same-named provider makes the save a no-op that returns the current list.
+ * New providers only: seed this host preset. A no-op returning the current list when the preset
+ * is already present; a same-named user provider adopts it instead of a duplicate.
  */
 presetId?: string, 
 /**

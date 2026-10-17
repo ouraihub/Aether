@@ -107,7 +107,7 @@
     if (!port) return
     try {
       providers = await port.list()
-      // Backend skips presets already seeded (even if deleted) or shadowed by a same-named provider.
+      // Backend no-ops a preset already present and lets a same-named provider adopt it (docs/39 §3).
       for (const preset of presets) {
         if (providers.some((p) => p.presetId === preset.id)) continue
         providers = await port.save({
@@ -379,9 +379,9 @@
                 <DropdownMenu.Item onSelect={() => void rowAction(p, 'notes')}
                   ><UserPenIcon />{t('providers.notes')}</DropdownMenu.Item
                 >
-                <DropdownMenu.Item variant="destructive" onSelect={() => void rowAction(p, 'delete')}
-                  ><Trash2Icon />{t('providers.remove')}</DropdownMenu.Item
-                >
+                {#if !p.presetId}<DropdownMenu.Item variant="destructive" onSelect={() => void rowAction(p, 'delete')}
+                    ><Trash2Icon />{t('providers.remove')}</DropdownMenu.Item
+                  >{/if}
               </DropdownMenu.Content>
             </DropdownMenu.Root>
           </li>
@@ -524,9 +524,12 @@
           <Input id="kit-provider-name" maxlength={80} bind:value={editName} />
         </Field.Field>
         <Dialog.Footer class="sm:justify-between">
-          <Button type="button" variant="ghost" class="text-destructive" onclick={() => void remove()}
-            >{t('providers.delete')}</Button
-          >
+          {#if !providers.find((p) => p.id === draft?.id)?.presetId}<Button
+              type="button"
+              variant="ghost"
+              class="text-destructive"
+              onclick={() => void remove()}>{t('providers.delete')}</Button
+            >{:else}<span></span>{/if}
           <Button type="submit" disabled={!editName.trim()}>{t('providers.save')}</Button>
         </Dialog.Footer>
       </form>

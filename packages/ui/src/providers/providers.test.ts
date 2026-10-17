@@ -103,6 +103,9 @@ describe('provider presets (docs/39)', () => {
     expect((await screen.findByRole('link', { name: 'Get a key' })).getAttribute('href')).toBe(
       'https://api.fenno.ai/s/vWbM',
     )
+    await fireEvent.click(screen.getByRole('button', { name: 'More actions for Fenno' }))
+    expect(await screen.findByRole('menuitem', { name: 'Model notes' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).toBeNull()
   })
 })
 
