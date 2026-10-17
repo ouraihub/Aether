@@ -416,6 +416,31 @@ describe('ChatPanel', () => {
     expect(runs[1]?.request.webSearch).not.toBe(true)
     runs[1]?.emit({ kind: 'end', status: 'completed' })
   })
+  it('customizes the toolbar: toggles, keyboard reorder, restore default (docs/38)', async () => {
+    const onToolbarChange = vi.fn()
+    setup(false, null, { search: {}, props: { onToolbarChange } })
+    const toolbarLabels = () =>
+      [...document.querySelectorAll('.composer-tools .tool-group:first-child > button')].map((b) =>
+        b.getAttribute('aria-label'),
+      )
+    expect(toolbarLabels()).toEqual(['New conversation', 'Web search', 'More tools'])
+    await fireEvent.click(screen.getByRole('button', { name: 'More tools' }))
+    expect(await screen.findByRole('button', { name: /^Upload attachment/ })).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'Web search' })).toHaveLength(1)
+    await fireEvent.click(screen.getByRole('button', { name: 'Customize toolbar' }))
+    await fireEvent.click(await screen.findByRole('switch', { name: 'Upload attachment' }))
+    expect(onToolbarChange).toHaveBeenLastCalledWith(['new-conversation', 'web-search', 'attachment'])
+    await fireEvent.keyDown(screen.getByRole('button', { name: 'Drag or use ↑/↓ to reorder Upload attachment' }), {
+      key: 'ArrowUp',
+    })
+    expect(onToolbarChange).toHaveBeenLastCalledWith(['new-conversation', 'attachment', 'web-search'])
+    await fireEvent.click(screen.getByRole('switch', { name: 'New conversation' }))
+    expect(onToolbarChange).toHaveBeenLastCalledWith(['attachment', 'web-search'])
+    expect(toolbarLabels()).toEqual(['Upload attachment', 'Web search', 'More tools'])
+    await fireEvent.click(screen.getByRole('button', { name: 'Restore default' }))
+    expect(onToolbarChange).toHaveBeenLastCalledWith(['new-conversation', 'web-search'])
+    expect(screen.getByRole('button', { name: 'Restore default' }).hasAttribute('disabled')).toBe(true)
+  })
   it('shows the last request context separately from known cumulative usage and clears it on regeneration', async () => {
     const { runs } = setup(true)
     await send('first')

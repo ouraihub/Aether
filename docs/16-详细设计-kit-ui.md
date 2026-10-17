@@ -103,6 +103,8 @@ interface ChatPanelProps {
   onSkillsChange?: (refs: SkillRef[]) => void       // 应用决定是否记住
   onInsert?: (markdown: string) => void             // 有它才显示"插入"；运行中禁用
   onSaveNote?: (markdown: string, images: ImageRef[]) => Promise<void> | void // 宿主真实创建笔记并持久化本条生成图片，无回调不显示；纯图片回复也可保存
+  toolbar?: string[]                                // 输入框工具栏置顶工具的有序 id（new-conversation/web-search/attachment/generate-image），省略为默认前两项；见 AutoNote docs/38
+  onToolbarChange?: (ids: string[]) => void         // “+”面板底部“输入快捷面板”→自定义工具栏（开关/拖动/↑↓/恢复默认）；宿主决定是否记住
   onExportMarkdown?: (markdown: string) => Promise<void> | void // 桌面宿主原生保存，无回调用Web Blob下载
   onToolPayload?: (tool: string, payload: unknown) => void
   onOpenSettings?: () => void                       // 没有任何对话模型时显示"打开设置"

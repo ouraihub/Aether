@@ -16,6 +16,10 @@
   import MessageSquarePlusIcon from '@lucide/svelte/icons/message-square-plus'
   import ImageIcon from '@lucide/svelte/icons/image'
   import CheckIcon from '@lucide/svelte/icons/check'
+  import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical'
+  import Settings2Icon from '@lucide/svelte/icons/settings-2'
+  import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
+  import { Switch } from '#lib/components/ui/switch/index.js'
   import { Popover } from 'bits-ui'
   import { Button } from '#lib/components/ui/button/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
@@ -60,6 +64,8 @@
     onConversationChange,
     onClose,
     paintingModel = false,
+    toolbar: toolbarProp,
+    onToolbarChange,
   }: {
     purpose?: string
     model?: ModelRef | null
@@ -79,6 +85,9 @@
     onClose?: () => void
     /** Whether the host has a painting model bound; gates “Generate image” (docs/20 §1). */
     paintingModel?: boolean
+    /** Ordered ids of composer tools pinned to the toolbar (docs/38); omitted means the default. */
+    toolbar?: string[]
+    onToolbarChange?: (ids: string[]) => void
   } = $props()
 
   const { ports, i18n, notify } = getKitContext()
@@ -504,6 +513,60 @@
   let fileInput = $state<HTMLInputElement | null>(null)
   let toolsOpen = $state(false)
   const vision = $derived(capability?.canVision === true)
+  const DEFAULT_TOOLBAR = ['new-conversation', 'web-search']
+  // svelte-ignore state_referenced_locally
+  let pinned = $state<string[]>(toolbarProp ?? DEFAULT_TOOLBAR)
+  let customizing = $state(false)
+  /** Tools usable here; unavailable pinned ids stay stored but hidden (docs/38 §3.2). */
+  const tools = $derived(
+    ['new-conversation', 'web-search', 'attachment', 'generate-image'].filter(
+      (id) =>
+        (id !== 'web-search' || (ports.search && purpose === 'chat')) &&
+        (id !== 'generate-image' || purpose === 'chat'),
+    ),
+  )
+  const toolOrder = $derived([
+    ...pinned.filter((id) => tools.includes(id)),
+    ...tools.filter((id) => !pinned.includes(id)),
+  ])
+  function setPinned(next: string[]) {
+    const all = [...next, ...pinned.filter((id) => !tools.includes(id))]
+    if (all.join() === pinned.join()) return
+    pinned = all
+    onToolbarChange?.(all)
+  }
+  function moveTool(id: string, to: number) {
+    const order = toolOrder.filter((item) => item !== id)
+    order.splice(Math.max(0, Math.min(to, order.length)), 0, id)
+    setPinned(order.filter((item) => pinned.includes(item)))
+  }
+  // Window listeners: keyed reordering moves the row node, which would drop pointer capture.
+  function dragTool(event: PointerEvent, id: string) {
+    const list = (event.currentTarget as HTMLElement).closest('ul')
+    if (!list) return
+    event.preventDefault()
+    const move = (e: PointerEvent) => {
+      const over = [...list.children].findIndex((row) => {
+        const box = row.getBoundingClientRect()
+        return e.clientY >= box.top && e.clientY < box.bottom
+      })
+      if (over >= 0 && toolOrder[over] !== id) moveTool(id, over)
+    }
+    const stop = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+  }
+  const TOOL_LABEL: Record<string, string> = {
+    'new-conversation': 'chat.newConversation',
+    'web-search': 'chat.network',
+    attachment: 'chat.uploadAttachment',
+    'generate-image': 'chat.generateImage',
+  }
   const canSend = $derived(
     session !== null &&
       !session.running &&
@@ -858,15 +921,54 @@
         </p>{/if}
       <div class="composer-tools">
         <div class="tool-group">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            disabled={session.running || historyBusy}
-            aria-label={t('chat.newConversation')}
-            title={t('chat.newConversation')}
-            onclick={newConversation}><MessageSquarePlusIcon /></Button
-          >
+          {#snippet toolIcon(id: string)}
+            {#if id === 'new-conversation'}<MessageSquarePlusIcon />{:else if id === 'web-search'}<GlobeIcon
+                >{#if !webSearch}<path d="m2 2 20 20" />{/if}</GlobeIcon
+              >{:else if id === 'attachment'}<PaperclipIcon />{:else}<ImageIcon />{/if}
+          {/snippet}
+          {#each pinned.filter((id) => tools.includes(id)) as id (id)}
+            {#if id === 'new-conversation'}<Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={session.running || historyBusy}
+                aria-label={t('chat.newConversation')}
+                title={t('chat.newConversation')}
+                onclick={newConversation}>{@render toolIcon(id)}</Button
+              >{:else if id === 'web-search'}<Button
+                type="button"
+                variant="ghost"
+                class="search-toggle"
+                size="icon-sm"
+                aria-label={t('chat.network')}
+                aria-pressed={webSearch}
+                disabled={session.running}
+                title={`${t(webSearch ? 'chat.networkOn' : 'chat.networkOff')} · ${t('chat.networkPrivacy')}`}
+                onclick={() => (webSearch = !webSearch)}>{@render toolIcon(id)}</Button
+              >{:else if id === 'attachment'}<Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t('chat.uploadAttachment')}
+                disabled={session.running || !vision}
+                title={vision ? t('chat.uploadAttachment') : t('chat.visionUnsupported')}
+                onclick={() => fileInput?.click()}>{@render toolIcon(id)}</Button
+              >{:else}<Button
+                type="button"
+                variant="ghost"
+                class="search-toggle"
+                size="icon-sm"
+                aria-label={t('chat.generateImage')}
+                aria-pressed={generateImage}
+                disabled={session.running || !paintingModel || capability?.supportsTools === false}
+                title={!paintingModel
+                  ? t('chat.paintingUnconfigured')
+                  : capability?.supportsTools === false
+                    ? t('chat.toolsUnsupported')
+                    : t('chat.generateImage')}
+                onclick={() => (generateImage = !generateImage)}>{@render toolIcon(id)}</Button
+              >{/if}
+          {/each}
           <input
             bind:this={fileInput}
             type="file"
@@ -878,21 +980,7 @@
               void attach(input.files).finally(() => (input.value = ''))
             }}
           />
-          {#if ports.search && purpose === 'chat'}<Button
-              type="button"
-              variant="ghost"
-              class="search-toggle"
-              size="icon-sm"
-              aria-label={t('chat.network')}
-              aria-pressed={webSearch}
-              disabled={session.running}
-              title={`${t(webSearch ? 'chat.networkOn' : 'chat.networkOff')} · ${t('chat.networkPrivacy')}`}
-              onclick={() => (webSearch = !webSearch)}
-              ><GlobeIcon
-                >{#if !webSearch}<path d="m2 2 20 20" />{/if}</GlobeIcon
-              ></Button
-            >{/if}
-          <Popover.Root bind:open={toolsOpen}>
+          <Popover.Root bind:open={toolsOpen} onOpenChange={(open) => !open && (customizing = false)}>
             <Popover.Trigger disabled={session.running}>
               {#snippet child({ props })}<Button
                   {...props}
@@ -904,40 +992,104 @@
                 >{/snippet}
             </Popover.Trigger>
             <Popover.Content class="tools-menu" side="top" align="start" sideOffset={6} collisionPadding={8}>
-              <button
-                type="button"
-                class="tools-item"
-                disabled={!vision}
-                title={vision ? undefined : t('chat.visionUnsupported')}
-                onclick={() => {
-                  toolsOpen = false
-                  fileInput?.click()
-                }}
-                ><PaperclipIcon /><span>{t('chat.uploadAttachment')}</span>{#if !vision}<small
-                    >{t('chat.visionUnsupported')}</small
-                  >{/if}</button
-              >
-              {#if purpose === 'chat'}<button
+              {#if customizing}
+                <p class="tools-title" id="{reasoningId}-toolbar">{t('chat.toolbarCustomize')}</p>
+                <ul class="tools-order" aria-labelledby="{reasoningId}-toolbar">
+                  {#each toolOrder as id, index (id)}
+                    <li class="tools-row">
+                      <button
+                        type="button"
+                        class="tools-grip"
+                        aria-label={t('chat.toolbarDrag', { name: t(TOOL_LABEL[id] ?? id) })}
+                        onpointerdown={(e) => dragTool(e, id)}
+                        onkeydown={(e) => {
+                          if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+                          e.preventDefault()
+                          const button = e.currentTarget
+                          moveTool(id, index + (e.key === 'ArrowUp' ? -1 : 1))
+                          void tick().then(() => button.focus())
+                        }}><GripVerticalIcon /></button
+                      >
+                      {@render toolIcon(id)}<span>{t(TOOL_LABEL[id] ?? id)}</span>
+                      <Switch
+                        size="sm"
+                        aria-label={t(TOOL_LABEL[id] ?? id)}
+                        checked={pinned.includes(id)}
+                        onCheckedChange={(on) =>
+                          setPinned(toolOrder.filter((item) => (item === id ? on : pinned.includes(item))))}
+                      />
+                    </li>
+                  {/each}
+                </ul>
+                <button
                   type="button"
-                  class="tools-item"
-                  aria-pressed={generateImage}
-                  disabled={!paintingModel || capability?.supportsTools === false}
-                  title={!paintingModel
-                    ? t('chat.paintingUnconfigured')
-                    : capability?.supportsTools === false
-                      ? t('chat.toolsUnsupported')
-                      : undefined}
+                  class="tools-item tools-footer"
+                  disabled={pinned.join() === DEFAULT_TOOLBAR.join()}
                   onclick={() => {
-                    toolsOpen = false
-                    generateImage = !generateImage
-                  }}
-                  ><ImageIcon /><span>{t('chat.generateImage')}</span>{#if !paintingModel}<small
-                      >{t('chat.paintingUnconfigured')}</small
-                    >{:else if generateImage}<CheckIcon />{/if}</button
-                >{/if}
+                    pinned = [...DEFAULT_TOOLBAR]
+                    onToolbarChange?.(pinned)
+                  }}><RotateCcwIcon /><span>{t('chat.toolbarRestore')}</span></button
+                >
+              {:else}
+                {#each toolOrder.filter((id) => !pinned.includes(id)) as id (id)}
+                  {#if id === 'new-conversation'}<button
+                      type="button"
+                      class="tools-item"
+                      disabled={historyBusy}
+                      onclick={() => {
+                        toolsOpen = false
+                        newConversation()
+                      }}>{@render toolIcon(id)}<span>{t('chat.newConversation')}</span></button
+                    >{:else if id === 'web-search'}<button
+                      type="button"
+                      class="tools-item"
+                      aria-pressed={webSearch}
+                      onclick={() => {
+                        toolsOpen = false
+                        webSearch = !webSearch
+                      }}
+                      >{@render toolIcon(id)}<span>{t('chat.network')}</span>{#if webSearch}<CheckIcon />{/if}</button
+                    >{:else if id === 'attachment'}<button
+                      type="button"
+                      class="tools-item"
+                      disabled={!vision}
+                      title={vision ? undefined : t('chat.visionUnsupported')}
+                      onclick={() => {
+                        toolsOpen = false
+                        fileInput?.click()
+                      }}
+                      >{@render toolIcon(id)}<span>{t('chat.uploadAttachment')}</span>{#if !vision}<small
+                          >{t('chat.visionUnsupported')}</small
+                        >{/if}</button
+                    >{:else}<button
+                      type="button"
+                      class="tools-item"
+                      aria-pressed={generateImage}
+                      disabled={!paintingModel || capability?.supportsTools === false}
+                      title={!paintingModel
+                        ? t('chat.paintingUnconfigured')
+                        : capability?.supportsTools === false
+                          ? t('chat.toolsUnsupported')
+                          : undefined}
+                      onclick={() => {
+                        toolsOpen = false
+                        generateImage = !generateImage
+                      }}
+                      >{@render toolIcon(id)}<span>{t('chat.generateImage')}</span>{#if !paintingModel}<small
+                          >{t('chat.paintingUnconfigured')}</small
+                        >{:else if generateImage}<CheckIcon />{/if}</button
+                    >{/if}
+                {/each}
+                <button
+                  type="button"
+                  class="tools-item tools-footer"
+                  aria-label={t('chat.toolbarCustomize')}
+                  onclick={() => (customizing = true)}><span>{t('chat.quickPanel')}</span><Settings2Icon /></button
+                >
+              {/if}
             </Popover.Content>
           </Popover.Root>
-          {#if generateImage && paintingModel && purpose === 'chat'}<Button
+          {#if generateImage && paintingModel && purpose === 'chat' && !pinned.includes('generate-image')}<Button
               type="button"
               variant="secondary"
               size="sm"
@@ -1439,6 +1591,71 @@
     margin-left: auto;
     color: var(--color-muted-foreground);
     font-size: 0.75rem;
+  }
+  :global(.tools-item > svg:last-child:not(:first-child)) {
+    margin-left: auto;
+  }
+  :global(.tools-footer) {
+    margin-top: 0.25rem;
+    border-top: 1px solid var(--color-border);
+    border-radius: 0 0 calc(var(--kit-radius, var(--radius)) - 2px) calc(var(--kit-radius, var(--radius)) - 2px);
+    color: var(--color-muted-foreground);
+  }
+  :global(.tools-title) {
+    margin: 0;
+    padding: 0.375rem 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+  :global(.tools-order) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  :global(.tools-row) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2rem;
+    padding: 0 0.375rem;
+    border-radius: calc(var(--kit-radius, var(--radius)) - 2px);
+    font-size: 0.875rem;
+  }
+  :global(.tools-row:hover) {
+    background: var(--color-accent);
+  }
+  :global(.tools-row > svg) {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    color: var(--color-muted-foreground);
+  }
+  :global(.tools-row > span) {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  :global(.tools-grip) {
+    display: inline-flex;
+    padding: 0.125rem;
+    border: 0;
+    border-radius: 0.25rem;
+    background: none;
+    color: var(--color-muted-foreground);
+    cursor: grab;
+    touch-action: none;
+  }
+  :global(.tools-grip:focus-visible) {
+    outline: 2px solid var(--color-ring);
+  }
+  :global(.tools-grip svg) {
+    width: 0.875rem;
+    height: 0.875rem;
   }
   :global(.reasoning-popover) {
     box-sizing: border-box;
