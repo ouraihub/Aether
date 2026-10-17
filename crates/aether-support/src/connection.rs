@@ -49,6 +49,8 @@ pub struct Connection {
     pub headers: Vec<(String, String)>,
     /// Normalised image generation base URL; `None` = use `base_url`.
     pub image_base_url: Option<String>,
+    /// Normalised image edit (`/images/edits`) base URL; `None` = use `base_url`.
+    pub image_edit_base_url: Option<String>,
 }
 
 /// Header names only the system sets; saves reject them (docs/11 §3).
@@ -100,6 +102,13 @@ impl fmt::Debug for Connection {
                 "image_base_url",
                 &self.image_base_url.as_deref().map(crate::mask::mask_url),
             )
+            .field(
+                "image_edit_base_url",
+                &self
+                    .image_edit_base_url
+                    .as_deref()
+                    .map(crate::mask::mask_url),
+            )
             .finish()
     }
 }
@@ -123,6 +132,7 @@ mod tests {
             can_vision: false,
             headers: vec![("X-Trace".to_owned(), "secret-header".to_owned())],
             image_base_url: None,
+            image_edit_base_url: None,
         };
         let printed = format!("{connection:?}");
         assert!(

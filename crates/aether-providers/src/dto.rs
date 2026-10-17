@@ -135,6 +135,8 @@ pub struct Endpoint {
     pub models: Vec<Model>,
     /// Image generation base URL; `None` = use `base_url`.
     pub image_base_url: Option<String>,
+    /// Image edit (`/images/edits`) base URL; `None` = use `base_url`.
+    pub image_edit_base_url: Option<String>,
     /// Custom request headers, applied before system headers.
     pub headers: BTreeMap<String, String>,
 }
@@ -175,6 +177,10 @@ pub struct EndpointSave {
     #[serde(default, deserialize_with = "present")]
     #[ts(optional = nullable)]
     pub image_base_url: Option<Option<String>>,
+    /// Image edit base URL: empty/null = use `baseUrl`; absent = keep.
+    #[serde(default, deserialize_with = "present")]
+    #[ts(optional = nullable)]
+    pub image_edit_base_url: Option<Option<String>>,
     /// Custom request headers; absent = keep.
     #[serde(default)]
     #[ts(optional)]

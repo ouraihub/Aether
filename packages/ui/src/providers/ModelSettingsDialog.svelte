@@ -116,6 +116,15 @@
             {/if}
           {/if}
         {/if}
+        {#if edit.modelType === 'image'}
+          <Field.Field orientation="horizontal">
+            <Switch id="kit-model-image-edit" bind:checked={edit.canVision} />
+            <Field.Content>
+              <Field.Label for="kit-model-image-edit">{t('providers.image_edit')}</Field.Label>
+              <Field.Description class="text-kit-xs">{t('providers.image_edit_hint')}</Field.Description>
+            </Field.Content>
+          </Field.Field>
+        {/if}
         <Field.Field>
           <Field.Label for="kit-model-context">{t('providers.context_window')}</Field.Label>
           <Input

@@ -233,7 +233,8 @@ pub(crate) fn check_request(req: &RunRequest, has_store: bool) -> Result<(), Kit
     Ok(())
 }
 
-/// docs/15 §4 steps 2–4, 6: model, connection, skill snapshot, system parts and trimmed history.
+/// docs/15 §4 steps 2–4, 6: model, connection, skill snapshot, system parts and trimmed history,
+/// plus the untrimmed history path (for `generate_image` choices, docs/37 §2.1).
 pub(crate) fn assemble(
     host: &dyn KitHost,
     providers: &aether_providers::Store,
@@ -242,7 +243,7 @@ pub(crate) fn assemble(
     budget: Budget,
     req: &RunRequest,
     run_id: String,
-) -> Result<RunInput, KitError> {
+) -> Result<(RunInput, Vec<aether_chat::Turn>), KitError> {
     let (turns, (input, images), source_model) = match (store, &req.conversation_id) {
         (Some(store), Some(id)) => {
             let conversation = store.load(id)?;
@@ -374,7 +375,7 @@ pub(crate) fn assemble(
         .saturating_sub(budget.max_output)
         .saturating_sub(used);
     let reasoning_effort = req.reasoning_effort.unwrap_or_default();
-    Ok(RunInput {
+    let input = RunInput {
         run_id,
         connection,
         system,
@@ -389,7 +390,8 @@ pub(crate) fn assemble(
         budget,
         reasoning_effort,
         native_web_search: false,
-    })
+    };
+    Ok((input, turns))
 }
 
 /// The skill store, or an uninhabited stand-in so `chat` without `skills` compiles the same call.
@@ -449,7 +451,7 @@ pub(crate) async fn chat_run<R: Runtime>(
     #[cfg(not(feature = "skills"))]
     let skill_store: Option<Arc<SkillStore>> = None;
     let task_run_id = run_id.clone();
-    let (mut input, mut request) = blocking(move || {
+    let (mut input, path, mut request) = blocking(move || {
         let mut request = request;
         if let (Some(store), Some(id)) = (store.as_deref(), request.conversation_id.as_deref())
             && request.reply_to_id.is_none()
@@ -473,7 +475,7 @@ pub(crate) async fn chat_run<R: Runtime>(
             }
         }
         let skills = skill_parts(skill_store.as_deref(), &request.skills)?;
-        let input = assemble(
+        let (input, path) = assemble(
             host.as_ref(),
             &providers,
             store.as_deref(),
@@ -482,7 +484,7 @@ pub(crate) async fn chat_run<R: Runtime>(
             &request,
             task_run_id,
         )?;
-        Ok((input, request))
+        Ok((input, path, request))
     })
     .await?;
     let skill_refs = request.skills.clone();
@@ -501,13 +503,16 @@ pub(crate) async fn chat_run<R: Runtime>(
             .ok_or_else(|| KitError::needs_config("painting_model"))?;
         let providers = Arc::clone(&app.state::<Providers>().store);
         let connection = blocking(move || providers.resolve(&model)).await?;
-        input.tools.push(aether_chat::generate_image_spec());
-        executor.painting = Some(crate::tools::Painting {
+        let painting = crate::tools::Painting {
+            choices: crate::tools::image_choices(&input.images, &path).into(),
+            history: chat.store.clone().zip(request.conversation_id.clone()),
             connection,
             policy: AddressPolicy::default(),
             store: None,
             calls: std::sync::atomic::AtomicU8::new(0),
-        });
+        };
+        input.tools.push(crate::tools::painting_spec(&painting));
+        executor.painting = Some(painting);
     }
     let web_search = request.web_search.unwrap_or(false);
     if web_search && request.purpose != "chat" {

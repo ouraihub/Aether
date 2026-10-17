@@ -111,6 +111,7 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
                 native_web_search: false,
             }],
             image_base_url: None,
+            image_edit_base_url: None,
             headers: None,
         }],
     })?;

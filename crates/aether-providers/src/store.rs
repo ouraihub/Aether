@@ -70,6 +70,7 @@ pub(crate) struct EndpointRow {
     pub(crate) keys: Vec<Zeroizing<String>>,
     pub(crate) headers: Vec<(String, String)>,
     pub(crate) image_base_url: Option<String>,
+    pub(crate) image_edit_base_url: Option<String>,
 }
 
 /// Provider configuration stored in `<root>/providers.db`.
@@ -128,6 +129,10 @@ CREATE INDEX idx_endpoint_keys ON endpoint_keys(endpoint_id, position, id);",
                 version: 6,
                 sql: "ALTER TABLE endpoints ADD COLUMN image_base_url TEXT;
 ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
+            },
+            Migration {
+                version: 7,
+                sql: "ALTER TABLE endpoints ADD COLUMN image_edit_base_url TEXT;",
             },
         ];
         let db = db::open(&path, &steps)?;
@@ -500,6 +505,7 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
             can_vision,
             headers: row.headers,
             image_base_url: row.image_base_url,
+            image_edit_base_url: row.image_edit_base_url,
         })
     }
 
@@ -522,6 +528,7 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
             can_vision: false,
             headers: row.headers,
             image_base_url: row.image_base_url,
+            image_edit_base_url: row.image_edit_base_url,
         })
     }
 
@@ -550,7 +557,7 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
     fn endpoint_row(&self, db: &Db, endpoint_id: &str) -> Result<EndpointRow, KitError> {
         let row = db
             .query_row(
-                "SELECT base_url, protocol, headers, image_base_url FROM endpoints WHERE id = ?1",
+                "SELECT base_url, protocol, headers, image_base_url, image_edit_base_url FROM endpoints WHERE id = ?1",
                 [endpoint_id],
                 |row| {
                     Ok((
@@ -558,17 +565,19 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
                     ))
                 },
             )
             .optional()?;
-        let (base_url, protocol, headers, image_base_url) =
+        let (base_url, protocol, headers, image_base_url, image_edit_base_url) =
             row.ok_or_else(|| KitError::not_found("endpoint"))?;
         Ok(EndpointRow {
             protocol: parse_protocol(&protocol)?,
             keys: self.keys(db, endpoint_id)?,
             headers: parse_headers(&headers)?.into_iter().collect(),
             image_base_url: image_base_url.as_deref().map(api_base),
+            image_edit_base_url: image_edit_base_url.as_deref().map(api_base),
             base_url,
         })
     }
@@ -656,13 +665,18 @@ fn validate(input: &ProviderSave) -> Result<(), KitError> {
         if !(url.is_empty() || url.starts_with("http://") || url.starts_with("https://")) {
             return Err(KitError::bad_request("baseUrl", "invalid_url"));
         }
-        if let Some(Some(image)) = &endpoint.image_base_url {
-            let image = image.trim();
-            if !image.is_empty()
-                && (image.len() > MAX_BASE_URL
-                    || !(image.starts_with("http://") || image.starts_with("https://")))
-            {
-                return Err(KitError::bad_request("imageBaseUrl", "invalid_url"));
+        for (field, image) in [
+            ("imageBaseUrl", &endpoint.image_base_url),
+            ("imageEditBaseUrl", &endpoint.image_edit_base_url),
+        ] {
+            if let Some(Some(image)) = image {
+                let image = image.trim();
+                if !image.is_empty()
+                    && (image.len() > MAX_BASE_URL
+                        || !(image.starts_with("http://") || image.starts_with("https://")))
+                {
+                    return Err(KitError::bad_request(field, "invalid_url"));
+                }
             }
         }
         if let Some(headers) = &endpoint.headers {
@@ -739,12 +753,17 @@ fn write_endpoint(
     let base_url = endpoint.base_url.trim();
     let protocol = protocol_str(endpoint.protocol);
     // `None` = keep the stored value (new endpoints: null / `{}`).
-    let image = endpoint.image_base_url.as_ref().map(|image| {
-        image
-            .as_deref()
-            .map(str::trim)
-            .filter(|image| !image.is_empty())
-    });
+    let trim = |image: &Option<Option<String>>| {
+        image.as_ref().map(|image| {
+            image
+                .as_deref()
+                .map(str::trim)
+                .filter(|image| !image.is_empty())
+                .map(str::to_owned)
+        })
+    };
+    let image = trim(&endpoint.image_base_url);
+    let edit = trim(&endpoint.image_edit_base_url);
     let headers = endpoint
         .headers
         .as_ref()
@@ -760,16 +779,17 @@ fn write_endpoint(
     let id = if let Some(id) = &endpoint.id {
         tx.execute(
             "UPDATE endpoints SET slug = ?2, base_url = ?3, protocol = ?4, position = ?5,
-             image_base_url = CASE WHEN ?6 THEN ?7 ELSE image_base_url END, headers = COALESCE(?8, headers) WHERE id = ?1",
-            params![id, endpoint.slug, base_url, protocol, position, image.is_some(), image.flatten(), headers],
+             image_base_url = CASE WHEN ?6 THEN ?7 ELSE image_base_url END, headers = COALESCE(?8, headers),
+             image_edit_base_url = CASE WHEN ?9 THEN ?10 ELSE image_edit_base_url END WHERE id = ?1",
+            params![id, endpoint.slug, base_url, protocol, position, image.is_some(), image.flatten(), headers, edit.is_some(), edit.flatten()],
         )?;
         id.clone()
     } else {
         let id = new_id()?;
         tx.execute(
-            "INSERT INTO endpoints (id, provider_id, slug, base_url, protocol, position, image_base_url, headers)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(?8, '{}'))",
-            params![id, provider_id, endpoint.slug, base_url, protocol, position, image.flatten(), headers],
+            "INSERT INTO endpoints (id, provider_id, slug, base_url, protocol, position, image_base_url, headers, image_edit_base_url)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(?8, '{}'), ?9)",
+            params![id, provider_id, endpoint.slug, base_url, protocol, position, image.flatten(), headers, edit.flatten()],
         )?;
         id
     };
@@ -851,7 +871,7 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
         });
     }
     let mut endpoints: HashMap<String, Vec<Endpoint>> = HashMap::new();
-    let mut stmt = db.prepare_cached("SELECT provider_id, id, slug, base_url, protocol, image_base_url, headers FROM endpoints ORDER BY provider_id, position")?;
+    let mut stmt = db.prepare_cached("SELECT provider_id, id, slug, base_url, protocol, image_base_url, headers, image_edit_base_url FROM endpoints ORDER BY provider_id, position")?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(1)?;
@@ -864,6 +884,7 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
             probe_url: format!("{}/models", api_base(&base_url)),
             models: models.remove(&id).unwrap_or_default(),
             image_base_url: row.get(5)?,
+            image_edit_base_url: row.get(7)?,
             headers: parse_headers(&row.get::<_, String>(6)?)?,
             base_url,
             id,
@@ -1115,7 +1136,7 @@ mod tests {
                 assert_eq!(
                     db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                         .unwrap(),
-                    6
+                    7
                 );
             }
             assert!(path.with_file_name("providers.db.bak-v2").is_file());
@@ -1579,7 +1600,7 @@ mod tests {
     }
 
     #[test]
-    fn version_five_db_upgrades_to_six_with_empty_request_config() {
+    fn version_five_db_upgrades_with_empty_request_config() {
         let dir = tempfile::tempdir().unwrap();
         let db = Db::open(dir.path().join("providers.db")).unwrap();
         db.execute_batch(
@@ -1596,6 +1617,7 @@ mod tests {
         let store = Store::open(dir.path()).unwrap();
         let endpoint = &store.list().unwrap()[0].endpoints[0];
         assert_eq!(endpoint.image_base_url, None);
+        assert_eq!(endpoint.image_edit_base_url, None);
         assert!(endpoint.headers.is_empty());
         let connection = store.endpoint_connection("e").unwrap();
         assert!(connection.headers.is_empty() && connection.image_base_url.is_none());
@@ -1604,7 +1626,46 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
+    }
+
+    #[test]
+    fn version_six_db_upgrades_to_seven_keeping_request_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(dir.path().join("providers.db")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE providers (id TEXT PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+             CREATE TABLE endpoints (id TEXT PRIMARY KEY, provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE, slug TEXT NOT NULL, base_url TEXT NOT NULL, protocol TEXT NOT NULL, position INTEGER NOT NULL, image_base_url TEXT, headers TEXT NOT NULL DEFAULT '{}', UNIQUE(provider_id, slug));
+             CREATE TABLE models (endpoint_id TEXT NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE, model_id TEXT NOT NULL, model_type TEXT NOT NULL, type_source TEXT NOT NULL, context_window INTEGER, max_output INTEGER, can_vision INTEGER NOT NULL DEFAULT 0, supports_tools INTEGER, position INTEGER NOT NULL, reasoning TEXT, native_web_search INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(endpoint_id, model_id));
+             CREATE TABLE endpoint_keys (id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE, label TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1, key_ciphertext BLOB NOT NULL, position INTEGER NOT NULL);
+             CREATE INDEX idx_endpoint_keys ON endpoint_keys(endpoint_id, position, id);
+             INSERT INTO providers VALUES ('p', 'Saved', 0, 1, 1, 1);
+             INSERT INTO endpoints VALUES ('e', 'p', 'saved', 'https://example.com', 'openai-chat', 0, 'https://img.example.com', '{\"X-A\":\"1\"}');
+             PRAGMA user_version = 6;",
+        )
+        .unwrap();
+        drop(db);
+        let store = Store::open(dir.path()).unwrap();
+        let endpoint = &store.list().unwrap()[0].endpoints[0];
+        assert_eq!(
+            endpoint.image_base_url.as_deref(),
+            Some("https://img.example.com")
+        );
+        assert_eq!(endpoint.image_edit_base_url, None);
+        assert_eq!(endpoint.headers.len(), 1);
+        assert!(
+            store
+                .endpoint_connection("e")
+                .unwrap()
+                .image_edit_base_url
+                .is_none()
+        );
+        let version: u32 = store
+            .lock()
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 7);
     }
 
     #[test]
@@ -1612,6 +1673,7 @@ mod tests {
         let (_dir, store) = store();
         let mut first = endpoint(None, "a", &["m1"]);
         first["imageBaseUrl"] = json!("  https://img.example.com/  ");
+        first["imageEditBaseUrl"] = json!(" https://edit.example.com ");
         first["headers"] = json!({ " X-Relay-Tag ": "team-a", "X-Two": "2" });
         let saved = store
             .save(request(json!({ "name": "P", "endpoints": [first] })))
@@ -1627,6 +1689,10 @@ mod tests {
                 listed.image_base_url.as_deref(),
                 Some("https://img.example.com/")
             );
+            assert_eq!(
+                listed.image_edit_base_url.as_deref(),
+                Some("https://edit.example.com")
+            );
             assert_eq!(listed.headers, expected);
             let resolved = store
                 .resolve(&ModelRef {
@@ -1637,6 +1703,10 @@ mod tests {
             assert_eq!(
                 resolved.image_base_url.as_deref(),
                 Some("https://img.example.com/v1")
+            );
+            assert_eq!(
+                resolved.image_edit_base_url.as_deref(),
+                Some("https://edit.example.com/v1")
             );
             assert_eq!(resolved.headers.len(), 2);
         };
@@ -1652,7 +1722,8 @@ mod tests {
         // null / "" and {} clear.
         for image in [json!(null), json!("  ")] {
             let mut cleared = endpoint(Some(&ep), "a", &["m1"]);
-            cleared["imageBaseUrl"] = image;
+            cleared["imageBaseUrl"] = image.clone();
+            cleared["imageEditBaseUrl"] = image;
             cleared["headers"] = json!({});
             let listed = store
                 .save(request(
@@ -1660,6 +1731,7 @@ mod tests {
                 ))
                 .unwrap();
             assert_eq!(listed[0].endpoints[0].image_base_url, None);
+            assert_eq!(listed[0].endpoints[0].image_edit_base_url, None);
             assert!(listed[0].endpoints[0].headers.is_empty());
         }
     }
@@ -1678,6 +1750,16 @@ mod tests {
             (
                 json!({ "imageBaseUrl": format!("https://{}", "a".repeat(2048)) }),
                 "imageBaseUrl",
+                "invalid_url",
+            ),
+            (
+                json!({ "imageEditBaseUrl": "ftp://x" }),
+                "imageEditBaseUrl",
+                "invalid_url",
+            ),
+            (
+                json!({ "imageEditBaseUrl": format!("https://{}", "a".repeat(2048)) }),
+                "imageEditBaseUrl",
                 "invalid_url",
             ),
             (json!({ "headers": many }), "headers", "too_many"),

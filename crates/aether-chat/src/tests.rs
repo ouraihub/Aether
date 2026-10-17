@@ -195,6 +195,7 @@ fn input(protocol: Protocol, base_url: String) -> RunInput {
         can_vision: true,
         headers: Vec::new(),
         image_base_url: None,
+        image_edit_base_url: None,
     };
     RunInput {
         run_id: "r1".to_owned(),

@@ -40,6 +40,10 @@ models: Array<Model>,
  */
 imageBaseUrl: string | null, 
 /**
+ * Image edit (`/images/edits`) base URL; `None` = use `base_url`.
+ */
+imageEditBaseUrl: string | null, 
+/**
  * Custom request headers, applied before system headers.
  */
 headers: { [key in string]?: string }, };

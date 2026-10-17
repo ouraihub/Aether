@@ -14,7 +14,10 @@ pub use tokio_util::sync::CancellationToken;
 
 /// Hosts build a [`Runner`] with it without depending on the private `aether-support`.
 pub use aether_support::net::AddressPolicy;
-pub use painting::{GENERATE_IMAGE, generate_image, generate_image_spec};
+pub use painting::{
+    GENERATE_IMAGE, ImageOrigin, MAX_EDIT_IMAGES, MAX_IMAGE_CHOICES, generate_image,
+    generate_image_spec,
+};
 pub use run::{RunSummary, Runner, Usage};
 pub use store::{
     Conversation, ConversationStore, ConversationSummary, SqliteStore, Turn, TurnHandle, TurnImage,

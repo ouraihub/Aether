@@ -142,7 +142,8 @@ async fn runs_without_a_conversation_store() {
         &request,
         "r1".to_owned(),
     )
-    .unwrap();
+    .unwrap()
+    .0;
     assert!(input.history.is_empty());
     assert!(input.tools.is_empty());
     let runner = Runner::new(AddressPolicy::default()).unwrap();
@@ -235,7 +236,8 @@ async fn tool_run(
         &request,
         "r1".to_owned(),
     )
-    .unwrap();
+    .unwrap()
+    .0;
     assert_eq!(input.tools.len(), 2);
     let approvals = Arc::new(Approvals::new(Duration::from_secs(5)));
     let mut outcomes = Vec::new();
@@ -438,6 +440,7 @@ async fn retry_and_translation_use_source_ancestry_and_real_runner() {
             request,
             "r1".into(),
         )
+        .map(|(input, _)| input)
     };
     let normal = assemble(&request).unwrap();
     assert!(normal.history.contains(&Message::User("q2".into())));
@@ -620,4 +623,134 @@ async fn end_is_returned_only_after_durable_finish_and_storage_failure_is_explic
             ..
         }
     ));
+}
+
+#[test]
+fn earlier_generated_image_is_selectable_and_ids_are_checked() {
+    use crate::tools::{ImageChoice, image_choices, painting_spec, resolve_images};
+    use aether_chat::{ConversationStore, ImagePart, SqliteStore};
+    let part = |data: &str| ImagePart {
+        mime: "image/png".into(),
+        data: data.into(),
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let (providers, mut request) = local_model(dir.path(), "http://127.0.0.1:9/v1", "q2");
+    let model = request.model.clone().unwrap();
+    let sqlite = Arc::new(SqliteStore::open(dir.path()).unwrap());
+    let store: Arc<dyn ConversationStore> = sqlite.clone();
+    // Turn 1: the user attached `in1`; the reply generated `gen1`.
+    let first = store
+        .begin_action(
+            None,
+            Some("note:1"),
+            "draw",
+            &[part("aW4x")],
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let conversation_id = first.conversation_id.clone();
+    store
+        .add_generated(&first.turn_id, &[part("Z2VuMQ==")])
+        .unwrap();
+    store_reply(&sqlite, first, &model, "done");
+    request.conversation_id = Some(conversation_id.clone());
+    request.images = vec![part("bm93")];
+    let (input, path) = super::chat::assemble(
+        &Host,
+        &providers,
+        Some(store.as_ref()),
+        Vec::new(),
+        ChatConfig::default().budget,
+        &request,
+        "r1".into(),
+    )
+    .unwrap();
+    let choices = image_choices(&input.images, &path);
+    assert_eq!(choices.len(), 3);
+    assert_eq!(choices[0], ImageChoice::Input(part("bm93")));
+    assert!(matches!(
+        choices[1],
+        ImageChoice::Stored {
+            generated: true,
+            idx: 0,
+            ..
+        }
+    ));
+    assert!(matches!(
+        choices[2],
+        ImageChoice::Stored {
+            generated: false,
+            idx: 0,
+            ..
+        }
+    ));
+
+    let mut painting = crate::tools::Painting {
+        connection: input.connection,
+        policy: AddressPolicy::default(),
+        store: None,
+        calls: std::sync::atomic::AtomicU8::new(0),
+        choices: choices.into(),
+        history: Some((Arc::clone(&store), conversation_id)),
+    };
+    // Not an edit model: no `image_ids`, and passing one is rejected.
+    assert!(
+        painting_spec(&painting).parameters["properties"]
+            .get("image_ids")
+            .is_none()
+    );
+    let resolve = |painting: &crate::tools::Painting, args| {
+        resolve_images(
+            &painting.choices,
+            painting.history.as_ref(),
+            painting.connection.can_vision,
+            &args,
+        )
+    };
+    let reason = |result: Result<Vec<ImagePart>, aether_support::KitError>| {
+        result.unwrap_err().details().reason().map(str::to_owned)
+    };
+    assert_eq!(
+        reason(resolve(&painting, json!({"image_ids": ["image-2"]}))).as_deref(),
+        Some("unsupported")
+    );
+    painting.connection.can_vision = true;
+    let spec = painting_spec(&painting);
+    assert_eq!(
+        spec.parameters["properties"]["image_ids"]["items"]["enum"],
+        json!(["image-1", "image-2", "image-3"])
+    );
+    assert!(
+        spec.description
+            .contains("image-2: generated in an earlier reply")
+    );
+    assert!(
+        spec.description
+            .contains("image-3: attached in an earlier message")
+    );
+    assert_eq!(
+        resolve(&painting, json!({"image_ids": ["image-2", "image-1"]})).unwrap(),
+        vec![part("Z2VuMQ=="), part("bm93")]
+    );
+    assert!(
+        resolve(&painting, json!({"prompt": "x"}))
+            .unwrap()
+            .is_empty()
+    );
+    for (args, want) in [
+        (json!({"image_ids": ["image-9"]}), "unknown"),
+        (json!({"image_ids": ["x"]}), "unknown"),
+        (json!({"image_ids": vec!["image-1"; 5]}), "too_many"),
+    ] {
+        assert_eq!(reason(resolve(&painting, args)).as_deref(), Some(want));
+    }
+    // Purged bytes: the choice still exists but is expired.
+    store.purge_images(i64::MAX).unwrap();
+    assert_eq!(
+        reason(resolve(&painting, json!({"image_ids": ["image-2"]}))).as_deref(),
+        Some("expired")
+    );
 }

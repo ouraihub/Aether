@@ -31,6 +31,10 @@ models: Array<ModelSave>,
  */
 imageBaseUrl?: string | null | null, 
 /**
+ * Image edit base URL: empty/null = use `baseUrl`; absent = keep.
+ */
+imageEditBaseUrl?: string | null | null, 
+/**
  * Custom request headers; absent = keep.
  */
 headers?: { [key in string]?: string }, };

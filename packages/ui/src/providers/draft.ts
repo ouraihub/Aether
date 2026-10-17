@@ -20,6 +20,8 @@ export interface EndpointDraft {
   protocol: Protocol
   /** `null` = paint at `baseUrl` (docs/36 §3.4). */
   imageBaseUrl: string | null
+  /** `null` = edit at `baseUrl` (docs/37 §2). */
+  imageEditBaseUrl: string | null
   headers: Endpoint['headers']
   models: Model[]
 }
@@ -42,6 +44,7 @@ export function toDraft(provider: Provider): ProviderDraft {
       baseUrl: saved.baseUrl,
       protocol: saved.protocol,
       imageBaseUrl: saved.imageBaseUrl,
+      imageEditBaseUrl: saved.imageEditBaseUrl,
       headers: saved.headers,
       models: saved.models,
     })),
@@ -55,6 +58,7 @@ export function newEndpoint(taken: readonly EndpointDraft[]): EndpointDraft {
     baseUrl: '',
     protocol: 'openai-chat',
     imageBaseUrl: null,
+    imageEditBaseUrl: null,
     headers: {},
     models: [],
   }
@@ -103,6 +107,7 @@ export function toSave(draft: ProviderDraft): ProviderSave {
       baseUrl: e.baseUrl.trim(),
       protocol: e.protocol,
       imageBaseUrl: e.imageBaseUrl?.trim() || null,
+      imageEditBaseUrl: e.imageEditBaseUrl?.trim() || null,
       headers: e.headers,
       models: e.models.map((model) => ({
         ...model,

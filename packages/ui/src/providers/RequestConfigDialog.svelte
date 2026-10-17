@@ -37,6 +37,7 @@
   let protocol = $state<Protocol>('openai-chat')
   let baseUrl = $state('')
   let imageBaseUrl = $state('')
+  let imageEditBaseUrl = $state('')
   let rows = $state<Row[]>([])
   let json = $state<string | null>(null)
   let error = $state<string | null>(null)
@@ -48,6 +49,7 @@
       protocol = endpoint.protocol
       baseUrl = endpoint.baseUrl
       imageBaseUrl = endpoint.imageBaseUrl ?? ''
+      imageEditBaseUrl = endpoint.imageEditBaseUrl ?? ''
       rows = Object.entries(endpoint.headers).map(([name, value = '']) => ({ name, value }))
       json = null
       error = null
@@ -80,11 +82,14 @@
       json = null
     }
   }
+  /** Same rule as the backend `image_base`: optional, http(s), ≤2048 bytes. */
+  const badImage = (url: string) => !!url && (!validUrl(url) || new TextEncoder().encode(url).length > 2048)
   function save() {
     error = null
     const url = baseUrl.trim()
     const image = imageBaseUrl.trim()
-    if ((url && !validUrl(url)) || (image && (!validUrl(image) || new TextEncoder().encode(image).length > 2048))) {
+    const imageEdit = imageEditBaseUrl.trim()
+    if ((url && !validUrl(url)) || badImage(image) || badImage(imageEdit)) {
       error = t('providers.url_invalid')
       return
     }
@@ -104,6 +109,7 @@
     endpoint.protocol = protocol
     endpoint.baseUrl = url
     endpoint.imageBaseUrl = image || null
+    endpoint.imageEditBaseUrl = imageEdit || null
     endpoint.headers = checked.headers
     open = false
     oncommit()
@@ -158,6 +164,16 @@
           bind:value={imageBaseUrl}
         />
         <Field.Description class="text-kit-xs">{t('providers.image_base_url_hint')}</Field.Description>
+      </Field.Field>
+      <Field.Field>
+        <Field.Label for="kit-request-image-edit-url">{t('providers.image_edit_base_url')}</Field.Label>
+        <Input
+          id="kit-request-image-edit-url"
+          class="font-mono"
+          placeholder="https://example.com"
+          bind:value={imageEditBaseUrl}
+        />
+        <Field.Description class="text-kit-xs">{t('providers.image_edit_base_url_hint')}</Field.Description>
       </Field.Field>
       <Field.Field>
         <div class="flex items-center justify-between gap-2">

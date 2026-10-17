@@ -13,6 +13,7 @@ const endpoint: Endpoint = {
   keys: [{ id: 'k1', label: '', enabled: true, masked: 'sk-a****wxyz', readable: true }],
   probeUrl: 'http://127.0.0.1:9/v1/models',
   imageBaseUrl: null,
+  imageEditBaseUrl: null,
   headers: { 'X-Team': 'a' },
   models: [],
 }
@@ -191,6 +192,9 @@ describe('ProvidersSettings', () => {
     await fireEvent.input(dialog.getByRole('textbox', { name: 'Image generation base URL' }), {
       target: { value: ' https://img.example.com ' },
     })
+    await fireEvent.input(dialog.getByRole('textbox', { name: 'Image edit base URL' }), {
+      target: { value: ' https://edit.example.com ' },
+    })
     await fireEvent.click(dialog.getByRole('button', { name: 'Add header' }))
     const [, name = document.body] = dialog.getAllByRole('textbox', { name: 'Header name' })
     const [, value = document.body] = dialog.getAllByRole('textbox', { name: 'Header value' })
@@ -201,8 +205,42 @@ describe('ProvidersSettings', () => {
     expect(saves[0]?.endpoints[0]).toMatchObject({
       id: 'e1',
       imageBaseUrl: 'https://img.example.com',
+      imageEditBaseUrl: 'https://edit.example.com',
       headers: { 'X-Team': 'a', 'X-Trace': '1' },
     })
+  })
+
+  it('blocks an invalid image edit base URL', async () => {
+    const { saves } = setup()
+    const dialog = await openConfig()
+    await fireEvent.input(dialog.getByRole('textbox', { name: 'Image edit base URL' }), {
+      target: { value: 'ftp://edit' },
+    })
+    await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    expect(dialog.getByRole('alert')).toBeTruthy()
+    expect(saves).toHaveLength(0)
+  })
+
+  it('shows the edit switch for image models and the vision switch for chat models', async () => {
+    const typed = { ...model, group: null, typeSource: 'user', reasoning: null } as const
+    const models = [
+      { ...typed, id: 'gpt-image-1', modelType: 'image' },
+      { ...typed, id: 'gpt-4o', modelType: 'chat' },
+    ] as const
+    const { saves } = setup({}, { ...stored, endpoints: [{ ...endpoint, models: [...models] }] })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Settings for gpt-4o' }))
+    let dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByRole('switch', { name: 'Vision' })).toBeTruthy()
+    expect(dialog.queryByRole('switch', { name: 'Accepts reference images (editing)' })).toBeNull()
+    await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings for gpt-image-1' }))
+    dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.queryByRole('switch', { name: 'Vision' })).toBeNull()
+    await fireEvent.click(dialog.getByRole('switch', { name: 'Accepts reference images (editing)' }))
+    await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0]?.endpoints[0]?.models.find((m) => m.id === 'gpt-image-1')?.canVision).toBe(true)
   })
 
   it('blocks a reserved header with a message', async () => {

@@ -59,6 +59,7 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}'; -- 自定�
 ```
 
 - `imageBaseUrl`：trim，空 → null；非空须 `http(s)://` 且 ≤ 2048 字节，否则 `bad_request{imageBaseUrl, invalid_url}`；运行时同样经 `api_base`。
+- migration 7（图像编辑，AutoNote docs/37）：`ALTER TABLE endpoints ADD COLUMN image_edit_base_url TEXT;` —— 改图 `/images/edits` 地址，NULL = 用 `base_url`。`imageEditBaseUrl` 校验同 `imageBaseUrl`（错误 `bad_request{imageEditBaseUrl, invalid_url}`，省略 = 保持），运行时经 `api_base` 成为 `Connection.image_edit_base_url`。
 - `headers`：≤ 20 个（`too_many`）；名称 trim 后为 HTTP token 1~100 字符、大小写不敏感去重，值 ≤ 2048 字符且无 `\r\n`（`invalid`）；保留名 `authorization`、`x-api-key`、`anthropic-version`、`host`、`content-type`、`content-length`、`accept`、`connection`、`transfer-encoding`、`cookie`（`reserved`）。字段均为 `bad_request{headers, …}`。
 - 运行时（聊天每轮、绘图、探测 saved / 带 `endpointId` 的 draft）先加自定义头、后加系统头，`custom_headers` 再次跳过保留名，鉴权头不可能被覆盖；`Connection` 的 `Debug` 只打印请求头个数。
 

@@ -29,6 +29,155 @@ pub(crate) struct Painting {
     pub(crate) store: Option<(Arc<dyn aether_chat::ConversationStore>, String)>,
     /// ponytail: per-run cap stops a looping model; raise only if users ask for batches.
     pub(crate) calls: std::sync::atomic::AtomicU8,
+    /// `image_ids` choices in id order (`image-1`…); empty = tool has no `image_ids` (docs/37 §2.1).
+    pub(crate) choices: Arc<[ImageChoice]>,
+    /// Store and conversation the [`ImageChoice::Stored`] entries are loaded from.
+    pub(crate) history: Option<(Arc<dyn aether_chat::ConversationStore>, String)>,
+}
+
+/// One `image_ids` choice; history bytes are loaded only when the model picks it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ImageChoice {
+    /// The current message's input image (already in memory).
+    Input(aether_chat::ImagePart),
+    /// `idx` of a history turn's input (`generated: false`) or generated images.
+    Stored {
+        turn_id: String,
+        generated: bool,
+        idx: usize,
+    },
+}
+
+impl ImageChoice {
+    fn origin(&self) -> aether_chat::ImageOrigin {
+        match self {
+            Self::Input(_) => aether_chat::ImageOrigin::Attached,
+            Self::Stored {
+                generated: true, ..
+            } => aether_chat::ImageOrigin::Generated,
+            Self::Stored { .. } => aether_chat::ImageOrigin::EarlierInput,
+        }
+    }
+}
+
+/// docs/37 §2.1: still-stored images newest first, at most [`aether_chat::MAX_IMAGE_CHOICES`]:
+/// `input` (this message), then each `path` turn from newest: generated, then input images.
+/// Within one image list the later image counts as newer.
+pub(crate) fn image_choices(
+    input: &[aether_chat::ImagePart],
+    path: &[aether_chat::Turn],
+) -> Vec<ImageChoice> {
+    let stored = path.iter().rev().flat_map(|turn| {
+        let list = |generated: bool| {
+            if generated {
+                &turn.generated
+            } else {
+                &turn.images
+            }
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, image)| image.data.is_some())
+            .map(move |(idx, _)| ImageChoice::Stored {
+                turn_id: turn.id.clone(),
+                generated,
+                idx,
+            })
+        };
+        list(true).chain(list(false))
+    });
+    input
+        .iter()
+        .rev()
+        .cloned()
+        .map(ImageChoice::Input)
+        .chain(stored)
+        .take(aether_chat::MAX_IMAGE_CHOICES)
+        .collect()
+}
+
+/// The spec for this run's choices; no `image_ids` when the painting model cannot edit.
+pub(crate) fn painting_spec(painting: &Painting) -> crate::ToolSpec {
+    let origins: Vec<_> = if painting.connection.can_vision {
+        painting.choices.iter().map(ImageChoice::origin).collect()
+    } else {
+        Vec::new()
+    };
+    aether_chat::generate_image_spec(&origins)
+}
+
+/// Resolves `image_ids` to bytes (docs/37 §2.1); absent = a new image. Blocking (store reads).
+pub(crate) fn resolve_images(
+    choices: &[ImageChoice],
+    history: Option<&(Arc<dyn aether_chat::ConversationStore>, String)>,
+    can_edit: bool,
+    args: &serde_json::Value,
+) -> Result<Vec<aether_chat::ImagePart>, aether_support::KitError> {
+    use aether_support::KitError;
+    let Some(ids) = args.get("image_ids").filter(|ids| !ids.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let ids = ids
+        .as_array()
+        .ok_or_else(|| KitError::bad_request("image_ids", "unknown"))?;
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !can_edit {
+        return Err(KitError::bad_request("image_ids", "unsupported"));
+    }
+    if ids.len() > aether_chat::MAX_EDIT_IMAGES {
+        return Err(KitError::bad_request("image_ids", "too_many"));
+    }
+    let picked = ids
+        .iter()
+        .map(|id| {
+            id.as_str()
+                .and_then(|id| id.strip_prefix("image-"))
+                .and_then(|n| n.parse::<usize>().ok())
+                .and_then(|n| n.checked_sub(1))
+                .and_then(|i| choices.get(i))
+                .ok_or_else(|| KitError::bad_request("image_ids", "unknown"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut conversation = None;
+    let mut parts = Vec::with_capacity(picked.len());
+    for choice in picked {
+        let part = match choice {
+            ImageChoice::Input(part) => Some(part.clone()),
+            ImageChoice::Stored {
+                turn_id,
+                generated,
+                idx,
+            } => {
+                let Some((store, id)) = history else {
+                    return Err(KitError::bad_request("image_ids", "expired"));
+                };
+                if conversation.is_none() {
+                    conversation = Some(store.load(id)?);
+                }
+                conversation
+                    .as_ref()
+                    .and_then(|c| c.turns.iter().find(|turn| &turn.id == turn_id))
+                    .and_then(|turn| {
+                        if *generated {
+                            &turn.generated
+                        } else {
+                            &turn.images
+                        }
+                        .get(*idx)
+                    })
+                    .and_then(|image| {
+                        Some(aether_chat::ImagePart {
+                            mime: image.mime.clone(),
+                            data: image.data.clone()?,
+                        })
+                    })
+            }
+        };
+        parts.push(part.ok_or_else(|| KitError::bad_request("image_ids", "expired"))?);
+    }
+    Ok(parts)
 }
 
 impl HostTools {
@@ -95,18 +244,32 @@ async fn paint(painting: &Painting, call: &ToolCall, cancel: &CancellationToken)
             message: "At most 2 images per reply.".to_owned(),
         };
     }
+    let error = |error: aether_support::KitError| ToolExecution::Error {
+        code: format!("{:?}", error.code()).to_lowercase(),
+        message: error.message().to_owned(),
+    };
+    let (choices, history, args) = (
+        Arc::clone(&painting.choices),
+        painting.history.clone(),
+        call.args.clone(),
+    );
+    let can_edit = painting.connection.can_vision;
+    let images = tauri::async_runtime::spawn_blocking(move || {
+        resolve_images(&choices, history.as_ref(), can_edit, &args)
+    })
+    .await;
+    let images = match images {
+        Ok(Ok(images)) => images,
+        Ok(Err(e)) => return error(e),
+        Err(e) => return error(aether_support::KitError::internal(e)),
+    };
     let generated = tokio::select! {
         () = cancel.cancelled() => return ToolExecution::Unknown { reason: "cancelled".to_owned() },
-        result = aether_chat::generate_image(&painting.connection, &painting.policy, &call.args) => result,
+        result = aether_chat::generate_image(&painting.connection, &painting.policy, &call.args, &images) => result,
     };
     let image = match generated {
         Ok(image) => image,
-        Err(error) => {
-            return ToolExecution::Error {
-                code: format!("{:?}", error.code()).to_lowercase(),
-                message: error.message().to_owned(),
-            };
-        }
+        Err(e) => return error(e),
     };
     if let Some((store, turn_id)) = &painting.store {
         let (store, turn_id, part) = (Arc::clone(store), turn_id.clone(), image.clone());
