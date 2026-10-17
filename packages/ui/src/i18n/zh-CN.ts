@@ -292,6 +292,7 @@ export const zhCN: Messages = {
   'providers.remove': '删除',
   'providers.notes': '模型备注',
   'providers.notes_placeholder': '请输入 Markdown 格式内容...',
+  'providers.get_key': '获取密钥',
   'providers.needs_setup': '需要密钥',
   'providers.save_failed': '保存失败，修改已保留。',
   'providers.retry': '重试',

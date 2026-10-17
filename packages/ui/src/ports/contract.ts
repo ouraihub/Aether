@@ -20,6 +20,7 @@ import type { Preview } from './generated/Preview'
 import type { ProbeTarget } from './generated/ProbeTarget'
 import type { Provider } from './generated/Provider'
 import type { ProviderSave } from './generated/ProviderSave'
+import type { Protocol } from './generated/Protocol'
 import type { RunAccepted } from './generated/RunAccepted'
 import type { RunEvent } from './generated/RunEvent'
 import type { RunRequest } from './generated/RunRequest'
@@ -45,6 +46,16 @@ export interface LogsPort {
   getLevel(): Promise<LogStatus>
   /** Takes effect immediately and is persisted to `level.json`. */
   setLevel(level: LogLevel): Promise<LogStatus>
+}
+
+/** Host-supplied provider template, seeded once into the store disabled and keyless (docs/39). */
+export interface ProviderPreset {
+  id: string
+  name: string
+  baseUrl: string
+  protocol: Protocol
+  /** "Get a key" link, e.g. an invite link. */
+  apiKeyUrl?: string
 }
 
 export interface ProvidersPort {

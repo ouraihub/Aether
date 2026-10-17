@@ -22,6 +22,10 @@ enabled: boolean,
  */
 notes: string, 
 /**
+ * Host preset this provider was seeded from; `None` for user-created providers.
+ */
+presetId: string | null, 
+/**
  * Endpoints in display order.
  */
 endpoints: Array<Endpoint>, };

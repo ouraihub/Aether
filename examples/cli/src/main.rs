@@ -93,6 +93,7 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
         name: "cli".to_owned(),
         enabled: None,
         notes: None,
+        preset_id: None,
         endpoints: vec![EndpointSave {
             id: existing
                 .and_then(|p| p.endpoints.into_iter().next())

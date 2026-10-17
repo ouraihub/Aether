@@ -18,14 +18,14 @@
   import Settings2Icon from '@lucide/svelte/icons/settings-2'
   import SlidersHorizontalIcon from '@lucide/svelte/icons/sliders-horizontal'
   import { getKitContext } from '../context'
-  import { isKitClientError, type ProbeResult, type Provider } from '../ports'
+  import { isKitClientError, type ProbeResult, type Provider, type ProviderPreset } from '../ports'
   import { cn } from '../utils'
   import { adopt, newEndpoint, probeTarget, savable, toDraft, toSave, type ProviderDraft } from './draft'
   import EndpointPanel, { type CheckState } from './EndpointPanel.svelte'
   import ModelPickerDialog from './ModelPickerDialog.svelte'
   import { providersRevision } from './revision.svelte'
 
-  let { onchanged }: { onchanged?: () => void } = $props()
+  let { onchanged, presets = [] }: { onchanged?: () => void; presets?: ProviderPreset[] } = $props()
   const { ports, i18n, notify } = getKitContext()
   const { t } = i18n
   const port = ports.providers
@@ -107,11 +107,24 @@
     if (!port) return
     try {
       providers = await port.list()
+      // Backend skips presets already seeded (even if deleted) or shadowed by a same-named provider.
+      for (const preset of presets) {
+        if (providers.some((p) => p.presetId === preset.id)) continue
+        providers = await port.save({
+          name: preset.name,
+          presetId: preset.id,
+          enabled: false,
+          endpoints: [{ slug: 'ep-1', baseUrl: preset.baseUrl, protocol: preset.protocol, models: [] }],
+        })
+      }
       load(providers[0] ? toDraft(providers[0]) : null)
     } catch (error) {
       notify.toast('error', errorText(error))
     }
   }
+  const keyUrl = $derived(
+    presets.find((preset) => preset.id === providers.find((p) => p.id === draft?.id)?.presetId)?.apiKeyUrl,
+  )
   $effect(() => {
     if (port) void refresh()
     return () => abort?.abort()
@@ -444,6 +457,7 @@
               onkeys={keysChanged}
               oncheck={() => void runProbe(active, false)}
               onsync={() => void runProbe(active, true)}
+              {keyUrl}
             />
           {/key}
         {:else}

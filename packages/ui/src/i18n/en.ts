@@ -300,6 +300,7 @@ export const en: Messages = {
   'providers.remove': 'Delete',
   'providers.notes': 'Model notes',
   'providers.notes_placeholder': 'Enter Markdown content...',
+  'providers.get_key': 'Get a key',
   'providers.needs_setup': 'Needs an API key',
   'providers.save_failed': 'Could not save. Your changes are kept.',
   'providers.retry': 'Retry',

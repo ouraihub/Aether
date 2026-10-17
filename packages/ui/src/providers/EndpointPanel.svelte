@@ -45,6 +45,7 @@
     onkeys,
     oncheck,
     onsync,
+    keyUrl,
   }: {
     endpoint: EndpointDraft
     check: CheckState | null
@@ -55,6 +56,8 @@
     onkeys: (providers: Provider[]) => void
     oncheck: () => void
     onsync: () => void
+    /** Preset "get a key" link shown beside the label (docs/39). */
+    keyUrl?: string | undefined
   } = $props()
 
   const CAPS = ['vision', 'reasoning', 'tools', 'web'] as const
@@ -159,7 +162,15 @@
 
 <div class="flex min-w-0 flex-col gap-5">
   <Field.Field class="gap-2">
-    <Field.Label for="kit-endpoint-key">{t('providers.api_key')}</Field.Label>
+    <div class="flex items-center gap-2">
+      <Field.Label for="kit-endpoint-key">{t('providers.api_key')}</Field.Label>
+      {#if keyUrl && /^https:\/\//.test(keyUrl)}<a
+          class="text-primary text-kit-xs hover:underline"
+          href={keyUrl}
+          target="_blank"
+          rel="noopener noreferrer">{t('providers.get_key')}</a
+        >{/if}
+    </div>
     <div class="flex min-w-0 items-start gap-2">
       <SecretInput id="kit-endpoint-key" endpoint={endpoint.saved} onchanged={onkeys} />
       <Button variant="outline" class="shrink-0" disabled={!validUrl(endpoint.baseUrl)} onclick={oncheck}>

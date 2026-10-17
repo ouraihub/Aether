@@ -139,6 +139,11 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
                 version: 8,
                 sql: "ALTER TABLE providers ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
             },
+            Migration {
+                version: 9,
+                sql: "ALTER TABLE providers ADD COLUMN preset_id TEXT;
+CREATE TABLE seeded_presets (id TEXT PRIMARY KEY);",
+            },
         ];
         let db = db::open(&path, &steps)?;
         Ok(Self {
@@ -192,11 +197,28 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
             }
             id.clone()
         } else {
+            if let Some(preset) = &input.preset_id {
+                // Seeded once per store, even after deletion; a same-named provider skips it unrecorded (docs/39 §3).
+                let named: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM providers WHERE lower(name) = lower(?1))",
+                    [input.name.trim()],
+                    |row| row.get(0),
+                )?;
+                if named
+                    || tx.execute(
+                        "INSERT OR IGNORE INTO seeded_presets (id) VALUES (?1)",
+                        [preset],
+                    )? == 0
+                {
+                    drop(tx);
+                    return list(&db);
+                }
+            }
             let id = new_id()?;
             tx.execute(
-                "INSERT INTO providers (id, name, position, created_at, updated_at, enabled, notes)
-                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM providers), ?3, ?3, ?4, ?5)",
-                params![id, input.name, now, input.enabled.unwrap_or(true), input.notes.as_deref().unwrap_or("")],
+                "INSERT INTO providers (id, name, position, created_at, updated_at, enabled, notes, preset_id)
+                 VALUES (?1, ?2, (SELECT COALESCE(MAX(position) + 1, 0) FROM providers), ?3, ?3, ?4, ?5, ?6)",
+                params![id, input.name, now, input.enabled.unwrap_or(true), input.notes.as_deref().unwrap_or(""), input.preset_id],
             )?;
             id
         };
@@ -648,6 +670,13 @@ fn validate(input: &ProviderSave) -> Result<(), KitError> {
     {
         return Err(too_long("notes", MAX_NOTES_CHARS));
     }
+    if input
+        .preset_id
+        .as_ref()
+        .is_some_and(|id| id.is_empty() || id.len() > 64)
+    {
+        return Err(too_long("presetId", 64));
+    }
     if input.endpoints.len() > MAX_ENDPOINTS {
         return Err(too_long("endpoints", MAX_ENDPOINTS));
     }
@@ -906,26 +935,26 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
             id,
         });
     }
-    let mut stmt =
-        db.prepare_cached("SELECT id, name, enabled, notes FROM providers ORDER BY position, id")?;
+    let mut stmt = db.prepare_cached(
+        "SELECT id, name, enabled, notes, preset_id FROM providers ORDER BY position, id",
+    )?;
     let providers = stmt
         .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, bool>(2)?,
-                row.get::<_, String>(3)?,
-            ))
+            Ok(Provider {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                enabled: row.get(2)?,
+                notes: row.get(3)?,
+                preset_id: row.get(4)?,
+                endpoints: Vec::new(),
+            })
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(providers
         .into_iter()
-        .map(|(id, name, enabled, notes)| Provider {
-            enabled,
-            endpoints: endpoints.remove(&id).unwrap_or_default(),
-            id,
-            name,
-            notes,
+        .map(|provider| Provider {
+            endpoints: endpoints.remove(&provider.id).unwrap_or_default(),
+            ..provider
         })
         .collect())
 }
@@ -1154,7 +1183,7 @@ mod tests {
                 assert_eq!(
                     db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                         .unwrap(),
-                    8
+                    9
                 );
             }
             assert!(path.with_file_name("providers.db.bak-v2").is_file());
@@ -1644,7 +1673,7 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
     }
 
     #[test]
@@ -1683,8 +1712,45 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
         assert_eq!(store.list().unwrap()[0].notes, "");
+    }
+
+    #[test]
+    fn presets_seed_once_skip_same_name_and_never_return_after_delete() {
+        let (_dir, store) = store();
+        let seed = |name: &str, preset: &str| {
+            store.save(request(
+                json!({ "name": name, "presetId": preset, "enabled": false,
+                "endpoints": [endpoint(None, "ep-1", &[])] }),
+            ))
+        };
+        let seeded = seed("七牛云", "qiniu").unwrap();
+        assert_eq!(seeded.len(), 1);
+        assert_eq!(seeded[0].preset_id.as_deref(), Some("qiniu"));
+        assert!(!seeded[0].enabled);
+        assert_eq!(seed("七牛云", "qiniu").unwrap().len(), 1);
+        let id = seeded[0].id.clone();
+        let renamed = store
+            .save(request(
+                json!({ "id": id, "name": "Q", "presetId": "other", "endpoints": [] }),
+            ))
+            .unwrap();
+        assert_eq!(renamed[0].preset_id.as_deref(), Some("qiniu"));
+        store.delete(&id).unwrap();
+        assert!(seed("七牛云", "qiniu").unwrap().is_empty());
+
+        store
+            .save(request(json!({ "name": "Fenno", "endpoints": [] })))
+            .unwrap();
+        let skipped = seed("fenno", "fenno").unwrap();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].preset_id, None);
+        store.delete(&skipped[0].id).unwrap();
+        assert_eq!(
+            seed("Fenno", "fenno").unwrap()[0].preset_id.as_deref(),
+            Some("fenno")
+        );
     }
 
     #[test]

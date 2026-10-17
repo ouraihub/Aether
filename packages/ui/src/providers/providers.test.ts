@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from '../i18n'
-import { createFakePorts, type Endpoint, type Provider, type ProviderSave } from '../ports'
+import { createFakePorts, type Endpoint, type Provider, type ProviderPreset, type ProviderSave } from '../ports'
 import { adopt, checkHeaders, newEndpoint, primaryKey, savable, toDraft } from './draft'
 import Harness from './Harness.test.svelte'
 
@@ -17,7 +17,7 @@ const endpoint: Endpoint = {
   headers: { 'X-Team': 'a' },
   models: [],
 }
-const stored: Provider = { id: 'p1', name: 'Local', enabled: true, notes: '', endpoints: [endpoint] }
+const stored: Provider = { id: 'p1', name: 'Local', enabled: true, notes: '', presetId: null, endpoints: [endpoint] }
 const twoKeys: Endpoint = {
   ...endpoint,
   keys: [...endpoint.keys, { id: 'k2', label: 'backup', enabled: true, masked: 'sk-b****1234', readable: true }],
@@ -30,7 +30,11 @@ const model = {
   nativeWebSearch: false,
 } as const
 
-function setup(overrides: NonNullable<Parameters<typeof createFakePorts>[0]>['providers'] = {}, list = stored) {
+function setup(
+  overrides: NonNullable<Parameters<typeof createFakePorts>[0]>['providers'] = {},
+  list = stored,
+  presets?: ProviderPreset[],
+) {
   const saves: ProviderSave[] = []
   const ports = createFakePorts({
     providers: {
@@ -60,9 +64,47 @@ function setup(overrides: NonNullable<Parameters<typeof createFakePorts>[0]>['pr
   })
   const notify = { toast: vi.fn(), confirm: () => Promise.resolve(true) }
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
-  render(Harness, { kit: { ports, i18n: createI18n('en'), notify, logger } })
+  render(Harness, { kit: { ports, i18n: createI18n('en'), notify, logger }, ...(presets ? { presets } : {}) })
   return { saves, notify }
 }
+
+describe('provider presets (docs/39)', () => {
+  it('seeds only presets not yet in the list and links the selected one to its key page', async () => {
+    const seeded: Provider = {
+      ...stored,
+      id: 'p2',
+      name: 'Fenno',
+      enabled: false,
+      presetId: 'fenno',
+      endpoints: [{ ...endpoint, id: 'e2', keys: [] }],
+    }
+    const save = vi.fn((input: ProviderSave) =>
+      Promise.resolve(input.presetId === 'fenno' ? [{ ...stored, presetId: 'qiniu' }, seeded] : [stored]),
+    )
+    setup({ save }, { ...stored, presetId: 'qiniu' }, [
+      { id: 'qiniu', name: 'Qiniu', baseUrl: 'https://api.qnaigc.com', protocol: 'openai-chat' },
+      {
+        id: 'fenno',
+        name: 'Fenno',
+        baseUrl: 'https://api.fenno.ai/v1',
+        protocol: 'openai-chat',
+        apiKeyUrl: 'https://api.fenno.ai/s/vWbM',
+      },
+    ])
+    await waitFor(() => expect(save).toHaveBeenCalledOnce())
+    expect(save).toHaveBeenCalledWith({
+      name: 'Fenno',
+      presetId: 'fenno',
+      enabled: false,
+      endpoints: [{ slug: 'ep-1', baseUrl: 'https://api.fenno.ai/v1', protocol: 'openai-chat', models: [] }],
+    })
+    expect(screen.queryByRole('link', { name: 'Get a key' })).toBeNull()
+    await fireEvent.click(await screen.findByText('Fenno'))
+    expect((await screen.findByRole('link', { name: 'Get a key' })).getAttribute('href')).toBe(
+      'https://api.fenno.ai/s/vWbM',
+    )
+  })
+})
 
 async function openPicker() {
   await fireEvent.click(await screen.findByRole('button', { name: 'Sync models' }))

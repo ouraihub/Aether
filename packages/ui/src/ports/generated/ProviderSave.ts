@@ -22,6 +22,11 @@ enabled?: boolean,
  */
 notes?: string, 
 /**
+ * New providers only: seed from this host preset once per store; a repeat or a
+ * same-named provider makes the save a no-op that returns the current list.
+ */
+presetId?: string, 
+/**
  * The complete endpoint list.
  */
 endpoints: Array<EndpointSave>, };

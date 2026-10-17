@@ -53,9 +53,13 @@ describe('createFakePorts', () => {
 
   it('overrides single methods and keeps the rest', async () => {
     const ports = createFakePorts({
-      providers: { list: () => Promise.resolve([{ id: 'p', name: 'P', enabled: true, notes: '', endpoints: [] }]) },
+      providers: {
+        list: () => Promise.resolve([{ id: 'p', name: 'P', enabled: true, notes: '', presetId: null, endpoints: [] }]),
+      },
     })
-    expect(await ports.providers?.list()).toEqual([{ id: 'p', name: 'P', enabled: true, notes: '', endpoints: [] }])
+    expect(await ports.providers?.list()).toEqual([
+      { id: 'p', name: 'P', enabled: true, notes: '', presetId: null, endpoints: [] },
+    ])
     expect(await ports.providers?.modelOptions()).toEqual([])
   })
 
