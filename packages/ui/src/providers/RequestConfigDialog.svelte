@@ -9,6 +9,7 @@
   import * as Dialog from '#lib/components/ui/dialog/index.js'
   import * as Field from '#lib/components/ui/field/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
+  import CopyInput from '../CopyInput.svelte'
   import * as Select from '#lib/components/ui/select/index.js'
   import { Textarea } from '#lib/components/ui/textarea/index.js'
   import { getKitContext } from '../context'
@@ -138,7 +139,12 @@
           <Field.Label for="kit-request-url">{t('providers.base_url')}</Field.Label>
           <span class="bg-primary/10 text-primary rounded-kit px-1.5 text-kit-xs">{t('providers.default')}</span>
         </div>
-        <Input id="kit-request-url" class="font-mono" placeholder="https://api.example.com/v1" bind:value={baseUrl} />
+        <CopyInput
+          id="kit-request-url"
+          class="font-mono"
+          placeholder="https://api.example.com/v1"
+          bind:value={baseUrl}
+        />
         {#if validUrl(baseUrl)}
           <Field.Description class="truncate font-mono text-kit-xs"
             >{t('providers.base_url_hint', { url: `POST ${chatUrl(baseUrl, protocol)}` })}</Field.Description
@@ -157,7 +163,7 @@
       {/if}
       <Field.Field>
         <Field.Label for="kit-request-image-url">{t('providers.image_base_url')}</Field.Label>
-        <Input
+        <CopyInput
           id="kit-request-image-url"
           class="font-mono"
           placeholder="https://example.com"
@@ -167,7 +173,7 @@
       </Field.Field>
       <Field.Field>
         <Field.Label for="kit-request-image-edit-url">{t('providers.image_edit_base_url')}</Field.Label>
-        <Input
+        <CopyInput
           id="kit-request-image-edit-url"
           class="font-mono"
           placeholder="https://example.com"

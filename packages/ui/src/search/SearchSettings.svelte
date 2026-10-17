@@ -6,6 +6,7 @@
   import ExternalLinkIcon from '@lucide/svelte/icons/external-link'
   import { Button } from '#lib/components/ui/button/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
+  import CopyInput from '../CopyInput.svelte'
   import { Textarea } from '#lib/components/ui/textarea/index.js'
   import * as Alert from '#lib/components/ui/alert/index.js'
   import * as Empty from '#lib/components/ui/empty/index.js'
@@ -418,7 +419,7 @@
               <Field.Field data-disabled={pending[cap]}>
                 <Field.Label for={`search-url-${cap}`}>{t('search.baseUrl')}</Field.Label>
                 <div class="flex min-w-0 items-center gap-2">
-                  <Input
+                  <CopyInput
                     id={`search-url-${cap}`}
                     class="min-w-0 flex-1"
                     disabled={pending[cap]}

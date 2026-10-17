@@ -8,6 +8,7 @@
   import * as Empty from '#lib/components/ui/empty/index.js'
   import * as Field from '#lib/components/ui/field/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
+  import CopyInput from '../CopyInput.svelte'
   import * as Select from '#lib/components/ui/select/index.js'
   import { Switch } from '#lib/components/ui/switch/index.js'
   import { Textarea } from '#lib/components/ui/textarea/index.js'
@@ -309,7 +310,7 @@
         </div>
         <Field.Field>
           <Field.Label for="kit-mcp-url">{t('mcp.client.url')}</Field.Label>
-          <Input id="kit-mcp-url" class="font-mono" placeholder="https://example.com/mcp" bind:value={url} />
+          <CopyInput id="kit-mcp-url" class="font-mono" placeholder="https://example.com/mcp" bind:value={url} />
           <Field.Description>{t('mcp.client.urlHint')}</Field.Description>
         </Field.Field>
         {#if editId}

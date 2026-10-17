@@ -114,6 +114,16 @@ describe('ProvidersSettings', () => {
     expect(revealKey).toHaveBeenCalledWith('k1', '')
   })
 
+  it('copies the trimmed API address from the input copy button', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    setup()
+    const url = (await screen.findByRole('textbox', { name: 'API URL' })) as HTMLInputElement
+    await fireEvent.input(url, { target: { value: '  https://copy.example.com/v1  ' } })
+    await fireEvent.click(within(url.parentElement as HTMLElement).getByRole('button', { name: 'Copy' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://copy.example.com/v1'))
+  })
+
   it('shows the primary key with +N and offers delete only for a single key', async () => {
     setup({}, { ...stored, endpoints: [twoKeys] })
     expect(await screen.findByText('+1')).toBeTruthy()

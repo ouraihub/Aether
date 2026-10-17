@@ -19,6 +19,7 @@
   import * as Dialog from '#lib/components/ui/dialog/index.js'
   import * as Field from '#lib/components/ui/field/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
+  import CopyInput from '../CopyInput.svelte'
   import * as Select from '#lib/components/ui/select/index.js'
   import { getKitContext } from '../context'
   import type { Model, Provider } from '../ports'
@@ -213,7 +214,7 @@
       {/if}
     </div>
     <div class="flex min-w-0 items-center gap-2">
-      <Input
+      <CopyInput
         id="kit-endpoint-url"
         class="min-w-0 flex-1 font-mono"
         placeholder="https://api.example.com/v1"
