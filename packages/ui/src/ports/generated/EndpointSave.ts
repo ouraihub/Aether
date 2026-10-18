@@ -29,11 +29,11 @@ models: Array<ModelSave>,
 /**
  * Image generation base URL: empty/null = use `baseUrl`; absent = keep.
  */
-imageBaseUrl?: string | null,
+imageBaseUrl?: string | null, 
 /**
  * Image edit (`/images/edits`) base URL: empty/null = use `base_url`; absent = keep.
  */
-imageEditBaseUrl?: string | null,
+imageEditBaseUrl?: string | null, 
 /**
  * Custom request headers; absent = keep.
  */
