@@ -25,7 +25,7 @@ const MAX_LICENSE: usize = 32 * 1024;
 /// Where a skill package comes from. JSON: `{ "path": "C:\\…" }` or
 /// `{ "bytes": { "fileName": "x.zip", "bytes": [80, 75, …] } }`.
 #[derive(Debug, Clone, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum Source {
     /// Absolute path to a `SKILL.md`, a directory or a `.zip`.

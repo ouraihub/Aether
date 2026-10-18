@@ -252,7 +252,7 @@ mod tests {
     use super::*;
 
     #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    #[serde(rename_all = "camelCase")]
     struct Case {
         id: String,
         model_type: ModelType,

@@ -2,7 +2,7 @@
 import type { Protocol } from "./Protocol";
 
 /**
- * What to probe: a saved endpoint, or an unsaved draft from the settings form (docs/11 §4).
+ * What to probe: a stored endpoint, or an unsaved draft from the settings form (docs/11 §4).
  */
 export type ProbeTarget = { "kind": "saved", 
 /**

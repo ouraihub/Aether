@@ -49,7 +49,7 @@ pub struct ServerDto {
 
 /// Credentials sent with every request; write-only, so no `Debug`/`Serialize`.
 #[derive(Deserialize, TS)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export)]
 pub struct ServerSecret {
     /// Request headers such as `Authorization`.

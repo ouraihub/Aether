@@ -178,12 +178,12 @@ pub struct EndpointSave {
     /// Selected models in display order.
     pub models: Vec<ModelSave>,
     /// Image generation base URL: empty/null = use `baseUrl`; absent = keep.
-    #[serde(default, deserialize_with = "present")]
-    #[ts(optional = nullable)]
+    #[serde(default, with = "present")]
+    #[ts(type = "string | null", optional)]
     pub image_base_url: Option<Option<String>>,
-    /// Image edit base URL: empty/null = use `baseUrl`; absent = keep.
-    #[serde(default, deserialize_with = "present")]
-    #[ts(optional = nullable)]
+    /// Image edit (`/images/edits`) base URL: empty/null = use `base_url`; absent = keep.
+    #[serde(default, with = "present")]
+    #[ts(type = "string | null", optional)]
     pub image_edit_base_url: Option<Option<String>>,
     /// Custom request headers; absent = keep.
     #[serde(default)]
@@ -191,13 +191,16 @@ pub struct EndpointSave {
     pub headers: Option<BTreeMap<String, String>>,
 }
 
-/// Present field (even `null`) = `Some`, so `null` clears while absence keeps.
-fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::deserialize(deserializer).map(Some)
+mod present {
+    use serde::Deserialize;
+
+    pub(super) fn deserialize<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        Option::deserialize(deserializer).map(Some)
+    }
 }
 
 /// Adds (no `id`) or patches (with `id`) one key of an endpoint; omitted fields keep.
@@ -345,10 +348,9 @@ impl TypeSource {
         }
     }
 }
-
-/// What to probe: a saved endpoint, or an unsaved draft from the settings form (docs/11 §4).
+/// What to probe: a stored endpoint, or an unsaved draft from the settings form (docs/11 §4).
 #[derive(Deserialize, TS)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export)]
 pub enum ProbeTarget {
     /// A stored endpoint with its stored keys.
