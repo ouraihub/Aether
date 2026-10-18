@@ -1,7 +1,7 @@
 import type { ProviderPreset } from '@ouraihub/aether-ui/ports'
 
 /** Public, non-secret provider templates for China-focused hosts. */
-export const CHINA_PROVIDER_PRESETS: readonly ProviderPreset[] = [
+export const CHINA_PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: 'qiniu',
     name: '七牛云',
