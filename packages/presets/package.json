@@ -1,0 +1,17 @@
+{
+  "name": "@ouraihub/aether-presets",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./china": "./src/china.ts",
+    "./international": "./src/international.ts"
+  },
+  "peerDependencies": {
+    "@ouraihub/aether-ui": "^0.1.0"
+  },
+  "devDependencies": {
+    "@ouraihub/aether-ui": "workspace:*"
+  }
+}
