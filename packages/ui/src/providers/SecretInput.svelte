@@ -194,7 +194,7 @@
   {#if askingPassword}
     <Input
       type="password"
-      autocomplete="current-password"
+      autocomplete="new-password"
       class="mt-2"
       placeholder={t('providers.key_current_password')}
       aria-label={t('providers.key_current_password')}

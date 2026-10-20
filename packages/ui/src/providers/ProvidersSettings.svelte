@@ -313,6 +313,7 @@
             placeholder={t('providers.search')}
             aria-label={t('providers.search')}
             bind:value={query}
+            autocomplete="off"
           />
         </div>
         <Select.Root type="single" value={filter} onValueChange={(value) => (filter = value as typeof filter)}>

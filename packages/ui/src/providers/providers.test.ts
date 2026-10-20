@@ -159,6 +159,15 @@ describe('ProvidersSettings', () => {
     expect(revealKey).toHaveBeenCalledWith('k1', '')
   })
 
+  it('asks for the web password in a field browsers will not autofill', async () => {
+    setup({ revealNeedsPassword: true, revealKey: vi.fn(() => Promise.resolve('sk-plain-key')) })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Show key' }))
+    const password = document.querySelector('input[aria-label="Current password"]')
+    expect(password?.getAttribute('autocomplete')).toBe('new-password')
+    expect((password as HTMLInputElement | null)?.value).toBe('')
+    expect(screen.getByRole('textbox', { name: 'Search model platforms…' }).getAttribute('autocomplete')).toBe('off')
+  })
+
   it('edits the stored key without browser autofill', async () => {
     const revealKey = vi.fn(() => Promise.resolve('sk-plain-key'))
     setup({ revealKey })

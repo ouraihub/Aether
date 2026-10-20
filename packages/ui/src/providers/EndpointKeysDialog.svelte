@@ -185,7 +185,7 @@
     {#if asking}
       <Input
         type="password"
-        autocomplete="current-password"
+        autocomplete="new-password"
         placeholder={t('providers.key_current_password')}
         aria-label={t('providers.key_current_password')}
         disabled={busy}
