@@ -31,7 +31,7 @@ if (process.platform === 'darwin' || process.platform === 'linux') {
   const fixture = mkdtempSync(join(tmpdir(), 'aether-native-secrets-'))
   const home = join(fixture, 'home')
   mkdirSync(home)
-  const binary = resolve(process.env.CARGO_TARGET_DIR || 'target', 'debug/native-secrets')
+  const binary = resolve(process.env.CARGO_TARGET_DIR || 'target', 'debug/examples/native-secrets')
   const env = { ...process.env, HOME: home }
   const run = (mode, path, environment = env) =>
     execFileSync(binary, [mode, path], { stdio: 'inherit', env: environment })

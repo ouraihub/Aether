@@ -48,14 +48,14 @@ macOS 在已解锁的用户 Keychain 会话中运行同一 `pnpm run ci`；CI �
 
 ```sh
 cargo build -p aether-providers --example native-secrets
-target/debug/native-secrets race /tmp/aether-native-race
-target/debug/native-secrets seal /tmp/aether-native.blob
-target/debug/native-secrets open /tmp/aether-native.blob
-target/debug/native-secrets tamper /tmp/aether-native.blob
+target/debug/examples/native-secrets race /tmp/aether-native-race
+target/debug/examples/native-secrets seal /tmp/aether-native.blob
+target/debug/examples/native-secrets open /tmp/aether-native.blob
+target/debug/examples/native-secrets tamper /tmp/aether-native.blob
 # Linux 验证服务不可用仍保留数据库凭据：
-DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/aether-bus target/debug/native-secrets unavailable /tmp/aether-native.blob
-target/debug/native-secrets open /tmp/aether-native.blob
-target/debug/native-secrets forget /tmp/aether-native.blob
+DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/aether-bus target/debug/examples/native-secrets unavailable /tmp/aether-native.blob
+target/debug/examples/native-secrets open /tmp/aether-native.blob
+target/debug/examples/native-secrets forget /tmp/aether-native.blob
 ```
 
 纯加密单元测试不访问原生存储；整个 workspace 的凭据集成测试需要真实服务。`forget` 清除示例文件/数据库，不删除共享主密钥（其他 BLOB 与备份仍需它）；新锁文件 `HOME/.aether/credential-v1.lock` 只有锁元数据，不能在运行中删除。更换 HOME/系统用户、丢失 Keychain 条目或跨平台搬移数据库不会自动迁移密钥，需重新输入凭据。
