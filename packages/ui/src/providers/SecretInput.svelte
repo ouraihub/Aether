@@ -108,7 +108,7 @@
       <Input
         {id}
         type="password"
-        autocomplete="off"
+        autocomplete="new-password"
         spellcheck={false}
         class="min-w-0 flex-1 font-mono"
         placeholder={t('providers.key_placeholder')}
@@ -194,6 +194,7 @@
   {#if askingPassword}
     <Input
       type="password"
+      autocomplete="current-password"
       class="mt-2"
       placeholder={t('providers.key_current_password')}
       aria-label={t('providers.key_current_password')}

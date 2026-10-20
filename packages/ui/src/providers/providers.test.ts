@@ -159,6 +159,16 @@ describe('ProvidersSettings', () => {
     expect(revealKey).toHaveBeenCalledWith('k1', '')
   })
 
+  it('marks API key editing as new-password instead of a saved login', async () => {
+    setup()
+    await fireEvent.click(await screen.findByRole('button', { name: 'Manage API keys' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    await fireEvent.click(dialog.getByRole('button', { name: 'Edit key' }))
+    const keyInput = document.querySelector('input[aria-label="API key"]')
+    expect(keyInput?.getAttribute('autocomplete')).toBe('new-password')
+    expect(keyInput?.getAttribute('name')).toBe('provider-api-key')
+  })
+
   it('copies the trimmed API address from the input copy button', async () => {
     const writeText = vi.fn(() => Promise.resolve())
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })

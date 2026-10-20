@@ -105,6 +105,8 @@
         <Input
           class="h-8"
           maxlength={40}
+          autocomplete="new-password"
+          name="provider-api-key-label"
           placeholder={t('providers.keys_label')}
           aria-label={t('providers.keys_label')}
           disabled={busy}
@@ -113,7 +115,8 @@
         />
         <Input
           type="password"
-          autocomplete="off"
+          autocomplete="new-password"
+          name="provider-api-key"
           spellcheck={false}
           class="h-8 font-mono"
           maxlength={4096}
@@ -162,7 +165,7 @@
     {#if asking}
       <Input
         type="password"
-        autocomplete="off"
+        autocomplete="current-password"
         placeholder={t('providers.key_current_password')}
         aria-label={t('providers.key_current_password')}
         disabled={busy}
