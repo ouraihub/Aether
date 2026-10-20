@@ -339,7 +339,7 @@ async fn cancel_aborts_a_pending_request() {
     assert_eq!(seen.lock().await.len(), 1, "the request was in flight");
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn saved_and_draft_targets_send_the_stored_key() {
     let (_dir, store) = store();

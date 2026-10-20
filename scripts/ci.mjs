@@ -1,6 +1,8 @@
-// The one quality gate: GitHub CI (windows job) and local pre-push both run this file,
-// so a step can never exist in one place and be missing in the other.
-import { execSync } from 'node:child_process'
+// One quality gate for local checks and every native runner; no platform skips existing checks.
+import { execFileSync, execSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 
 // Git for Windows ships a link.exe that shadows the MSVC linker; cargo goes through the wrapper.
 const cargo = (args) => (process.platform === 'win32' ? `scripts\\cargo-msvc.bat ${args}` : `cargo ${args}`)
@@ -23,5 +25,30 @@ const steps = [
 for (const step of steps) {
   console.log(`\n=== ${step}`)
   execSync(step, { stdio: 'inherit' })
+}
+if (process.platform === 'darwin' || process.platform === 'linux') {
+  execSync(cargo('build -p aether-providers --example native-secrets'), { stdio: 'inherit' })
+  const fixture = mkdtempSync(join(tmpdir(), 'aether-native-secrets-'))
+  const home = join(fixture, 'home')
+  mkdirSync(home)
+  const binary = resolve(process.env.CARGO_TARGET_DIR || 'target', 'debug/native-secrets')
+  const env = { ...process.env, HOME: home }
+  const run = (mode, path, environment = env) =>
+    execFileSync(binary, [mode, path], { stdio: 'inherit', env: environment })
+  try {
+    // First access races in real separate processes; all resulting BLOBs must stay readable.
+    run('race', join(fixture, 'race'))
+    const file = join(fixture, 'saved.blob')
+    run('seal', file)
+    run('open', file)
+    run('tamper', file)
+    if (process.platform === 'linux') {
+      run('unavailable', file, { ...env, DBUS_SESSION_BUS_ADDRESS: 'unix:path=/nonexistent/aether-bus' })
+      run('open', file)
+    }
+    run('forget', file)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
 }
 console.log('\nci: all steps passed')

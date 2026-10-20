@@ -1,7 +1,7 @@
-//! Opaque at-rest encryption for credentials (docs/10 §2, decision D3).
+//! Native at-rest protection for credentials (docs/10 §2, decision D3).
 //!
-//! A sealed BLOB is one format byte followed by a platform payload:
-//! `0x01` = Windows DPAPI `CryptProtectData` output (current-user scope).
+//! `0x01` preserves Windows DPAPI; `0x02` (macOS) / `0x03` (Linux) prefix an
+//! AES-256-GCM nonce and ciphertext. The key exists only in the native credential store.
 
 use zeroize::Zeroizing;
 
@@ -9,47 +9,76 @@ use crate::KitError;
 
 const KEY_UNREADABLE: &str = "key_unreadable";
 
-/// Encrypts `plain` into an opaque BLOB for storage.
+/// Encrypts UTF-8 credentials into an opaque BLOB for storage.
 ///
 /// # Errors
-/// `unsupported` on platforms without a secret store yet; `internal` if the OS call fails.
-/// Callers fail the whole save so the stored ciphertext stays unchanged.
+/// The same errors as [`protect`]. A failed save must leave the stored BLOB unchanged.
 pub fn seal(plain: &str) -> Result<Vec<u8>, KitError> {
+    protect(plain.as_bytes())
+}
+
+/// Decrypts UTF-8 credentials produced by [`seal`].
+///
+/// # Errors
+/// The same errors as [`unprotect`], plus `needs_config{key_unreadable}` for invalid UTF-8.
+pub fn open(sealed: &[u8]) -> Result<Zeroizing<String>, KitError> {
+    let mut plain = unprotect(sealed)?;
+    if std::str::from_utf8(&plain).is_err() {
+        return Err(KitError::needs_config(KEY_UNREADABLE));
+    }
+    String::from_utf8(std::mem::take(&mut *plain))
+        .map(Zeroizing::new)
+        .map_err(|_| KitError::needs_config(KEY_UNREADABLE))
+}
+
+/// Encrypts arbitrary credential bytes using the current user's native store.
+///
+/// # Errors
+/// `needs_config{secret_store_unavailable}` for unavailable/locked native storage or
+/// failed randomness; `needs_config{key_unreadable}` for a malformed stored key;
+/// `unsupported{secret_store}` on other platforms; `internal` for a failed Windows call.
+/// There is no plaintext or file-key fallback.
+pub fn protect(plain: &[u8]) -> Result<Vec<u8>, KitError> {
     #[cfg(windows)]
-    return dpapi::protect(plain.as_bytes());
-    #[cfg(not(windows))]
+    return dpapi::protect(plain);
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    return native::protect(plain);
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         let _ = plain;
         Err(KitError::unsupported("secret_store"))
     }
 }
 
-/// Decrypts a BLOB produced by [`seal`].
+/// Decrypts bytes produced by [`protect`], wiping the returned buffer on drop.
 ///
 /// # Errors
-/// `needs_config{reason:"key_unreadable"}` for an unknown or foreign-platform marker, tampered
-/// data, or a BLOB sealed by another Windows user; the UI asks the user to re-enter the key.
-pub fn open(sealed: &[u8]) -> Result<Zeroizing<String>, KitError> {
+/// `needs_config{key_unreadable}` for missing keys, wrong/foreign markers, tampering,
+/// or another Windows user's BLOB; `needs_config{secret_store_unavailable}` for
+/// unavailable/locked native storage. Native errors never include credential bytes.
+pub fn unprotect(sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>, KitError> {
     match sealed.split_first() {
         #[cfg(windows)]
         Some((&dpapi::MARKER, payload)) => dpapi::unprotect(payload),
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        Some((&native::MARKER, _)) => native::unprotect(sealed),
         _ => Err(KitError::needs_config(KEY_UNREADABLE)),
     }
 }
 
-/// Removes platform-side leftovers of a BLOB; call before overwriting or deleting it.
-/// DPAPI keeps nothing outside the BLOB, so this is a no-op on Windows.
+/// Releases per-BLOB platform resources; none of the supported formats have any.
+/// The shared native key must outlive every BLOB, including database backups.
 ///
 /// # Errors
-/// Never on Windows.
+/// Never fails. Removing a BLOB does not delete the user's shared native key.
 pub fn forget(_sealed: &[u8]) -> Result<(), KitError> {
     Ok(())
 }
 
-/// Whether [`seal`] works on this platform.
+/// Whether this target implements native protection (not a runtime service probe).
 #[must_use]
 pub const fn available() -> bool {
-    cfg!(windows)
+    cfg!(any(windows, target_os = "macos", target_os = "linux"))
 }
 
 #[cfg(windows)]
@@ -95,7 +124,7 @@ mod dpapi {
         }))
     }
 
-    pub(super) fn unprotect(payload: &[u8]) -> Result<Zeroizing<String>, KitError> {
+    pub(super) fn unprotect(payload: &[u8]) -> Result<Zeroizing<Vec<u8>>, KitError> {
         let unreadable = |cause| KitError::needs_config(KEY_UNREADABLE).with_cause(cause);
         let input = blob(payload)?;
         let mut out = CRYPT_INTEGER_BLOB::default();
@@ -112,10 +141,7 @@ mod dpapi {
             )
         }
         .map_err(unreadable)?;
-        take(out, |bytes| {
-            std::str::from_utf8(bytes).map(|plain| Zeroizing::new(plain.to_owned()))
-        })
-        .map_err(|e| KitError::needs_config(KEY_UNREADABLE).with_cause(e))
+        Ok(take(out, |bytes| Zeroizing::new(bytes.to_vec())))
     }
 
     fn blob(data: &[u8]) -> Result<CRYPT_INTEGER_BLOB, KitError> {
@@ -138,6 +164,180 @@ mod dpapi {
         // SAFETY: `pbData` was LocalAlloc'ed by DPAPI and is freed exactly once, after its last use.
         unsafe { LocalFree(Some(HLOCAL(out.pbData.cast()))) };
         value
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod native {
+    use std::fmt::Write;
+    use std::fs::{self, DirBuilder, OpenOptions};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    use std::path::Path;
+
+    use aes_gcm::aead::{AeadInPlace, KeyInit};
+    use aes_gcm::{Aes256Gcm, Nonce, Tag};
+    use sha2::{Digest, Sha256};
+    use zeroize::Zeroizing;
+
+    use super::KEY_UNREADABLE;
+    use crate::KitError;
+
+    #[cfg(target_os = "macos")]
+    pub(super) const MARKER: u8 = 0x02;
+    #[cfg(target_os = "linux")]
+    pub(super) const MARKER: u8 = 0x03;
+    const SERVICE: &str = "com.ouraihub.aether.credentials.v1";
+    const HEADER: usize = 13; // marker + 96-bit nonce
+    const TAG: usize = 16;
+
+    fn unavailable() -> KitError {
+        KitError::needs_config("secret_store_unavailable")
+    }
+
+    fn unreadable() -> KitError {
+        KitError::needs_config(KEY_UNREADABLE)
+    }
+
+    fn account(home: &Path) -> Result<String, KitError> {
+        let mut account = String::with_capacity(64);
+        for byte in Sha256::digest(home.as_os_str().as_bytes()) {
+            write!(account, "{byte:02x}").map_err(|_| unavailable())?;
+        }
+        Ok(account)
+    }
+
+    fn master_key(create: bool) -> Result<Zeroizing<Vec<u8>>, KitError> {
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .ok_or_else(unavailable)?;
+        let home = fs::canonicalize(home).map_err(|_| unavailable())?;
+        let directory = home.join(".aether");
+        DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&directory)
+            .map_err(|_| unavailable())?;
+        // This file holds no secrets. Keep its inode: removing it would split concurrent locks.
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .mode(0o600)
+            .open(directory.join("credential-v1.lock"))
+            .map_err(|_| unavailable())?;
+        // Serialize lookup + creation across threads, processes and host applications.
+        lock.lock().map_err(|_| unavailable())?;
+        // Use the compiled native backend directly, never an installable mock default.
+        let credential = keyring::default::default_credential_builder()
+            .build(None, SERVICE, &account(&home)?)
+            .map_err(|_| unavailable())?;
+        let entry = keyring::Entry::new_with_credential(credential);
+        let key = match entry.get_secret() {
+            Ok(key) => Zeroizing::new(key),
+            Err(keyring::Error::NoEntry) if create => {
+                let mut key = Zeroizing::new(vec![0_u8; 32]);
+                getrandom::fill(&mut key).map_err(|_| unavailable())?;
+                entry.set_secret(&key).map_err(|_| unavailable())?;
+                key
+            }
+            Err(keyring::Error::NoEntry) => return Err(unreadable()),
+            Err(_) => return Err(unavailable()),
+        };
+        if key.len() != 32 {
+            return Err(unreadable());
+        }
+        Ok(key)
+    }
+
+    pub(super) fn protect(plain: &[u8]) -> Result<Vec<u8>, KitError> {
+        let key = master_key(true)?;
+        let mut nonce = [0_u8; 12];
+        getrandom::fill(&mut nonce).map_err(|_| unavailable())?;
+        encrypt(&key, nonce, plain)
+    }
+
+    pub(super) fn unprotect(sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>, KitError> {
+        // Reject malformed data before contacting the credential store.
+        if sealed.len() < HEADER + TAG || sealed[0] != MARKER {
+            return Err(unreadable());
+        }
+        decrypt(&master_key(false)?, sealed)
+    }
+
+    fn encrypt(key: &[u8], nonce: [u8; 12], plain: &[u8]) -> Result<Vec<u8>, KitError> {
+        let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| unreadable())?;
+        let mut sealed = Zeroizing::new(Vec::with_capacity(HEADER + plain.len() + TAG));
+        sealed.push(MARKER);
+        sealed.extend_from_slice(&nonce);
+        sealed.extend_from_slice(plain);
+        let tag = cipher
+            .encrypt_in_place_detached(&Nonce::from(nonce), &[MARKER], &mut sealed[HEADER..])
+            .map_err(|_| unavailable())?;
+        sealed.extend_from_slice(&tag);
+        Ok(std::mem::take(&mut *sealed))
+    }
+
+    fn decrypt(key: &[u8], sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>, KitError> {
+        if sealed.len() < HEADER + TAG || sealed[0] != MARKER {
+            return Err(unreadable());
+        }
+        let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| unreadable())?;
+        let nonce = <[u8; 12]>::try_from(&sealed[1..HEADER]).map_err(|_| unreadable())?;
+        let end = sealed.len() - TAG;
+        let tag = <[u8; TAG]>::try_from(&sealed[end..]).map_err(|_| unreadable())?;
+        let mut plain = Zeroizing::new(sealed[HEADER..end].to_vec());
+        cipher
+            .decrypt_in_place_detached(&Nonce::from(nonce), &[MARKER], &mut plain, &Tag::from(tag))
+            .map_err(|_| unreadable())?;
+        Ok(plain)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #![expect(clippy::unwrap_used, reason = "a failed unwrap is a failed test")]
+        use super::*;
+
+        #[test]
+        fn deterministic_cipher_authenticates_every_byte_and_key() {
+            let key = [0x42_u8; 32];
+            let nonce = [0x24_u8; 12];
+            for plain in [b"".as_slice(), b"\0\xffprivate credential\0".as_slice()] {
+                let sealed = encrypt(&key, nonce, plain).unwrap();
+                assert_eq!(sealed, encrypt(&key, nonce, plain).unwrap());
+                assert_eq!(decrypt(&key, &sealed).unwrap().as_slice(), plain);
+                assert_eq!(sealed.len(), HEADER + plain.len() + TAG);
+                if !plain.is_empty() {
+                    assert!(!sealed.windows(plain.len()).any(|bytes| bytes == plain));
+                }
+                assert_ne!(sealed, encrypt(&key, [0x25; 12], plain).unwrap());
+                assert!(decrypt(&[0x43; 32], &sealed).is_err());
+                for index in 0..sealed.len() {
+                    let mut tampered = sealed.clone();
+                    tampered[index] ^= 1;
+                    let error = decrypt(&key, &tampered).unwrap_err();
+                    assert_eq!(error.details().reason(), Some(KEY_UNREADABLE));
+                    assert!(!format!("{error:?}").contains("private credential"));
+                }
+                for end in 0..sealed.len() {
+                    assert!(decrypt(&key, &sealed[..end]).is_err());
+                }
+                let mut extended = sealed;
+                extended.push(0);
+                assert!(decrypt(&key, &extended).is_err());
+            }
+        }
+
+        #[test]
+        fn native_identity_contains_no_credential_and_is_home_scoped() {
+            let first = account(Path::new("/users/one")).unwrap();
+            assert_eq!(first.len(), 64);
+            assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
+            assert_eq!(first, account(Path::new("/users/one")).unwrap());
+            assert_ne!(first, account(Path::new("/users/two")).unwrap());
+        }
     }
 }
 
@@ -168,6 +368,22 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn bytes_preserve_dpapi_marker_and_string_compatibility() {
+        let bytes = b"\0\xffopaque credential\0";
+        let sealed = protect(bytes).unwrap();
+        assert_eq!(sealed[0], 0x01);
+        assert_eq!(unprotect(&sealed).unwrap().as_slice(), bytes);
+        assert_unreadable(open(&sealed));
+        assert_eq!(
+            unprotect(&seal("existing").unwrap()).unwrap().as_slice(),
+            b"existing"
+        );
+        forget(&sealed).unwrap();
+        assert_eq!(unprotect(&sealed).unwrap().as_slice(), bytes);
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn tampered_byte_is_unreadable() {
         let sealed = seal("sk-test-1234567890").unwrap();
         for index in [1, sealed.len() / 2, sealed.len() - 1] {
@@ -177,9 +393,9 @@ mod tests {
         }
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     #[test]
-    fn seal_is_unsupported_off_windows() {
+    fn seal_is_unsupported_on_other_targets() {
         assert_eq!(seal("k").err().unwrap().code(), KitErrorCode::Unsupported);
         assert!(!available());
     }

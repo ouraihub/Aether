@@ -16,3 +16,8 @@ pub use dto::*;
 pub use infer::{Inferred, infer, infer_reasoning};
 pub use store::Store;
 pub use url::api_base;
+
+/// Native at-rest byte protection for host credentials, without a private support dependency.
+pub mod secrets {
+    pub use aether_support::secret::{protect, unprotect};
+}

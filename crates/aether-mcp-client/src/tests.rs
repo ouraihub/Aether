@@ -398,7 +398,7 @@ fn url_with_credentials_is_rejected_on_save() {
 }
 
 /// Credentials live only in the sealed secret and are attached per request.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn credential_query_is_sent_but_never_stored_in_url() {
     let fake = Fake::start(|seen| match seen.method() {

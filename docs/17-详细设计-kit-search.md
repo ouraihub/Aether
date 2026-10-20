@@ -2,7 +2,7 @@
 
 ## 1. 范围与归属
 
-`aether-search` 是独立可选 Rust 能力：搜索/读取各选一个默认服务商，每家配置独立保存，DPAPI 密文凭据、地址策略、响应上限和超时沿用 support。聊天核心不读取搜索数据库；`tauri-plugin-aether` 接入层组合搜索和模型请求。
+`aether-search` 是独立可选 Rust 能力：搜索/读取各选一个默认服务商，每家配置独立保存，原生密文凭据（Windows DPAPI / macOS Keychain / Linux Secret Service）、地址策略、响应上限和超时沿用 support。聊天核心不读取搜索数据库；`tauri-plugin-aether` 接入层组合搜索和模型请求。
 
 - 搜索：智谱、Tavily、SearXNG、Exa、Exa MCP、博查、Querit、Brave、Parallel、Jina、Firecrawl。
 - 读取：Querit、直接获取、Jina、Firecrawl。

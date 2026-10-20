@@ -266,7 +266,7 @@ CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id
     /// # Errors
     /// `not_found{endpoint|key}`; `bad_request{apiKey: empty|too_long|duplicate}`,
     /// `bad_request{label: too_long}`, `bad_request{keys: too_many}`; the sealing error
-    /// (e.g. `unsupported`) when the key cannot be encrypted, in which case nothing is written.
+    /// (e.g. `needs_config{secret_store_unavailable}`), in which case nothing is written.
     pub fn save_key(&self, input: EndpointKeySave) -> Result<Vec<Provider>, KitError> {
         let had_key = input.key.is_some();
         // The request's plaintext is wiped on drop like every other clear key.

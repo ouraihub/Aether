@@ -84,7 +84,7 @@ fn mcp_highlights_keep_paragraphs_between_results() {
         ]
     );
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 #[test]
 fn scoped_keys_are_ciphertext_masked_bounded_and_survive_restart() {
     let dir = tempfile::tempdir().unwrap();
@@ -295,7 +295,7 @@ fn preferences_reject_invalid_rules_and_filter_before_unicode_cutoff() {
     assert_eq!(parsed[0].snippet.chars().count(), 3000);
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn real_keys_retry_only_explicit_status_and_rotate_next_start() {
     use tokio::{
@@ -363,7 +363,7 @@ async fn real_keys_retry_only_explicit_status_and_rotate_next_start() {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn fetch_retries_keys_but_network_and_cancel_do_not() {
     use tokio::{

@@ -37,16 +37,73 @@ jobs:
       # Every check lives in scripts/ci.mjs; locally run the same `pnpm run ci` before pushing.
       - run: pnpm run ci
 
-  # Decision D3: Windows first, macOS later. Keep the core crates compiling on macOS
-  # from day one so platform-specific code stays behind cfg gates.
+  # Native stores and the full quality gate run on both shipping Unix targets.
   macos-core:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
       - name: Install the pinned Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: >
           cargo check -p aether-support -p aether-observability -p aether-providers -p aether-chat
           -p aether-skills -p aether-mcp-client -p aether-mcp-server -p example-cli
+      - name: Create unlocked native test keychain
+        run: |
+          security default-keychain -d user > "$RUNNER_TEMP/aether-original-keychain"
+          security create-keychain -p aether-ci "$RUNNER_TEMP/aether-ci.keychain-db"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/aether-ci.keychain-db"
+          security unlock-keychain -p aether-ci "$RUNNER_TEMP/aether-ci.keychain-db"
+          security list-keychains -d user -s "$RUNNER_TEMP/aether-ci.keychain-db"
+          security default-keychain -d user -s "$RUNNER_TEMP/aether-ci.keychain-db"
+          # Workspace tests are different executables: pre-authorize only this disposable test key.
+          account=$(printf '%s' "$(cd "$HOME" && pwd -P)" | shasum -a 256 | cut -d' ' -f1)
+          key=$(openssl rand -hex 32)
+          security add-generic-password -a "$account" -s com.ouraihub.aether.credentials.v1 \
+            -X "$key" -A "$RUNNER_TEMP/aether-ci.keychain-db"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run ci
+      - name: Remove native test keychain
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/aether-original-keychain" ]; then
+            original=$(tr -d '"' < "$RUNNER_TEMP/aether-original-keychain" | xargs)
+            security default-keychain -d user -s "$original"
+            security list-keychains -d user -s "$original"
+          fi
+          security delete-keychain "$RUNNER_TEMP/aether-ci.keychain-db"
+
+  linux-core:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install native desktop and Secret Service dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl wget file libxdo-dev libssl-dev \
+            librsvg2-dev libayatana-appindicator3-dev libwebkit2gtk-4.1-dev patchelf \
+            libdbus-1-dev gnome-keyring dbus-x11 xvfb
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - name: Full gate in unlocked native Secret Service session
+        run: |
+          dbus-run-session -- xvfb-run -a bash -euc '
+            export XDG_RUNTIME_DIR="$(mktemp -d)"
+            chmod 700 "$XDG_RUNTIME_DIR"
+            eval "$(printf "%s" aether-ci | gnome-keyring-daemon --unlock --components=secrets)"
+            pnpm run ci
+          '
