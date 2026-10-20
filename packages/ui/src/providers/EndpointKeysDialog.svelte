@@ -35,15 +35,16 @@
   let edit = $state<{ id: string | null; label: string; key: string } | null>(null)
   let busy = $state(false)
   let password = $state('')
-  /** Key waiting for the current password before it can be copied (web). */
-  let asking = $state<string | null>(null)
+  /** Key waiting for the current password before it can be copied or edited (web). */
+  let asking = $state<{ id: string; action: 'copy' | 'edit' } | null>(null)
   $effect.pre(() => {
     if (!open) return
     untrack(() => {
-      const key = endpoint.keys.find((k) => k.id === editKeyId)
-      edit = key ? { id: key.id, label: key.label, key: '' } : null
+      edit = null
       password = ''
       asking = null
+      const key = endpoint.keys.find((k) => k.id === editKeyId)
+      if (key) void startEdit(key)
     })
   })
   const enabled = $derived(endpoint.keys.filter((k) => k.enabled).length)
@@ -71,25 +72,44 @@
     if (key) input.key = key
     if (await run((port) => port.saveKey(input))) edit = null
   }
-  async function copy(key: EndpointKey) {
+  async function plaintext(key: EndpointKey, action: 'copy' | 'edit'): Promise<string | null> {
     const port = ports.providers
-    if (!port || !key.readable || busy) return
+    if (!port || !key.readable || busy) return null
     if (port.revealNeedsPassword && !password) {
-      asking = key.id
-      return
+      asking = { id: key.id, action }
+      return null
     }
     busy = true
     try {
       const text = await port.revealKey(key.id, password)
       asking = null
-      await navigator.clipboard.writeText(text)
-      notify.toast('success', t('providers.key_copied'))
+      return text
     } catch (error) {
       password = ''
-      notify.toast('error', error instanceof Error ? error.message : t('providers.key_copy_failed'))
+      notify.toast('error', error instanceof Error ? error.message : t('providers.key_reveal_failed'))
+      return null
     } finally {
       busy = false
     }
+  }
+  async function copy(key: EndpointKey) {
+    const text = await plaintext(key, 'copy')
+    if (text === null) return
+    try {
+      await navigator.clipboard.writeText(text)
+      notify.toast('success', t('providers.key_copied'))
+    } catch {
+      notify.toast('error', t('providers.key_copy_failed'))
+    }
+  }
+  /** Edits start from the stored key; an unreadable key can only be replaced. */
+  async function startEdit(key: EndpointKey) {
+    if (!key.readable) {
+      edit = { id: key.id, label: key.label, key: '' }
+      return
+    }
+    const text = await plaintext(key, 'edit')
+    if (text !== null) edit = { id: key.id, label: key.label, key: text }
   }
   function keydown(event: KeyboardEvent) {
     if (event.key !== 'Enter') return
@@ -171,8 +191,9 @@
         disabled={busy}
         bind:value={password}
         onkeydown={(event) => {
-          const key = endpoint.keys.find((k) => k.id === asking)
-          if (event.key === 'Enter' && password && key) void copy(key)
+          const key = endpoint.keys.find((k) => k.id === asking?.id)
+          if (event.key !== 'Enter' || !password || !key) return
+          void (asking?.action === 'edit' ? startEdit(key) : copy(key))
         }}
       />
     {/if}
@@ -207,7 +228,7 @@
                 title={t('providers.key_edit')}
                 aria-label={t('providers.key_edit')}
                 disabled={busy}
-                onclick={() => (edit = { id: key.id, label: key.label, key: '' })}><EditIcon /></Button
+                onclick={() => void startEdit(key)}><EditIcon /></Button
               >
               <Button
                 variant="ghost"

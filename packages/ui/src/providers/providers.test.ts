@@ -159,14 +159,20 @@ describe('ProvidersSettings', () => {
     expect(revealKey).toHaveBeenCalledWith('k1', '')
   })
 
-  it('marks API key editing as new-password instead of a saved login', async () => {
-    setup()
+  it('edits the stored key without browser autofill', async () => {
+    const revealKey = vi.fn(() => Promise.resolve('sk-plain-key'))
+    setup({ revealKey })
     await fireEvent.click(await screen.findByRole('button', { name: 'Manage API keys' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
     await fireEvent.click(dialog.getByRole('button', { name: 'Edit key' }))
-    const keyInput = document.querySelector('input[aria-label="API key"]')
+    await waitFor(() =>
+      expect((document.querySelector('input[name="provider-api-key"]') as HTMLInputElement | null)?.value).toBe(
+        'sk-plain-key',
+      ),
+    )
+    const keyInput = document.querySelector('input[name="provider-api-key"]')
+    expect(revealKey).toHaveBeenCalledWith('k1', '')
     expect(keyInput?.getAttribute('autocomplete')).toBe('new-password')
-    expect(keyInput?.getAttribute('name')).toBe('provider-api-key')
   })
 
   it('copies the trimmed API address from the input copy button', async () => {
