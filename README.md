@@ -42,6 +42,8 @@ dbus-run-session -- xvfb-run -a bash -euc '
 
 macOS 在已解锁的用户 Keychain 会话中运行同一 `pnpm run ci`；CI 创建临时、已解锁的默认 Keychain，并只为该一次性钥匙串预置允许不同测试可执行文件访问的随机测试主密钥，结束后移除（不依赖 mock 或开发者凭据；生产代码不放宽 Keychain ACL）。两平台完整检查保留 fmt、Clippy、整个 workspace 测试和各插件 feature 检查；此外编译 `native-secrets` 示例，以四个并发子进程首次创建另一 HOME namespace 的主密钥，另起进程读回凭据和 provider 数据库、逐字节篡改拒绝。Linux 再切断该进程 D-Bus 地址验证保存失败且数据库原密文不变，恢复会话后再次读取。
 
+三个 Tauri 窗口示例共用 `examples/icon.ico`（Windows）和 `examples/icon.png`（32×32 RGBA，macOS/Linux）；即使 `bundle.active=false`，`generate_context!()` 仍读取窗口图标。完整 DTO 检查会编译这些示例，不得通过跳过 workspace 或关闭 DTO 检查规避缺图标错误。
+
 单独原生冒烟命令（必须在同一个已解锁会话、相同 HOME 中执行；只写加密测试数据）：
 
 ```sh
