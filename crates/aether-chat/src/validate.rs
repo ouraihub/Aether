@@ -73,10 +73,15 @@ pub(crate) fn prepare(input: &mut RunInput) -> Result<String, KitError> {
     if !input.images.is_empty() && !connection.can_vision {
         return Err(KitError::bad_request("images", "vision_unsupported"));
     }
+    // Unset max_output stays unbounded here: inferred budgets assume no declared limit, and
+    // protocol.rs clamps the sent budget below the real max_tokens anyway.
     if let Some(config) = connection.reasoning.as_ref()
-        && !config.validate(connection.protocol, connection.max_output)
+        && let Err(reason) = config.validate(
+            connection.protocol,
+            connection.max_output.or(Some(u32::MAX)),
+        )
     {
-        return Err(KitError::bad_request("reasoning", "invalid"));
+        return Err(KitError::bad_request("reasoning", reason));
     }
     if input.reasoning_effort != ReasoningEffort::Default {
         let Some(config) = connection.reasoning.as_ref() else {

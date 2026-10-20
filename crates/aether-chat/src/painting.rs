@@ -314,6 +314,7 @@ mod tests {
             supports_tools: None,
             reasoning: None,
             native_web_search: false,
+            pricing: None,
             can_vision: false,
             headers: Vec::new(),
             image_base_url: None,

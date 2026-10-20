@@ -9,8 +9,9 @@ mod store;
 mod url;
 
 pub use aether_support::{
-    Connection, ContextSource, ContextUsage, KitError, KitErrorCode, Protocol, ReasoningBlock,
-    ReasoningConfig, ReasoningDialect, ReasoningEffort, TokenUsage,
+    Connection, ContextSource, ContextUsage, Cost, Currency, KitError, KitErrorCode, ModelPricing,
+    PricingTier, Protocol, ReasoningBlock, ReasoningConfig, ReasoningDialect, ReasoningEffort,
+    TokenUsage,
 };
 pub use dto::*;
 pub use infer::{Inferred, infer, infer_reasoning};

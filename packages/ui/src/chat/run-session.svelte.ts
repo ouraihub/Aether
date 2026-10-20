@@ -29,7 +29,7 @@ export interface ToolItem {
   summary: string
 }
 
-import type { ContextUsage, TokenUsage, ReasoningEffort } from '../ports'
+import type { ContextUsage, Cost, TokenUsage, ReasoningEffort } from '../ports'
 
 export interface ChatTurn {
   id: string
@@ -48,6 +48,8 @@ export interface ChatTurn {
   reasoningText: string
   reasoningEffort: ReasoningEffort
   usage: TokenUsage | null
+  /** Priced at run time; later price changes never recompute it (docs/41 §3.7). */
+  cost: Cost | null
   contextUsage: ContextUsage | null
   status: TurnStatus
   error: string | null
@@ -113,6 +115,18 @@ export class RunSession {
         if (value != null) total[key] = (total[key] ?? 0) + value
       }
     return total
+  }
+
+  /** Known turn costs summed per currency, same scope as `cumulativeUsage` (no exchange rates). */
+  get cumulativeCost(): Cost[] {
+    const totals: Cost[] = []
+    for (const { cost } of this.turns) {
+      if (!cost) continue
+      const found = totals.find((item) => item.currency === cost.currency)
+      if (found) found.amount += cost.amount
+      else totals.push({ ...cost })
+    }
+    return totals
   }
 
   send(base: RunBase, input: string, webSearch = false, images: ImagePart[] = []): Promise<boolean> {
@@ -224,6 +238,7 @@ export class RunSession {
       reasoningText: '',
       reasoningEffort: base.reasoningEffort ?? 'default',
       usage: null,
+      cost: null,
       contextUsage: null,
       status: 'running',
       error: null,
@@ -301,6 +316,7 @@ export class RunSession {
       reasoningText: turn.reasoningText ?? '',
       reasoningEffort: turn.reasoningEffort ?? 'default',
       usage: turn.usage ?? null,
+      cost: turn.cost ?? null,
       contextUsage: turn.contextUsage ?? null,
       status: turn.status,
       error: turn.errorCode,
@@ -412,6 +428,7 @@ export class RunSession {
             cacheWriteTokens: event.cacheWriteTokens,
             reasoningTokens: event.reasoningTokens,
           }
+          turn.cost = event.cost
           break
         case 'tool_call':
           // A repeated call id is fed back without running again (docs/12 §5): one row.

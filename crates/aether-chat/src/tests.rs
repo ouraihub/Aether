@@ -193,6 +193,7 @@ fn input(protocol: Protocol, base_url: String) -> RunInput {
         reasoning: None,
         native_web_search: false,
         can_vision: true,
+        pricing: None,
         headers: Vec::new(),
         image_base_url: None,
         image_edit_base_url: None,
@@ -262,6 +263,66 @@ async fn native_search_keeps_citations_and_does_not_execute_server_calls_locally
                 "web_search"
             }
         );
+    }
+}
+
+#[tokio::test]
+async fn usage_counts_cache_and_reasoning_and_prices_the_turn() {
+    let pricing = aether_support::ModelPricing {
+        currency: aether_support::Currency::Usd,
+        tiers: vec![aether_support::PricingTier {
+            min_input_tokens: 0,
+            input: 10.0,
+            output: 20.0,
+            cache_read: Some(1.0),
+            cache_write: None,
+        }],
+    };
+    for protocol in PROTOCOLS {
+        let body = match protocol {
+            Protocol::AnthropicMessages => concat!(
+                "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":30,\"cache_read_input_tokens\":80,\"cache_creation_input_tokens\":10,\"output_tokens\":1}}}\n\n",
+                "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi\"}}\n\n",
+                "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":30}}\n\n",
+                "data: {\"type\":\"message_stop\"}\n\n",
+            ),
+            Protocol::OpenaiChat => concat!(
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi\"},\"finish_reason\":\"stop\"}]}\n\n",
+                "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":30,\"prompt_tokens_details\":{\"cached_tokens\":80,\"cache_write_tokens\":10},\"completion_tokens_details\":{\"reasoning_tokens\":20}}}\n\n",
+                "data: [DONE]\n\n",
+            ),
+            Protocol::OpenaiResponses => concat!(
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":120,\"output_tokens\":30,\"input_tokens_details\":{\"cached_tokens\":80,\"cache_write_tokens\":10},\"output_tokens_details\":{\"reasoning_tokens\":20}}}}\n\n",
+            ),
+        };
+        let (base, _) = upstream(sse(body.to_owned())).await;
+        let mut req = input(protocol, base);
+        req.connection.pricing = Some(pricing.clone());
+        let (summary, events) = run(&runner(5_000, 5_000), req, false).await;
+        assert_eq!(summary.status, EndStatus::Completed, "{protocol:?}");
+        let reasoning = (protocol != Protocol::AnthropicMessages).then_some(20);
+        assert_eq!(
+            summary.usage,
+            Usage {
+                input_tokens: Some(120),
+                output_tokens: Some(30),
+                cache_read_tokens: Some(80),
+                cache_write_tokens: Some(10),
+                reasoning_tokens: reasoning,
+            },
+            "{protocol:?}"
+        );
+        // (30·10 + 80·1 + 10·10 + 30·20) / 1e6
+        let cost = summary.cost.unwrap();
+        assert!(
+            (cost.amount - 0.001_08).abs() < 1e-12,
+            "{protocol:?} {cost:?}"
+        );
+        assert!(events.iter().any(|e| matches!(
+            e,
+            RunEvent::Usage { cost: Some(c), .. } if *c == cost
+        )));
     }
 }
 
@@ -471,17 +532,19 @@ async fn streams_text_and_usage_for_every_protocol() {
             assert!(matches!(events[0], RunEvent::RoundStart { round: 1 }));
             assert_eq!(streamed(&events), text, "{protocol:?} {name}");
             assert_eq!(summary_text(&summary), text);
+            // Only the Responses fixtures report (zero) cache/reasoning details.
+            let detail = (protocol == Protocol::OpenaiResponses).then_some(0);
             let expected = Usage {
                 input_tokens: Some(i),
                 output_tokens: Some(o),
-                cache_read_tokens: None,
+                cache_read_tokens: detail,
                 cache_write_tokens: None,
-                reasoning_tokens: None,
+                reasoning_tokens: detail,
             };
             assert_eq!(summary.usage, expected, "{protocol:?} {name}");
             assert!(matches!(
                 events[events.len() - 2],
-                RunEvent::Usage { input_tokens, output_tokens, .. } if input_tokens == Some(i) && output_tokens == Some(o)
+                RunEvent::Usage { input_tokens, output_tokens, cost: None, .. } if input_tokens == Some(i) && output_tokens == Some(o)
             ));
 
             let request = seen.lock().await[0].clone();

@@ -366,6 +366,7 @@ fn store_reply(
                 reasoning_tokens: None,
                 context_usage: None,
                 reasoning_effort: None,
+                cost: None,
             },
         )
         .unwrap();
@@ -576,6 +577,10 @@ async fn end_is_returned_only_after_durable_finish_and_storage_failure_is_explic
         reasoning_tokens: None,
         context_usage: None,
         reasoning_effort: None,
+        cost: Some(aether_support::Cost {
+            amount: 0.125,
+            currency: aether_support::Currency::Usd,
+        }),
     };
     let end = || RunEvent::End {
         status: EndStatus::Completed,
@@ -602,6 +607,10 @@ async fn end_is_returned_only_after_durable_finish_and_storage_failure_is_explic
     assert!(wire["turns"][0]["supersedesId"].is_null());
     assert_eq!(wire["turns"][0]["kind"], "reply");
     assert_eq!(wire["turns"][0]["endpointId"], "e1");
+    assert_eq!(
+        wire["turns"][0]["cost"],
+        json!({"amount": 0.125, "currency": "USD"})
+    );
     assert_eq!(
         wire["turns"][0]["reasoningText"],
         "visible thoughtvisible summaryvisible chat"

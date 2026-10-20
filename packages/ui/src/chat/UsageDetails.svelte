@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ContextUsage, TokenUsage } from '../ports'
+  import type { ContextUsage, Cost, TokenUsage } from '../ports'
   import { getKitContext } from '../context'
   import ChartNoAxesColumnIcon from '@lucide/svelte/icons/chart-no-axes-column'
   let details = $state<HTMLDetailsElement | null>(null)
@@ -7,8 +7,12 @@
     context: ContextUsage | null
     usage: TokenUsage | null
     total: TokenUsage
+    /** Last turn's cost; null when its model has no pricing or a round lacked token counts. */
+    cost: Cost | null
+    /** Session total per currency. */
+    totalCost: Cost[]
   }
-  let { context, usage, total }: Props = $props()
+  let { context, usage, total, cost, totalCost }: Props = $props()
   const { t } = getKitContext().i18n
   const percent = $derived(
     context?.tokens != null && context.contextWindow != null && context.contextWindow > 0
@@ -16,6 +20,7 @@
       : null,
   )
   const fields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const
+  const money = ({ amount, currency }: Cost) => `${currency === 'CNY' ? '¥' : '$'}${amount.toFixed(4)}`
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Esc closes this disclosure first) -->
@@ -60,7 +65,11 @@
             ><th scope="row">{t(`chat.usage.${field}`)}</th><td>{usage?.[field] ?? t('chat.unknown')}</td><td
               >{total[field] ?? t('chat.unknown')}</td
             ></tr
-          >{/each}</tbody
+          >{/each}<tr
+          ><th scope="row">{t('chat.cost')}</th><td>{cost ? money(cost) : t('chat.unknown')}</td><td
+            >{totalCost.length ? totalCost.map(money).join(' + ') : t('chat.unknown')}</td
+          ></tr
+        ></tbody
       >
     </table>
     <p>{t('chat.usageHint')}</p>

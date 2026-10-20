@@ -45,6 +45,8 @@ pub struct Connection {
     pub native_web_search: bool,
     /// User-declared image input support (docs/19 §1).
     pub can_vision: bool,
+    /// User-declared prices for turn cost; `None` = unknown.
+    pub pricing: Option<crate::ModelPricing>,
     /// Custom request headers of the endpoint, applied before system headers.
     pub headers: Vec<(String, String)>,
     /// Normalised image generation base URL; `None` = use `base_url`.
@@ -97,6 +99,7 @@ impl fmt::Debug for Connection {
             .field("supports_tools", &self.supports_tools)
             .field("reasoning", &self.reasoning)
             .field("can_vision", &self.can_vision)
+            .field("pricing", &self.pricing)
             .field("headers", &self.headers.len())
             .field(
                 "image_base_url",
@@ -130,6 +133,7 @@ mod tests {
             reasoning: None,
             native_web_search: false,
             can_vision: false,
+            pricing: None,
             headers: vec![("X-Trace".to_owned(), "secret-header".to_owned())],
             image_base_url: None,
             image_edit_base_url: None,

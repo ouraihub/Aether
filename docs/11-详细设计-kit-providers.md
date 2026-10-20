@@ -90,6 +90,8 @@ nativeWebSearch默认false，用户显式声明；只允许chat模型与Messages
 
 providers.db保留migration1原始建表、migration2新增reasoning；migration3新增native_web_search（NOT NULL DEFAULT 0）；migration4新增providers.enabled；migration5换成endpoint_keys（见§2）。2026-10-14修复：首个原生搜索版本误改migration1而保留user_version=2，导致旧库模型列表/能力/连接查询缺列。打开时按实际列区分两种v2，经既有升级事务/备份升至v3；已包含列的v2只推进版本，保留原生声明。不得删库、清空模型或用空列表吞掉SQL错误。回归覆盖两种v2、v4、重启、模型/思考参数保留。
 
+migration 10（AutoNote docs/41）：`models` 增加 `name TEXT`、`group_name TEXT`（trim，空串存 NULL，≤80 字符，`bad_request{name|groupName: too_long}`）、`pricing TEXT`（JSON `ModelPricing`，仅 chat，`bad_request{pricing: invalid}`）。`ModelOption` 增加 `name`，`label` 不变。`reasoning` 列：NULL = 未设置（chat 读取时推断），字面量 `'none'` = 用户关闭（读取为 null，不推断），其他为 JSON；唯一读取函数 `read_reasoning`。`ModelSave.reasoning`：省略 = 保留并按新协议/max_output 重新校验，`null` = 关闭，对象 = 替换。校验原因：`contextWindow|maxOutput invalid`（< 1）、`maxOutput exceeds_context`（chat 且 ≥ contextWindow）、`reasoning invalid_efforts|protocol_mismatch|invalid_budget|unexpected_budget`。
+
 - 密钥（详见 AutoNote `docs/34` §3）：`keys` 按 `position, id`；`masked` 首 4 尾 4 打码，解不开时 `masked=null, readable=false`（换了 Windows 账户）。每个动作立即走 `save_key`/`remove_key`，密钥不进 `ProviderSave`。新增必须带 `key`；修改时省略字段保持不变。`key`/`label` trim 后保存。错误：`not_found{endpoint|key}`；`bad_request{apiKey: empty|too_long|duplicate}`（重复按同线路明文比较）、`bad_request{label: too_long}`、`bad_request{keys: too_many}`。先加密再写库，加密失败原数据不变；删线路/服务商/密钥、换密钥后在提交后 `forget` 旧密文。
 - 轮换：只取启用密钥，游标在进程内存（线路 id → 下次起点，重启从头），每次请求返回从起点循环一圈的顺序；全部停用 = 无密钥。任一启用密钥解不开 → `needs_config{key_unreadable}`。
 - 失败切换：聊天每一轮、绘图、探测按该顺序尝试；上游在首字节前返回 401/403/429 且还有下一个 → 换下一个；其他错误、已开始输出或已试完 → 报错。脱敏 `known` = 本次全部密钥。

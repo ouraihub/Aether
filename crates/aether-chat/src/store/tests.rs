@@ -26,6 +26,10 @@ fn completed(messages: Vec<Message>) -> TurnRecord {
         context_usage: None,
         reasoning_effort: None,
         endpoint_id: None,
+        cost: Some(aether_support::Cost {
+            amount: 0.25,
+            currency: aether_support::Currency::Cny,
+        }),
     }
 }
 
@@ -71,6 +75,7 @@ fn tool_turn(seq: u32, input: &str) -> Turn {
         context_usage: None,
         reasoning_effort: None,
         endpoint_id: None,
+        cost: None,
         created_at: 0,
         images: vec![],
         generated: vec![],
@@ -187,6 +192,7 @@ fn reopen_reads_history_back() {
         (one.model_id.as_deref(), one.input_tokens, one.output_tokens),
         (Some("m1"), Some(10), Some(5))
     );
+    assert_eq!(one.cost, completed(vec![]).cost, "cost survives reopen");
     assert_eq!(
         (two.seq, two.status, two.input.as_str()),
         (2, TurnStatus::Cancelled, "again")
@@ -806,6 +812,7 @@ fn fork_copies_only_exact_ancestry_with_fresh_graph_ids_and_records() {
         assert_eq!(copied.model_id, source.model_id);
         assert_eq!(copied.input_tokens, source.input_tokens);
         assert_eq!(copied.output_tokens, source.output_tokens);
+        assert_eq!(copied.cost, source.cost);
         assert_eq!(copied.created_at, source.created_at);
         assert_eq!(copied.kind, source.kind);
     }

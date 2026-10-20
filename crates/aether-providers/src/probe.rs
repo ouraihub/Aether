@@ -234,6 +234,9 @@ fn probed(id: String, protocol: Protocol) -> ProbedModel {
             supports_tools: inferred.supports_tools,
             reasoning,
             native_web_search: false,
+            name: None,
+            group_name: None,
+            pricing: None,
         },
         group: inferred.group,
     }

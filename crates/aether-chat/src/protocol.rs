@@ -354,6 +354,8 @@ pub(crate) struct Decoder {
     pub(crate) done: bool,
     calls: Vec<Partial>,
     truncated: bool,
+    /// Anthropic `input_tokens` without cache; `usage.input_tokens` adds cache back.
+    base_input: Option<u32>,
 }
 
 impl Decoder {
@@ -363,6 +365,7 @@ impl Decoder {
             done: false,
             calls: Vec::new(),
             truncated: false,
+            base_input: None,
         }
     }
 
@@ -455,21 +458,34 @@ impl Decoder {
                 "content_block_delta" if v["delta"]["type"] == "input_json_delta" => {
                     self.append(&v["index"], &v["delta"]["partial_json"]);
                 }
-                "message_start" => {
-                    usage.input_tokens = tokens(&v["message"]["usage"]["input_tokens"]);
+                "message_start" | "message_delta" => {
+                    let raw = if kind == "message_start" {
+                        &v["message"]["usage"]
+                    } else {
+                        &v["usage"]
+                    };
+                    self.base_input = tokens(&raw["input_tokens"]).or(self.base_input);
+                    usage.output_tokens = tokens(&raw["output_tokens"]).or(usage.output_tokens);
+                    usage.cache_read_tokens =
+                        tokens(&raw["cache_read_input_tokens"]).or(usage.cache_read_tokens);
+                    usage.cache_write_tokens =
+                        tokens(&raw["cache_creation_input_tokens"]).or(usage.cache_write_tokens);
+                    usage.reasoning_tokens =
+                        tokens(&raw["reasoning_tokens"]).or(usage.reasoning_tokens);
+                    // `inputTokens` always includes cache (docs/41 §4).
+                    usage.input_tokens = self.base_input.map(|base| {
+                        base.saturating_add(usage.cache_read_tokens.unwrap_or(0))
+                            .saturating_add(usage.cache_write_tokens.unwrap_or(0))
+                    });
+                    if v["delta"]["stop_reason"] == "max_tokens" {
+                        self.truncated = true;
+                    }
                 }
                 "content_block_delta" if v["delta"]["type"] == "text_delta" => {
                     return text(&v["delta"]["text"]);
                 }
                 "content_block_delta" if v["delta"]["type"] == "citations_delta" => {
                     return citation(&v["delta"]["citation"]);
-                }
-                "message_delta" => {
-                    usage.output_tokens =
-                        tokens(&v["usage"]["output_tokens"]).or(usage.output_tokens);
-                    if v["delta"]["stop_reason"] == "max_tokens" {
-                        self.truncated = true;
-                    }
                 }
                 "message_stop" => self.done = true,
                 "error" => return error(&v["error"]),
@@ -479,9 +495,19 @@ impl Decoder {
                 if !v["error"].is_null() {
                     return error(&v["error"]);
                 }
-                if v["usage"].is_object() {
-                    usage.input_tokens = tokens(&v["usage"]["prompt_tokens"]);
-                    usage.output_tokens = tokens(&v["usage"]["completion_tokens"]);
+                let raw = &v["usage"];
+                if raw.is_object() {
+                    usage.input_tokens = tokens(&raw["prompt_tokens"]).or(usage.input_tokens);
+                    usage.output_tokens = tokens(&raw["completion_tokens"]).or(usage.output_tokens);
+                    usage.cache_read_tokens =
+                        tokens(&raw["prompt_tokens_details"]["cached_tokens"])
+                            .or(usage.cache_read_tokens);
+                    usage.cache_write_tokens =
+                        tokens(&raw["prompt_tokens_details"]["cache_write_tokens"])
+                            .or(usage.cache_write_tokens);
+                    usage.reasoning_tokens =
+                        tokens(&raw["completion_tokens_details"]["reasoning_tokens"])
+                            .or(usage.reasoning_tokens);
                 }
                 let choice = &v["choices"][0];
                 self.chat_tool_calls(&choice["delta"]["tool_calls"]);
@@ -501,8 +527,14 @@ impl Decoder {
                 "response.function_call_arguments.delta" => self.append(&v["item_id"], &v["delta"]),
                 "response.output_text.annotation.added" => return citation(&v["annotation"]),
                 "response.completed" | "response.incomplete" => {
-                    usage.input_tokens = tokens(&v["response"]["usage"]["input_tokens"]);
-                    usage.output_tokens = tokens(&v["response"]["usage"]["output_tokens"]);
+                    let raw = &v["response"]["usage"];
+                    usage.input_tokens = tokens(&raw["input_tokens"]);
+                    usage.output_tokens = tokens(&raw["output_tokens"]);
+                    usage.cache_read_tokens = tokens(&raw["input_tokens_details"]["cached_tokens"]);
+                    usage.cache_write_tokens =
+                        tokens(&raw["input_tokens_details"]["cache_write_tokens"]);
+                    usage.reasoning_tokens =
+                        tokens(&raw["output_tokens_details"]["reasoning_tokens"]);
                     self.done = true;
                     self.truncated |=
                         v["response"]["incomplete_details"]["reason"] == "max_output_tokens";

@@ -61,38 +61,39 @@ pub struct ReasoningConfig {
 }
 
 impl ReasoningConfig {
-    /// Checks protocol compatibility and bounded nonduplicate effort declarations.
-    pub fn validate(&self, protocol: Protocol, max_output: Option<u32>) -> bool {
+    /// Checks bounded nonduplicate efforts, protocol compatibility and the budget against
+    /// `max_output` (4096 when unset).
+    ///
+    /// # Errors
+    /// The `bad_request` reason of docs/41 §3: `invalid_efforts`, `protocol_mismatch`,
+    /// `invalid_budget` or `unexpected_budget`.
+    pub fn validate(
+        &self,
+        protocol: Protocol,
+        max_output: Option<u32>,
+    ) -> Result<(), &'static str> {
+        let mut seen = HashSet::new();
         if self.efforts.is_empty()
             || self
                 .efforts
                 .iter()
-                .any(|e| matches!(e, ReasoningEffort::Default))
+                .any(|e| matches!(e, ReasoningEffort::Default) || !seen.insert(*e))
         {
-            return false;
+            return Err("invalid_efforts");
         }
-        let mut seen = HashSet::new();
-        if self.efforts.iter().any(|effort| !seen.insert(*effort)) {
-            return false;
+        if (self.dialect == ReasoningDialect::Openai) == (protocol == Protocol::AnthropicMessages) {
+            return Err("protocol_mismatch");
         }
-        let protocol_ok = match self.dialect {
-            ReasoningDialect::Openai => {
-                matches!(protocol, Protocol::OpenaiChat | Protocol::OpenaiResponses)
+        match (self.dialect, self.budget_tokens) {
+            (ReasoningDialect::AnthropicBudget, budget) => {
+                if budget.is_some_and(|n| n >= 1024 && n < max_output.unwrap_or(4096)) {
+                    Ok(())
+                } else {
+                    Err("invalid_budget")
+                }
             }
-            ReasoningDialect::AnthropicBudget | ReasoningDialect::AnthropicAdaptive => {
-                protocol == Protocol::AnthropicMessages
-            }
-        };
-        if !protocol_ok {
-            return false;
-        }
-        match self.dialect {
-            ReasoningDialect::AnthropicBudget => self
-                .budget_tokens
-                .is_some_and(|n| n >= 1024 && max_output.is_none_or(|m| n < m)),
-            ReasoningDialect::Openai | ReasoningDialect::AnthropicAdaptive => {
-                self.budget_tokens.is_none()
-            }
+            (_, Some(_)) => Err("unexpected_budget"),
+            (_, None) => Ok(()),
         }
     }
 
@@ -174,7 +175,15 @@ mod tests {
             efforts: vec![ReasoningEffort::Low],
             budget_tokens: Some(1024),
         };
-        assert!(c.validate(Protocol::AnthropicMessages, Some(4096)));
-        assert!(!c.validate(Protocol::OpenaiChat, Some(4096)));
+        assert_eq!(c.validate(Protocol::AnthropicMessages, Some(4096)), Ok(()));
+        assert_eq!(
+            c.validate(Protocol::OpenaiChat, Some(4096)),
+            Err("protocol_mismatch")
+        );
+        assert_eq!(c.validate(Protocol::AnthropicMessages, None), Ok(()));
+        assert_eq!(
+            c.validate(Protocol::AnthropicMessages, Some(1024)),
+            Err("invalid_budget")
+        );
     }
 }

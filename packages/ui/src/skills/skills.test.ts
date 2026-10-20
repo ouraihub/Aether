@@ -44,6 +44,7 @@ function mount(options: FakePortsOptions, skills?: { id: string; revision: numbe
             endpointId: 'e1',
             modelId: 'm1',
             label: 'm1',
+            name: null,
             modelType: 'chat',
             supportsTools: null,
             reasoning: null,

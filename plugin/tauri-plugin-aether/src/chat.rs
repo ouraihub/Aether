@@ -603,6 +603,7 @@ pub(crate) async fn chat_run<R: Runtime>(
                     context_usage: None,
                     reasoning_effort: Some(input.reasoning_effort),
                     endpoint_id: input.connection.endpoint_id.clone(),
+                    cost: None,
                 };
                 let failed_handle = handle.clone();
                 blocking(move || store.finish_turn(failed_handle, record)).await?;
@@ -724,6 +725,7 @@ pub(crate) async fn chat_run<R: Runtime>(
                         context_usage: None,
                         reasoning_effort: Some(input.reasoning_effort),
                         endpoint_id: input.connection.endpoint_id.clone(),
+                        cost: None,
                     };
                     end = finish_event(store, turn, record, end).await;
                 }
@@ -778,6 +780,7 @@ pub(crate) async fn chat_run<R: Runtime>(
                 context_usage: summary.context_usage,
                 reasoning_effort: Some(reasoning_effort),
                 endpoint_id,
+                cost: summary.cost,
             };
             let event = end.take().unwrap_or_else(|| RunEvent::End {
                 status: aether_chat::EndStatus::Failed,
@@ -881,7 +884,7 @@ impl From<aether_chat::ConversationSummary> for ConversationSummary {
 }
 
 /// A stored conversation for display, turns oldest first.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub(crate) struct Conversation {
@@ -901,7 +904,7 @@ pub(crate) enum TurnStatus {
 }
 
 /// One turn as shown: user input and the assistant text it produced.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub(crate) struct Turn {
@@ -923,6 +926,9 @@ pub(crate) struct Turn {
     context_usage: Option<aether_support::ContextUsage>,
     #[ts(optional = nullable)]
     reasoning_effort: Option<aether_support::ReasoningEffort>,
+    /// Fixed when the turn finished (docs/41 §4).
+    #[ts(optional = nullable)]
+    cost: Option<aether_support::Cost>,
     reasoning_text: Option<String>,
     /// Images attached to the input; never base64 in history (docs/19 §2).
     images: Vec<aether_chat::ImageRef>,
@@ -1002,6 +1008,7 @@ impl From<aether_chat::Turn> for Turn {
             }),
             context_usage: t.context_usage,
             reasoning_effort: t.reasoning_effort,
+            cost: t.cost,
             reasoning_text: Some(reasoning_text),
             images: t.images.into_iter().map(image_ref).collect(),
             generated: t.generated.into_iter().map(image_ref).collect(),

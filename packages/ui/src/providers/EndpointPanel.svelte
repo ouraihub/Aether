@@ -24,7 +24,7 @@
   import { getKitContext } from '../context'
   import type { Model, Provider } from '../ports'
   import { cn } from '../utils'
-  import { keyError, maskedText, probeUrl, validUrl, type EndpointDraft } from './draft'
+  import { groupKey, keyError, maskedText, probeUrl, validUrl, type EndpointDraft } from './draft'
   import ModelSettingsDialog from './ModelSettingsDialog.svelte'
   import RequestConfigDialog from './RequestConfigDialog.svelte'
   import SecretInput from './SecretInput.svelte'
@@ -46,6 +46,7 @@
     oncheck,
     onsync,
     keyUrl,
+    usedBy,
   }: {
     endpoint: EndpointDraft
     check: CheckState | null
@@ -58,6 +59,8 @@
     onsync: () => void
     /** Preset "get a key" link shown beside the label (docs/39). */
     keyUrl?: string | undefined
+    /** Localized roles bound to a stored model (contract §6). */
+    usedBy?: ((endpointId: string, modelId: string) => string[]) | undefined
   } = $props()
 
   const CAPS = ['vision', 'reasoning', 'tools', 'web'] as const
@@ -113,13 +116,15 @@
         : cap === 'tools'
           ? model.supportsTools === true
           : model.nativeWebSearch
-  const shown = $derived(
-    endpoint.models.filter(
+  const shown = $derived.by(() => {
+    const search = query.trim().toLowerCase()
+    return endpoint.models.filter(
       (model) =>
-        model.id.toLowerCase().includes(query.trim().toLowerCase()) && (capFilter === 'all' || has(model, capFilter)),
-    ),
-  )
-  const groups = $derived(Object.entries(Object.groupBy(shown, (model) => model.id.split(/[-/:]/)[0] || '')))
+        (model.id.toLowerCase().includes(search) || !!model.name?.toLowerCase().includes(search)) &&
+        (capFilter === 'all' || has(model, capFilter)),
+    )
+  })
+  const groups = $derived(Object.entries(Object.groupBy(shown, groupKey)))
   const allFolded = $derived(groups.length > 0 && groups.every(([group]) => folded[group]))
 
   function commitUrl() {
@@ -144,6 +149,8 @@
         ...endpoint.models,
         {
           id,
+          name: null,
+          groupName: null,
           modelType: 'chat',
           typeSource: 'user',
           contextWindow: null,
@@ -152,6 +159,7 @@
           supportsTools: null,
           reasoning: null,
           nativeWebSearch: false,
+          pricing: null,
         },
       ])
     }
@@ -339,9 +347,9 @@
                 <span
                   aria-hidden="true"
                   class="bg-muted text-muted-foreground flex size-6 shrink-0 items-center justify-center rounded-full text-kit-xs uppercase"
-                  >{model.id.slice(0, 1)}</span
+                  >{(model.name ?? model.id).slice(0, 1)}</span
                 >
-                <span class="min-w-0 flex-1 truncate text-kit-sm" title={model.id}>{model.id}</span>
+                <span class="min-w-0 flex-1 truncate text-kit-sm" title={model.id}>{model.name ?? model.id}</span>
                 <span class="flex shrink-0 items-center gap-0.5">
                   {#each CAPS.filter((cap) => has(model, cap)) as cap (cap)}
                     <span
@@ -392,6 +400,7 @@
   bind:open={modelOpen}
   model={editing}
   protocol={endpoint.protocol}
+  usedBy={editing && endpoint.saved && usedBy ? usedBy(endpoint.saved.id, editing.id) : []}
   onsave={(saved) => setModels(endpoint.models.map((model) => (model.id === saved.id ? saved : model)))}
 />
 

@@ -6,6 +6,8 @@ import {
   type EndpointKey,
   type EndpointSave,
   type Model,
+  type ModelSave,
+  type ModelType,
   type ProbeTarget,
   type Protocol,
   type Provider,
@@ -111,16 +113,95 @@ export function toSave(draft: ProviderDraft): ProviderSave {
       imageBaseUrl: e.imageBaseUrl?.trim() || null,
       imageEditBaseUrl: e.imageEditBaseUrl?.trim() || null,
       headers: e.headers,
-      models: e.models.map((model) => ({
-        ...model,
-        nativeWebSearch: model.modelType === 'chat' && e.protocol !== 'openai-chat' && model.nativeWebSearch,
-      })),
+      models: e.models.map((model) => {
+        const save: ModelSave = {
+          ...model,
+          nativeWebSearch: model.modelType === 'chat' && e.protocol !== 'openai-chat' && model.nativeWebSearch,
+        }
+        // Contract §2: omitted reasoning keeps the stored value, so an untouched (possibly inferred) value is not frozen.
+        // Key order matches: edits spread the stored config and append `budgetTokens` last, like serde.
+        const before = e.saved?.models.find((item) => item.id === model.id)
+        const unchanged = before
+          ? JSON.stringify(before.reasoning) === JSON.stringify(model.reasoning)
+          : model.reasoning === null
+        if (unchanged) delete save.reasoning
+        return save
+      }),
     }
     if (e.saved) save.id = e.saved.id
     return save
   })
   const save = { name: draft.name.trim(), enabled: draft.enabled, notes: draft.notes, endpoints }
   return draft.id === null ? save : { id: draft.id, ...save }
+}
+
+/** Model list group: the user's group name, else the id prefix (`gpt-4o` → `gpt`). */
+export const idPrefix = (id: string): string => id.split(/[-/:]/)[0] || ''
+export const groupKey = (model: Model): string => model.groupName ?? idPrefix(model.id)
+
+/** Purpose maps onto existing fields (docs/41 §3.3): edit = image + canVision. */
+export type Purpose = 'chat' | 'image' | 'edit'
+export const purposeOf = (model: Model): Purpose | null =>
+  model.modelType === 'chat' ? 'chat' : model.modelType === 'image' ? (model.canVision ? 'edit' : 'image') : null
+export function withPurpose(model: Model, purpose: Purpose): Model {
+  const typed = withType(model, purpose === 'chat' ? 'chat' : 'image')
+  return purpose === 'chat' ? typed : { ...typed, canVision: purpose === 'edit' }
+}
+/** A user-chosen type; leaving chat drops chat-only settings the backend would reject. */
+export function withType(model: Model, modelType: ModelType): Model {
+  if (modelType === model.modelType) return model
+  const next: Model = { ...model, modelType, typeSource: 'user' }
+  return modelType === 'chat' ? next : { ...next, reasoning: null, nativeWebSearch: false, pricing: null }
+}
+
+export type ModelField = 'name' | 'groupName' | 'contextWindow' | 'maxOutput' | 'reasoning' | 'pricing'
+export interface ModelError {
+  field: ModelField
+  reason: string
+}
+
+/** Front-end mirror of the backend model rules (contract §3); reason codes match `bad_request(field, reason)`. */
+export function validateModel(model: Model, protocol: Protocol): ModelError[] {
+  const errors: ModelError[] = []
+  const add = (field: ModelField, reason: string) => errors.push({ field, reason })
+  for (const field of ['name', 'groupName'] as const)
+    if ([...(model[field]?.trim() ?? '')].length > 80) add(field, 'too_long')
+  const { contextWindow, maxOutput, reasoning, pricing } = model
+  const chat = model.modelType === 'chat'
+  // Non-integers also fail the backend's integer schema; doc §4.2 shows them as the same `invalid`.
+  if (contextWindow !== null && !(Number.isInteger(contextWindow) && contextWindow >= 1))
+    add('contextWindow', 'invalid')
+  if (maxOutput !== null && !(Number.isInteger(maxOutput) && maxOutput >= 1)) add('maxOutput', 'invalid')
+  else if (chat && contextWindow !== null && maxOutput !== null && maxOutput >= contextWindow)
+    add('maxOutput', 'exceeds_context')
+  if (reasoning) {
+    const { efforts, dialect, budgetTokens } = reasoning
+    if (!chat || !efforts.length || efforts.includes('default') || new Set(efforts).size !== efforts.length)
+      add('reasoning', 'invalid_efforts')
+    else if ((dialect === 'openai') === (protocol === 'anthropic-messages')) add('reasoning', 'protocol_mismatch')
+    else if (dialect === 'anthropic-budget') {
+      if (budgetTokens == null || budgetTokens < 1024 || budgetTokens >= (maxOutput ?? 4096))
+        add('reasoning', 'invalid_budget')
+    } else if (budgetTokens != null) add('reasoning', 'unexpected_budget')
+  }
+  if (pricing) {
+    const { tiers } = pricing
+    const price = (value: number | null) => value === null || (Number.isFinite(value) && value >= 0 && value <= 1e6)
+    if (
+      !chat ||
+      !tiers.length ||
+      tiers.length > 8 ||
+      tiers[0]?.minInputTokens !== 0 ||
+      tiers.some(
+        (tier, index) =>
+          !Number.isSafeInteger(tier.minInputTokens) ||
+          (index > 0 && tier.minInputTokens <= (tiers[index - 1]?.minInputTokens ?? 0)) ||
+          ![tier.input, tier.output, tier.cacheRead, tier.cacheWrite].every(price),
+      )
+    )
+      add('pricing', 'invalid')
+  }
+  return errors
 }
 
 /** Always a draft target: with endpointId the backend uses the stored keys on an edited, unsaved address. */

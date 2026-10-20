@@ -20,12 +20,21 @@
   import { getKitContext } from '../context'
   import { isKitClientError, type ProbeResult, type Provider, type ProviderPreset } from '../ports'
   import { cn } from '../utils'
-  import { adopt, newEndpoint, probeTarget, savable, toDraft, toSave, type ProviderDraft } from './draft'
+  import { adopt, newEndpoint, probeTarget, savable, toDraft, toSave, validateModel, type ProviderDraft } from './draft'
   import EndpointPanel, { type CheckState } from './EndpointPanel.svelte'
   import ModelPickerDialog from './ModelPickerDialog.svelte'
   import { providersRevision } from './revision.svelte'
 
-  let { onchanged, presets = [] }: { onchanged?: () => void; presets?: ProviderPreset[] } = $props()
+  let {
+    onchanged,
+    presets = [],
+    usedBy,
+  }: {
+    onchanged?: () => void
+    presets?: ProviderPreset[]
+    /** Localized role names bound to a model, shown when its type changes (contract §6). */
+    usedBy?: (endpointId: string, modelId: string) => string[]
+  } = $props()
   const { ports, i18n, notify } = getKitContext()
   const { t } = i18n
   const port = ports.providers
@@ -40,6 +49,8 @@
   let probe = $state<{ slug: string; result: ProbeResult } | null>(null)
   let pickerOpen = $state(false)
   let failed = $state(false)
+  /** Last rejected model setting, named in the banner (docs/41 §4.3). */
+  let invalid = $state<{ model: string | null; message: string } | null>(null)
   let enabledSaving = $state(false)
   let query = $state('')
   let filter = $state<(typeof FILTERS)[number]>('all')
@@ -67,6 +78,28 @@
   function errorText(error: unknown): string {
     return isKitClientError(error) ? t(`errors.${error.code}`) : String(error)
   }
+  const MODEL_FIELDS: Record<string, true> = {
+    name: true,
+    groupName: true,
+    contextWindow: true,
+    maxOutput: true,
+    reasoning: true,
+    pricing: true,
+  }
+  /** A rejected model setting: the backend names field + reason; the model is `entity` or found by the local rules. */
+  function modelError(error: unknown, sent: ProviderDraft): { model: string | null; message: string } | null {
+    if (!isKitClientError(error) || error.code !== 'bad_request') return null
+    const { field, reason, entity } = error.details
+    if (!field || !reason || !Object.hasOwn(MODEL_FIELDS, field)) return null
+    const models = sent.endpoints.flatMap((e) => e.models.map((model) => ({ model, protocol: e.protocol })))
+    const found =
+      models.find(({ model }) => model.id === entity) ??
+      models.find(({ model, protocol }) =>
+        validateModel(model, protocol).some((item) => item.field === field && item.reason === reason),
+      )
+    const model = found ? (found.model.name ?? found.model.id) : null
+    return { model, message: t(`providers.error.${field}.${reason}`) }
+  }
   function status(p: Provider): string | null {
     if (!p.enabled) return null
     return p.endpoints.length === 0 || p.endpoints.some((e) => !e.keys.some((k) => k.enabled && k.readable))
@@ -93,6 +126,7 @@
     check = null
     probe = null
     failed = false
+    invalid = null
     draft = next
     active = 0
     token++
@@ -138,20 +172,24 @@
       return
     }
     saving = true
+    let last: ProviderDraft | null = null
     try {
       do {
         again = false
         const sent = $state.snapshot(savable(draft)) as ProviderDraft
+        last = sent
         const before = new Set(providers.map((p) => p.id))
         providers = await port.save(toSave(sent))
         const stored = providers.find((p) => (sent.id === null ? !before.has(p.id) : p.id === sent.id))
         if (stored && draft && draft.id === sent.id) draft = adopt(draft, sent, stored)
         failed = false
+        invalid = null
         notifyChanged()
       } while (again && draft)
     } catch (error) {
       failed = true
-      notify.toast('error', errorText(error))
+      invalid = last && modelError(error, last)
+      if (!invalid) notify.toast('error', errorText(error))
     } finally {
       saving = false
     }
@@ -419,7 +457,11 @@
         </header>
         {#if failed}
           <p role="alert" class="text-destructive flex items-center gap-2 text-kit-sm">
-            {t('providers.save_failed')}
+            {invalid
+              ? invalid.model
+                ? t('providers.save_model_invalid', { model: invalid.model, error: invalid.message })
+                : invalid.message
+              : t('providers.save_failed')}
             <Button variant="link" size="sm" class="h-auto p-0" onclick={() => void commit()}
               >{t('providers.retry')}</Button
             >
@@ -459,6 +501,7 @@
               oncheck={() => void runProbe(active, false)}
               onsync={() => void runProbe(active, true)}
               {keyUrl}
+              {usedBy}
             />
           {/key}
         {:else}

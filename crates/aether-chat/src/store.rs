@@ -34,6 +34,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 5,
         sql: "ALTER TABLE turn_images ADD COLUMN kind TEXT NOT NULL DEFAULT 'input' CHECK (kind IN ('input','generated'));",
     },
+    Migration {
+        version: 6,
+        sql: "ALTER TABLE turns ADD COLUMN cost REAL; ALTER TABLE turns ADD COLUMN cost_currency TEXT;",
+    },
 ];
 
 /// Title = first input without line breaks, cut to this many characters.
@@ -207,6 +211,8 @@ pub struct Turn {
     pub reasoning_effort: Option<aether_support::ReasoningEffort>,
     /// Endpoint used for this turn.
     pub endpoint_id: Option<String>,
+    /// Cost fixed when the turn finished; never recomputed (docs/41 §4).
+    pub cost: Option<aether_support::Cost>,
     /// Conversation owning the graph node.
     pub conversation_id: String,
     /// Previous context head.
@@ -298,6 +304,8 @@ pub struct TurnRecord {
     pub reasoning_effort: Option<aether_support::ReasoningEffort>,
     /// Endpoint used for this turn.
     pub endpoint_id: Option<String>,
+    /// Turn cost from the model's pricing.
+    pub cost: Option<aether_support::Cost>,
 }
 
 /// History for the next request: only `completed` turns, dropping whole turns from the
@@ -671,8 +679,8 @@ impl ConversationStore for SqliteStore {
             .transpose()
             .map_err(KitError::internal)?;
         let changed = tx.execute(
-            "UPDATE turns SET status=?1,messages=?2,model_id=?3,skills=?4,error_code=?5,input_tokens=?6,output_tokens=?7,cache_read_tokens=?8,cache_write_tokens=?9,reasoning_tokens=?10,context_usage=?11,reasoning_effort=?12,endpoint_id=?13 WHERE id=?14 AND conversation_id=?15 AND status='running'",
-            params![status,messages,record.model_id,skills,record.error_code,record.input_tokens,record.output_tokens,record.cache_read_tokens,record.cache_write_tokens,record.reasoning_tokens,context_usage,reasoning_effort,record.endpoint_id,turn.turn_id,turn.conversation_id],
+            "UPDATE turns SET status=?1,messages=?2,model_id=?3,skills=?4,error_code=?5,input_tokens=?6,output_tokens=?7,cache_read_tokens=?8,cache_write_tokens=?9,reasoning_tokens=?10,context_usage=?11,reasoning_effort=?12,endpoint_id=?13,cost=?16,cost_currency=?17 WHERE id=?14 AND conversation_id=?15 AND status='running'",
+            params![status,messages,record.model_id,skills,record.error_code,record.input_tokens,record.output_tokens,record.cache_read_tokens,record.cache_write_tokens,record.reasoning_tokens,context_usage,reasoning_effort,record.endpoint_id,turn.turn_id,turn.conversation_id,record.cost.map(|c| c.amount),record.cost.map(|c| c.currency.as_str())],
         )?;
         if changed == 0 {
             return Err(KitError::not_found("turn"));
@@ -862,7 +870,7 @@ impl ConversationStore for SqliteStore {
         tx.execute("INSERT INTO conversations (id,title,scope,created_at,updated_at) VALUES (?1,?2,?3,?4,?4)", params![id,c.summary.title,c.summary.scope,now])?;
         for (seq, t) in path.iter().enumerate() {
             let seq = i64::try_from(seq + 1).map_err(KitError::internal)?;
-            tx.execute("INSERT INTO turns (id,conversation_id,seq,parent_id,question_id,supersedes_id,kind,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,created_at) SELECT ?1,?2,?3,?4,?5,?6,kind,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,created_at FROM turns WHERE id=?7 AND conversation_id=?8", params![ids[&t.id.as_str()],id,seq,t.parent_id.as_deref().and_then(|p| ids.get(p)),questions[&t.question_id.as_str()],t.supersedes_id.as_deref().and_then(|s| ids.get(s)),t.id,conversation_id])?;
+            tx.execute("INSERT INTO turns (id,conversation_id,seq,parent_id,question_id,supersedes_id,kind,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,created_at,cost,cost_currency) SELECT ?1,?2,?3,?4,?5,?6,kind,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,created_at,cost,cost_currency FROM turns WHERE id=?7 AND conversation_id=?8", params![ids[&t.id.as_str()],id,seq,t.parent_id.as_deref().and_then(|p| ids.get(p)),questions[&t.question_id.as_str()],t.supersedes_id.as_deref().and_then(|s| ids.get(s)),t.id,conversation_id])?;
             tx.execute("INSERT INTO turn_images (turn_id,idx,mime,data,created_at,kind) SELECT ?1,idx,mime,data,created_at,kind FROM turn_images WHERE turn_id=?2", params![ids[&t.id.as_str()], t.id])?;
         }
         tx.execute(
@@ -951,6 +959,22 @@ fn turn(row: &Row<'_>) -> rusqlite::Result<Turn> {
         supersedes_id: row.get(19)?,
         kind: row.get(20)?,
         created_at: row.get(21)?,
+        cost: match (
+            row.get::<_, Option<f64>>(22)?,
+            row.get::<_, Option<String>>(23)?,
+        ) {
+            (Some(amount), Some(currency)) => Some(aether_support::Cost {
+                amount,
+                currency: aether_support::Currency::parse(&currency).ok_or_else(|| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        23,
+                        Type::Text,
+                        format!("unknown currency {currency}").into(),
+                    )
+                })?,
+            }),
+            _ => None,
+        },
         images: Vec::new(),
         generated: Vec::new(),
     })
@@ -965,7 +989,7 @@ fn load_conversation(db: &rusqlite::Connection, id: &str) -> Result<Conversation
         )
         .optional()?
         .ok_or_else(|| KitError::not_found("conversation"))?;
-    let mut stmt = db.prepare("SELECT id,seq,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,conversation_id,parent_id,question_id,supersedes_id,kind,created_at FROM turns WHERE conversation_id=?1 ORDER BY seq")?;
+    let mut stmt = db.prepare("SELECT id,seq,status,input,messages,model_id,skills,error_code,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,context_usage,reasoning_effort,endpoint_id,conversation_id,parent_id,question_id,supersedes_id,kind,created_at,cost,cost_currency FROM turns WHERE conversation_id=?1 ORDER BY seq")?;
     let mut turns: Vec<Turn> = stmt.query_map([id], turn)?.collect::<Result<_, _>>()?;
     let mut stmt = db.prepare("SELECT i.turn_id,i.mime,i.data,i.kind FROM turn_images i JOIN turns t ON t.id=i.turn_id WHERE t.conversation_id=?1 ORDER BY i.turn_id,i.idx")?;
     let mut rows = stmt.query([id])?;

@@ -117,7 +117,7 @@
     void modelReload
     void providersRevision.value
     let alive = true
-    modelOptions = null
+    // A provider save swaps options in place: nulling them would reset the chosen effort (docs/41 §3.5).
     modelError = null
     if (!ports.providers) {
       modelOptions = []
@@ -137,6 +137,10 @@
   })
   $effect(() => {
     if (reasoningEffort !== 'default' && !allowedEfforts.includes(reasoningEffort)) reasoningEffort = 'default'
+  })
+  $effect(() => {
+    // A model that turns out not to take tools cannot keep a pending generate_image request.
+    if (capability?.supportsTools === false) generateImage = false
   })
   function commitReasoning(event: Event) {
     const effort = allowedEfforts[Number((event.currentTarget as HTMLInputElement).value)]
@@ -337,10 +341,12 @@
     return turn.endpointId && turn.modelId ? { endpointId: turn.endpointId, modelId: turn.modelId } : null
   }
   function sourceLabel(turn: ChatTurn) {
-    return (
-      modelOptions?.find((option) => option.endpointId === turn.endpointId && option.modelId === turn.modelId)?.label ??
-      (turn.modelId ? `${turn.endpointId ?? t('chat.unknown')} · ${turn.modelId}` : t('chat.noSourceModel'))
-    )
+    const option = modelOptions?.find((item) => item.endpointId === turn.endpointId && item.modelId === turn.modelId)
+    return option
+      ? (option.name ?? option.modelId)
+      : turn.modelId
+        ? `${turn.endpointId ?? t('chat.unknown')} · ${turn.modelId}`
+        : t('chat.noSourceModel')
   }
   function hasChildren(turn: ChatTurn) {
     return session?.turns.some((child) => child.parentId === turn.id || child.supersedesId === turn.id) === true
@@ -1230,6 +1236,8 @@
             context={currentContext}
             usage={session.turns.at(-1)?.usage ?? null}
             total={session.cumulativeUsage}
+            cost={session.turns.at(-1)?.cost ?? null}
+            totalCost={session.cumulativeCost}
           />
           {#if session.running}<Button
               type="button"

@@ -60,6 +60,7 @@ function setup(
             ...model,
             label: 'Local · main · m1',
             modelType: 'chat',
+            name: null,
             supportsTools: null,
             reasoning: null,
             nativeWebSearch: false,
@@ -101,7 +102,7 @@ function setup(
         const wrapped = (event: RunEvent) => {
           if (event.kind === 'text_delta') turn.text += event.text
           if (event.kind === 'reasoning_delta') turn.reasoningText = (turn.reasoningText ?? '') + event.text
-          if (event.kind === 'usage')
+          if (event.kind === 'usage') {
             turn.usage = {
               inputTokens: event.inputTokens,
               outputTokens: event.outputTokens,
@@ -109,6 +110,8 @@ function setup(
               cacheWriteTokens: event.cacheWriteTokens,
               reasoningTokens: event.reasoningTokens,
             }
+            turn.cost = event.cost
+          }
           if (event.kind === 'context') turn.contextUsage = event.usage
           if (event.kind === 'end') {
             turn.status = event.status
@@ -359,6 +362,7 @@ describe('ChatPanel', () => {
       ...model,
       label: 'Local · main · m1',
       modelType: 'chat',
+      name: null,
       supportsTools: null,
       reasoning: null,
       nativeWebSearch: false,
@@ -375,6 +379,42 @@ describe('ChatPanel', () => {
     await waitFor(() => expect(modelOptions).toHaveBeenCalledTimes(2))
     await fireEvent.click(await screen.findByLabelText('Select a model'))
     expect(await screen.findByRole('button', { name: 'Vision' })).toBeTruthy()
+  })
+
+  it('keeps the chosen effort across a provider save and drops generate image once tools are unsupported', async () => {
+    const option: ModelOption = {
+      ...model,
+      label: 'Local · main · m1',
+      name: 'Mine',
+      modelType: 'chat',
+      supportsTools: null,
+      reasoning: { dialect: 'openai', efforts: ['low', 'high'] },
+      nativeWebSearch: false,
+      canVision: false,
+    }
+    const modelOptions = vi
+      .fn<ProvidersPort['modelOptions']>()
+      .mockResolvedValueOnce([option])
+      .mockResolvedValue([{ ...option, supportsTools: false }])
+    const { runs } = setup(false, null, {
+      providers: { modelOptions },
+      props: { paintingModel: true, toolbar: ['generate-image'] },
+    })
+    expect(await screen.findByText('Mine')).toBeTruthy()
+    await fireEvent.click(await screen.findByRole('button', { name: 'Reasoning effort: Default' }))
+    await fireEvent.input(await screen.findByRole('slider', { name: 'Reasoning effort' }), { target: { value: '1' } })
+    await fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    const generate = screen.getByRole('button', { name: 'Generate image' })
+    await fireEvent.click(generate)
+    expect(generate.getAttribute('aria-pressed')).toBe('true')
+    providersRevision.value++
+    await waitFor(() => expect(modelOptions).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(generate.hasAttribute('disabled')).toBe(true))
+    expect(generate.getAttribute('aria-pressed')).toBe('false')
+    expect(screen.getByRole('button', { name: 'Reasoning effort: High' })).toBeTruthy()
+    await send('after save')
+    expect(runs[0]?.request).toMatchObject({ reasoningEffort: 'high' })
+    expect(runs[0]?.request.generateImage).toBeUndefined()
   })
 
   it('without chat models offers to open settings', async () => {
@@ -450,6 +490,7 @@ describe('ChatPanel', () => {
       cacheReadTokens: 80,
       cacheWriteTokens: null,
       reasoningTokens: 20,
+      cost: null,
     }
     runs[0]?.emit({ kind: 'usage', ...usage })
     runs[0]?.emit({ kind: 'usage', ...usage })
@@ -461,12 +502,19 @@ describe('ChatPanel', () => {
     await fireEvent.click(summary)
     await waitFor(() => expect(screen.getByRole('meter').getAttribute('value')).toBe('15'))
     await send('second')
-    runs[1]?.emit({ kind: 'usage', ...usage, inputTokens: 200, outputTokens: 40 })
+    runs[1]?.emit({
+      kind: 'usage',
+      ...usage,
+      inputTokens: 200,
+      outputTokens: 40,
+      cost: { amount: 0.0123, currency: 'USD' },
+    })
     runs[1]?.emit({ kind: 'context', usage: { tokens: 240, contextWindow: 1000, source: 'reported', ...model } })
     runs[1]?.emit({ kind: 'end', status: 'completed' })
     await waitFor(() => expect(screen.getByRole('meter').getAttribute('value')).toBe('24'))
     const inputRow = screen.getByRole('row', { name: 'Input 200 320' })
     expect(inputRow).toBeTruthy()
+    expect(screen.getByRole('row', { name: 'Cost $0.0123 $0.0123' })).toBeTruthy()
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Regenerate' }).at(-1)))
     await waitFor(() => expect(screen.queryByRole('meter')).toBeNull())
     expect(screen.queryByRole('meter')).toBeNull()
@@ -748,6 +796,7 @@ describe('ChatPanel', () => {
               ...model,
               label: 'Reasoner',
               modelType: 'chat',
+              name: null,
               supportsTools: null,
               reasoning: { dialect: 'openai', efforts: ['high'] },
               nativeWebSearch: false,
@@ -791,6 +840,7 @@ describe('ChatPanel', () => {
               ...model,
               label: 'Sparse reasoner',
               modelType: 'chat',
+              name: null,
               supportsTools: null,
               reasoning: { dialect: 'openai', efforts: ['high', 'none', 'low'] },
               nativeWebSearch: false,
@@ -801,6 +851,7 @@ describe('ChatPanel', () => {
               modelId: 'm2',
               label: 'Other reasoner',
               modelType: 'chat',
+              name: null,
               supportsTools: null,
               reasoning: { dialect: 'openai', efforts: ['low', 'high'] },
               nativeWebSearch: false,
@@ -811,6 +862,7 @@ describe('ChatPanel', () => {
               modelId: 'm3',
               label: 'Without reasoning',
               modelType: 'chat',
+              name: null,
               supportsTools: null,
               reasoning: null,
               nativeWebSearch: false,
@@ -858,6 +910,7 @@ describe('ChatPanel', () => {
     const onOpenSettings = vi.fn()
     const onClose = vi.fn()
     const base = {
+      name: null,
       modelType: 'chat',
       supportsTools: null,
       reasoning: null,
@@ -1020,7 +1073,7 @@ describe('ChatPanel', () => {
     await screen.findByText('Alternative reply')
     expect(screen.getAllByText('Shared question')).toHaveLength(1)
     expect(screen.getByText('reply', { selector: 'strong' })).toBeTruthy()
-    expect(screen.getAllByText('Local · main · m1')).toHaveLength(2)
+    expect(screen.getAllByText('m1', { selector: '.reply-source' })).toHaveLength(2)
     const setContext = screen.getAllByRole('button', { name: 'Set as context' })
     expect(setContext.map((button) => button.getAttribute('aria-pressed'))).toEqual(['true', 'false'])
     await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Keep my draft' } })
@@ -1075,6 +1128,7 @@ describe('ChatPanel', () => {
               ...model,
               label: 'First model',
               modelType: 'chat',
+              name: null,
               supportsTools: null,
               reasoning: null,
               nativeWebSearch: false,
@@ -1084,6 +1138,7 @@ describe('ChatPanel', () => {
               ...secondModel,
               label: 'Second model',
               modelType: 'chat',
+              name: null,
               supportsTools: null,
               reasoning: null,
               nativeWebSearch: false,
@@ -1349,6 +1404,7 @@ describe('ChatPanel images', () => {
   const option = (ref: typeof model, label: string, canVision: boolean): ModelOption => ({
     ...ref,
     label,
+    name: null,
     modelType: 'chat',
     supportsTools: null,
     reasoning: null,

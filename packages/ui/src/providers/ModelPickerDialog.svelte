@@ -74,18 +74,23 @@
       .map((m): Model => {
         const existing = selected.find((item) => item.id === m.id)
         const modelType = types[m.id] ?? m.modelType
-        // Keep user-edited metadata (including reasoning/context) when a probe refreshes it.
+        // Keep user-edited metadata when a probe refreshes it; new models take the probe's group (docs/41 §3.2).
+        const chat = modelType === 'chat'
         return {
           id: m.id,
+          name: existing ? existing.name : m.name,
+          groupName: existing ? existing.groupName : m.group,
           modelType,
           typeSource:
             existing?.modelType === modelType ? existing.typeSource : modelType === m.modelType ? m.typeSource : 'user',
           contextWindow: existing ? existing.contextWindow : m.contextWindow,
           maxOutput: existing ? existing.maxOutput : m.maxOutput,
-          reasoning: existing ? existing.reasoning : m.reasoning,
-          nativeWebSearch: modelType === 'chat' && (existing ? existing.nativeWebSearch : m.nativeWebSearch),
+          // Chat-only settings would be rejected on any other type.
+          reasoning: chat ? (existing ? existing.reasoning : m.reasoning) : null,
+          nativeWebSearch: chat && (existing ? existing.nativeWebSearch : m.nativeWebSearch),
+          pricing: chat ? (existing ? existing.pricing : m.pricing) : null,
           canVision: existing ? existing.canVision : m.canVision,
-          supportsTools: m.supportsTools,
+          supportsTools: existing ? existing.supportsTools : m.supportsTools,
         }
       })
     onchange([...kept, ...picked])

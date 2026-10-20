@@ -354,6 +354,8 @@ pub enum RunEvent {
         cache_write_tokens: Option<u32>,
         /// Reasoning output tokens.
         reasoning_tokens: Option<u32>,
+        /// Turn cost from the model's pricing; `None` = unknown.
+        cost: Option<aether_support::Cost>,
     },
     /// Provider context usage for the current request.
     Context {
@@ -408,10 +410,14 @@ mod tests {
             cache_read_tokens: None,
             cache_write_tokens: None,
             reasoning_tokens: None,
+            cost: Some(aether_support::Cost {
+                amount: 0.5,
+                currency: aether_support::Currency::Usd,
+            }),
         };
         assert_eq!(
             wire(&usage),
-            r#"{"kind":"usage","inputTokens":3,"outputTokens":null,"cacheReadTokens":null,"cacheWriteTokens":null,"reasoningTokens":null}"#,
+            r#"{"kind":"usage","inputTokens":3,"outputTokens":null,"cacheReadTokens":null,"cacheWriteTokens":null,"reasoningTokens":null,"cost":{"amount":0.5,"currency":"USD"}}"#,
         );
         let end = RunEvent::End {
             status: EndStatus::Failed,

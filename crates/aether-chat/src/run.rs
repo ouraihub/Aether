@@ -55,6 +55,18 @@ impl Usage {
     }
 }
 
+impl From<Usage> for aether_support::TokenUsage {
+    fn from(u: Usage) -> Self {
+        Self {
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            cache_read_tokens: u.cache_read_tokens,
+            cache_write_tokens: u.cache_write_tokens,
+            reasoning_tokens: u.reasoning_tokens,
+        }
+    }
+}
+
 /// Outcome and known usage of a completed or interrupted run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunSummary {
@@ -64,6 +76,8 @@ pub struct RunSummary {
     pub messages: Vec<Message>,
     /// Known provider-reported token counts.
     pub usage: Usage,
+    /// Cost summed per round from the connection's pricing; `None` = unknown (docs/41 §4).
+    pub cost: Option<aether_support::Cost>,
     /// Last request context estimate or report.
     pub context_usage: Option<aether_support::ContextUsage>,
     /// Tool loop stopped at its configured round limit.
@@ -119,6 +133,7 @@ impl Runner {
             Err(error) => Err(error),
         };
         turn.flush();
+        let cost = aether_support::cost(input.connection.pricing.as_ref(), &turn.rounds);
         let (status, error, exhausted) = match result {
             Ok(exhausted) => {
                 emitter.emit(RunEvent::Usage {
@@ -127,6 +142,7 @@ impl Runner {
                     cache_read_tokens: turn.usage.cache_read_tokens,
                     cache_write_tokens: turn.usage.cache_write_tokens,
                     reasoning_tokens: turn.usage.reasoning_tokens,
+                    cost,
                 });
                 (EndStatus::Completed, None, exhausted)
             }
@@ -148,6 +164,7 @@ impl Runner {
             status,
             messages: turn.messages,
             usage: turn.usage,
+            cost,
             context_usage: None,
             exhausted,
         }
@@ -294,6 +311,11 @@ impl Runner {
             result = self.round(run, tools, &turn.messages, emitter, &mut turn.text, &mut usage) => result,
         };
         turn.usage.add(usage);
+        // A request refused before streaming bills nothing; a streamed round without usage
+        // makes the cost unknown.
+        if result.is_ok() || usage != Usage::default() {
+            turn.rounds.push(usage.into());
+        }
         result
     }
 
@@ -396,6 +418,8 @@ struct Turn {
     messages: Vec<Message>,
     text: String,
     usage: Usage,
+    /// Usage of every billed upstream request, for per-round pricing tiers.
+    rounds: Vec<aether_support::TokenUsage>,
 }
 
 impl Turn {

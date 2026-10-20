@@ -19,6 +19,10 @@ modelId: string,
  */
 label: string, 
 /**
+ * User display name of the model; `None` = not set.
+ */
+name: string | null, 
+/**
  * Model type.
  */
 modelType: ModelType, 

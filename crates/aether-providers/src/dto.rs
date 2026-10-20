@@ -42,7 +42,7 @@ pub enum TypeSource {
 }
 
 /// A selected model of an endpoint.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export)]
 pub struct Model {
@@ -66,11 +66,21 @@ pub struct Model {
     /// User-declared support for protocol-native web search.
     #[serde(default)]
     pub native_web_search: bool,
+    /// Display name; `None` = show the id.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Picker group; `None` = ungrouped.
+    #[serde(default)]
+    pub group_name: Option<String>,
+    /// User-declared prices (chat only).
+    #[serde(default)]
+    pub pricing: Option<aether_support::ModelPricing>,
 }
 
 /// Model fields in a save request. `reasoning` is tri-state: omitted keeps the
-/// stored value, `null` clears it, and an object replaces it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+/// stored value, `null` turns it off, and an object replaces it. `name`, `groupName`
+/// and `pricing` replace the stored value (omitted = `null`).
+#[derive(Debug, Clone, PartialEq, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export)]
 pub struct ModelSave {
@@ -88,13 +98,22 @@ pub struct ModelSave {
     pub can_vision: bool,
     /// Client-side tool support, unknown when absent.
     pub supports_tools: Option<bool>,
-    /// Omit to keep, null to clear, object to replace reasoning settings.
-    #[serde(default)]
-    #[ts(optional = nullable)]
+    /// Omit to keep, null to turn off, object to replace reasoning settings.
+    #[serde(default, with = "present")]
+    #[ts(as = "Option<aether_support::ReasoningConfig>", optional = nullable)]
     pub reasoning: Option<Option<aether_support::ReasoningConfig>>,
     /// User-declared support for protocol-native web search.
     #[serde(default)]
     pub native_web_search: bool,
+    /// Display name, at most 80 characters; blank = `None`.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Picker group, at most 80 characters; blank = `None`.
+    #[serde(default)]
+    pub group_name: Option<String>,
+    /// User-declared prices (chat only).
+    #[serde(default)]
+    pub pricing: Option<aether_support::ModelPricing>,
 }
 
 /// One API key of an endpoint as shown to the UI: never the plaintext.
@@ -115,7 +134,7 @@ pub struct EndpointKey {
 }
 
 /// A stored endpoint as shown to the UI: keys only as masked entries.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct Endpoint {
@@ -142,7 +161,7 @@ pub struct Endpoint {
 }
 
 /// A provider with its endpoints in display order.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct Provider {
@@ -278,6 +297,8 @@ pub struct ModelOption {
     pub model_id: String,
     /// `provider · endpoint · model`.
     pub label: String,
+    /// User display name of the model; `None` = not set.
+    pub name: Option<String>,
     /// Model type.
     pub model_type: ModelType,
     /// Whether the model accepts tools; `None` = unknown.
@@ -418,7 +439,7 @@ pub struct ProbeError {
 }
 
 /// A model found by a probe, with the inferred family group.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct ProbedModel {
@@ -431,7 +452,7 @@ pub struct ProbedModel {
 }
 
 /// Probe outcome: never a command error, so the UI can show `probeUrl` either way.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct ProbeResult {

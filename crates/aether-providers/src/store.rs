@@ -10,7 +10,7 @@ use aether_support::db::{self, Migration};
 use aether_support::id::new_id;
 use aether_support::mask::mask_secret;
 use aether_support::secret;
-use aether_support::{Connection, KitError, Protocol};
+use aether_support::{Connection, KitError, ModelPricing, Protocol, ReasoningConfig};
 use rusqlite::{Connection as Db, OptionalExtension, params};
 use zeroize::Zeroizing;
 
@@ -143,6 +143,12 @@ ALTER TABLE endpoints ADD COLUMN headers TEXT NOT NULL DEFAULT '{}';",
                 version: 9,
                 sql: "ALTER TABLE providers ADD COLUMN preset_id TEXT;
 CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id IS NOT NULL;",
+            },
+            Migration {
+                version: 10,
+                sql: "ALTER TABLE models ADD COLUMN name TEXT;
+ALTER TABLE models ADD COLUMN group_name TEXT;
+ALTER TABLE models ADD COLUMN pricing TEXT;",
             },
         ];
         let db = db::open(&path, &steps)?;
@@ -427,7 +433,7 @@ CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id
     pub fn model_options(&self, filter: ModelFilter) -> Result<Vec<ModelOption>, KitError> {
         let db = self.lock()?;
         let mut stmt = db.prepare_cached(
-            "SELECT p.name, e.slug, m.endpoint_id, m.model_id, m.model_type, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, e.protocol, m.can_vision
+            "SELECT p.name, e.slug, m.endpoint_id, m.model_id, m.model_type, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, e.protocol, m.can_vision, m.name
              FROM models m JOIN endpoints e ON e.id = m.endpoint_id JOIN providers p ON p.id = e.provider_id
              WHERE p.enabled = 1
              ORDER BY p.position, p.id, e.position, m.position",
@@ -446,6 +452,7 @@ CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id
                     row.get::<_, bool>(8)?,
                     row.get::<_, String>(9)?,
                     row.get::<_, bool>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -462,20 +469,18 @@ CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id
             native_web_search,
             protocol,
             can_vision,
+            name,
         ) in rows
         {
             let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
             let protocol = parse_protocol(&protocol)?;
-            let reasoning = reasoning
-                .as_deref()
-                .map(serde_json::from_str)
-                .transpose()
-                .map_err(KitError::internal)?
-                .or_else(|| {
-                    (model_type == ModelType::Chat)
-                        .then(|| infer_reasoning(&model_id, protocol, max_output))
-                        .flatten()
-                });
+            let reasoning = read_reasoning(
+                reasoning.as_deref(),
+                &model_id,
+                model_type,
+                protocol,
+                max_output,
+            )?;
             if filter.model_type.is_some_and(|wanted| wanted != model_type)
                 || filter
                     .supports_tools
@@ -485,6 +490,7 @@ CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id
             }
             options.push(ModelOption {
                 label: format!("{provider} · {slug} · {model_id}"),
+                name,
                 endpoint_id,
                 model_id,
                 model_type,
@@ -507,11 +513,11 @@ CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id
     pub fn resolve(&self, model: &ModelRef) -> Result<Connection, KitError> {
         let db = self.lock()?;
         let row = db.query_row(
-            "SELECT m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, m.can_vision
+            "SELECT m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, m.can_vision, m.pricing
              FROM models m JOIN endpoints e ON e.id = m.endpoint_id JOIN providers p ON p.id = e.provider_id
              WHERE m.endpoint_id = ?1 AND m.model_id = ?2 AND p.enabled = 1",
             params![model.endpoint_id, model.model_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<u32>>(1)?, row.get::<_, Option<u32>>(2)?, row.get::<_, Option<bool>>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, bool>(5)?, row.get::<_, bool>(6)?)),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<u32>>(1)?, row.get::<_, Option<u32>>(2)?, row.get::<_, Option<bool>>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, bool>(5)?, row.get::<_, bool>(6)?, row.get::<_, Option<String>>(7)?)),
         ).optional()?;
         let (
             model_type,
@@ -521,6 +527,7 @@ CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id
             reasoning,
             native_web_search,
             can_vision,
+            pricing,
         ) = row.ok_or_else(|| KitError::not_found("model"))?;
         let row = self.endpoint_row(&db, &model.endpoint_id)?;
         if row.base_url.trim().is_empty() {
@@ -528,16 +535,14 @@ CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id
         }
         let protocol = row.protocol;
         let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
-        let reasoning = reasoning
-            .as_deref()
-            .map(serde_json::from_str)
-            .transpose()
-            .map_err(KitError::internal)?
-            .or_else(|| {
-                (model_type == ModelType::Chat)
-                    .then(|| infer_reasoning(&model.model_id, protocol, max_output))
-                    .flatten()
-            });
+        let reasoning = read_reasoning(
+            reasoning.as_deref(),
+            &model.model_id,
+            model_type,
+            protocol,
+            max_output,
+        )?;
+        let pricing = read_pricing(pricing.as_deref())?;
         Ok(Connection {
             base_url: api_base(&row.base_url),
             protocol,
@@ -550,6 +555,7 @@ CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id
             reasoning,
             native_web_search,
             can_vision,
+            pricing,
             headers: row.headers,
             image_base_url: row.image_base_url,
             image_edit_base_url: row.image_edit_base_url,
@@ -573,6 +579,7 @@ CREATE UNIQUE INDEX idx_providers_preset ON providers(preset_id) WHERE preset_id
             reasoning: None,
             native_web_search: false,
             can_vision: false,
+            pricing: None,
             headers: row.headers,
             image_base_url: row.image_base_url,
             image_edit_base_url: row.image_edit_base_url,
@@ -757,11 +764,26 @@ fn validate(input: &ProviderSave) -> Result<(), KitError> {
                     "unsupported_protocol",
                 ));
             }
-            if let Some(Some(config)) = &model.reasoning
-                && (model.model_type != ModelType::Chat
-                    || !config.validate(endpoint.protocol, model.max_output))
+            label("name", model.name.as_deref())?;
+            label("groupName", model.group_name.as_deref())?;
+            if model.context_window.is_some_and(|n| n < 1) {
+                return Err(KitError::bad_request("contextWindow", "invalid"));
+            }
+            if model.max_output.is_some_and(|n| n < 1) {
+                return Err(KitError::bad_request("maxOutput", "invalid"));
+            }
+            if model.model_type == ModelType::Chat
+                && let (Some(window), Some(output)) = (model.context_window, model.max_output)
+                && output >= window
             {
-                return Err(KitError::bad_request("reasoning", "invalid"));
+                return Err(KitError::bad_request("maxOutput", "exceeds_context"));
+            }
+            if model
+                .pricing
+                .as_ref()
+                .is_some_and(|p| model.model_type != ModelType::Chat || !p.is_valid())
+            {
+                return Err(KitError::bad_request("pricing", "invalid"));
             }
             if model.id.is_empty() {
                 return Err(KitError::bad_request("models", "empty_id"));
@@ -770,6 +792,49 @@ fn validate(input: &ProviderSave) -> Result<(), KitError> {
                 return Err(KitError::bad_request("models", "duplicate"));
             }
         }
+    }
+    Ok(())
+}
+
+/// Stored `models.reasoning` of a model the user turned reasoning off for.
+const REASONING_OFF: &str = "none";
+
+/// The one read path of `models.reasoning`: NULL = not set (inferred for chat models),
+/// `'none'` = turned off, otherwise the stored config (docs/41 §2).
+fn read_reasoning(
+    stored: Option<&str>,
+    model_id: &str,
+    model_type: ModelType,
+    protocol: Protocol,
+    max_output: Option<u32>,
+) -> Result<Option<ReasoningConfig>, KitError> {
+    match stored {
+        Some(REASONING_OFF) => Ok(None),
+        Some(json) => serde_json::from_str(json)
+            .map(Some)
+            .map_err(KitError::internal),
+        None => Ok((model_type == ModelType::Chat)
+            .then(|| infer_reasoning(model_id, protocol, max_output))
+            .flatten()),
+    }
+}
+
+fn read_pricing(stored: Option<&str>) -> Result<Option<ModelPricing>, KitError> {
+    stored
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(KitError::internal)
+}
+
+/// Trimmed label; blank = `None`.
+fn trimmed(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|v| !v.is_empty())
+}
+
+fn label(field: &str, value: Option<&str>) -> Result<(), KitError> {
+    if trimmed(value).is_some_and(|v| v.chars().count() > MAX_NAME_CHARS) {
+        return Err(KitError::bad_request(field, "too_long")
+            .with_limit(u64::try_from(MAX_NAME_CHARS).unwrap_or(u64::MAX)));
     }
     Ok(())
 }
@@ -859,13 +924,32 @@ fn write_endpoint(
         .query_map([&id], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<Result<_, _>>()?;
     tx.execute("DELETE FROM models WHERE endpoint_id = ?1", [&id])?;
-    let mut insert = tx.prepare_cached("INSERT INTO models (endpoint_id, model_id, model_type, type_source, context_window, max_output, can_vision, supports_tools, position, reasoning, native_web_search) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)")?;
+    let mut insert = tx.prepare_cached("INSERT INTO models (endpoint_id, model_id, model_type, type_source, context_window, max_output, can_vision, supports_tools, position, reasoning, native_web_search, name, group_name, pricing) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)")?;
     for (position, model) in endpoint.models.iter().enumerate() {
+        // Omitted keeps the stored column, re-validated below; null = off ('none' for chat).
         let reasoning = match &model.reasoning {
             Some(Some(config)) => Some(serde_json::to_string(config).map_err(KitError::internal)?),
-            Some(None) => None,
+            Some(None) => (model.model_type == ModelType::Chat).then(|| REASONING_OFF.to_owned()),
             None => old.get(&model.id).cloned().flatten(),
         };
+        if let Some(stored) = reasoning.as_deref().filter(|r| *r != REASONING_OFF) {
+            let config: ReasoningConfig =
+                serde_json::from_str(stored).map_err(|_| corrupt("reasoning"))?;
+            let reason = if model.model_type == ModelType::Chat {
+                config.validate(endpoint.protocol, model.max_output).err()
+            } else {
+                Some("invalid_efforts")
+            };
+            if let Some(reason) = reason {
+                return Err(KitError::bad_request("reasoning", reason));
+            }
+        }
+        let pricing = model
+            .pricing
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(KitError::internal)?;
         insert.execute(params![
             id,
             model.id,
@@ -877,7 +961,10 @@ fn write_endpoint(
             model.supports_tools,
             i64::try_from(position).unwrap_or(i64::MAX),
             reasoning,
-            model.native_web_search
+            model.native_web_search,
+            trimmed(model.name.as_deref()),
+            trimmed(model.group_name.as_deref()),
+            pricing
         ])?;
     }
     Ok(())
@@ -885,7 +972,7 @@ fn write_endpoint(
 
 fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
     let mut models: HashMap<String, Vec<Model>> = HashMap::new();
-    let mut stmt = db.prepare_cached("SELECT m.endpoint_id, m.model_id, m.model_type, m.type_source, m.context_window, m.max_output, m.can_vision, m.supports_tools, m.reasoning, m.native_web_search, e.protocol FROM models m JOIN endpoints e ON e.id = m.endpoint_id ORDER BY m.endpoint_id, m.position")?;
+    let mut stmt = db.prepare_cached("SELECT m.endpoint_id, m.model_id, m.model_type, m.type_source, m.context_window, m.max_output, m.can_vision, m.supports_tools, m.reasoning, m.native_web_search, e.protocol, m.name, m.group_name, m.pricing FROM models m JOIN endpoints e ON e.id = m.endpoint_id ORDER BY m.endpoint_id, m.position")?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let model_type: String = row.get(2)?;
@@ -903,17 +990,17 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
             max_output: row.get(5)?,
             can_vision: row.get(6)?,
             supports_tools: row.get(7)?,
-            reasoning: reasoning
-                .as_deref()
-                .map(serde_json::from_str)
-                .transpose()
-                .map_err(KitError::internal)?
-                .or_else(|| {
-                    (model_type == ModelType::Chat)
-                        .then(|| infer_reasoning(&model_id, protocol, max_output))
-                        .flatten()
-                }),
+            reasoning: read_reasoning(
+                reasoning.as_deref(),
+                &model_id,
+                model_type,
+                protocol,
+                max_output,
+            )?,
             native_web_search: row.get(9)?,
+            name: row.get(11)?,
+            group_name: row.get(12)?,
+            pricing: read_pricing(row.get::<_, Option<String>>(13)?.as_deref())?,
         });
     }
     let mut keys: HashMap<String, Vec<EndpointKey>> = HashMap::new();
@@ -1199,7 +1286,7 @@ mod tests {
                 assert_eq!(
                     db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                         .unwrap(),
-                    9
+                    10
                 );
             }
             assert!(path.with_file_name("providers.db.bak-v2").is_file());
@@ -1689,7 +1776,7 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
     }
 
     #[test]
@@ -1728,8 +1815,319 @@ mod tests {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
         assert_eq!(store.list().unwrap()[0].notes, "");
+    }
+
+    #[test]
+    fn version_nine_db_upgrades_to_ten_with_empty_display_and_pricing() {
+        let (dir, store) = store();
+        let (_, endpoint_id) = saved(&store);
+        store
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "ALTER TABLE models DROP COLUMN name; ALTER TABLE models DROP COLUMN group_name;
+                 ALTER TABLE models DROP COLUMN pricing; PRAGMA user_version = 9;",
+            )
+            .unwrap();
+        drop(store);
+        let store = Store::open(dir.path()).unwrap();
+        let version: u32 = store
+            .lock()
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 10);
+        let model = &store.list().unwrap()[0].endpoints[0].models[0];
+        assert_eq!(
+            (
+                model.id.as_str(),
+                &model.name,
+                &model.group_name,
+                &model.pricing
+            ),
+            ("m1", &None, &None, &None)
+        );
+        let reference = ModelRef {
+            endpoint_id,
+            model_id: "m1".into(),
+        };
+        assert!(store.resolve(&reference).unwrap().pricing.is_none());
+    }
+
+    #[test]
+    fn display_fields_and_pricing_round_trip_to_every_read_path() {
+        let (dir, store) = store();
+        let mut e = endpoint(None, "a", &["m1"]);
+        let pricing = json!({ "currency": "CNY", "tiers": [
+            { "minInputTokens": 0, "input": 2.0, "output": 8.0, "cacheRead": 0.5, "cacheWrite": null },
+            { "minInputTokens": 32000, "input": 4.0, "output": 16.0, "cacheRead": null, "cacheWrite": null }
+        ] });
+        e["models"][0]["name"] = json!("  Model One  ");
+        e["models"][0]["groupName"] = json!("   ");
+        e["models"][0]["pricing"] = pricing.clone();
+        let saved = store
+            .save(request(json!({ "name": "P", "endpoints": [e] })))
+            .unwrap();
+        let reference = ModelRef {
+            endpoint_id: saved[0].endpoints[0].id.clone(),
+            model_id: "m1".into(),
+        };
+        drop(store);
+        let store = Store::open(dir.path()).unwrap();
+        let model = &store.list().unwrap()[0].endpoints[0].models[0];
+        assert_eq!(model.name.as_deref(), Some("Model One"));
+        assert_eq!(model.group_name, None);
+        assert_eq!(serde_json::to_value(&model.pricing).unwrap(), pricing);
+        let option = &store.model_options(ModelFilter::default()).unwrap()[0];
+        assert_eq!(option.name.as_deref(), Some("Model One"));
+        assert_eq!(option.label, "P · a · m1");
+        assert_eq!(
+            serde_json::to_value(store.resolve(&reference).unwrap().pricing).unwrap(),
+            pricing
+        );
+    }
+
+    #[test]
+    fn null_reasoning_turns_chat_reasoning_off_without_reinference() {
+        let (dir, store) = store();
+        let mut e = endpoint(None, "a", &["claude-sonnet-5-5", "embed"]);
+        e["protocol"] = json!("anthropic-messages");
+        e["models"][0]["reasoning"] = Value::Null;
+        e["models"][1]["modelType"] = json!("embedding");
+        e["models"][1]["reasoning"] = Value::Null;
+        let saved = store
+            .save(request(json!({ "name": "P", "endpoints": [e.clone()] })))
+            .unwrap();
+        let id = saved[0].endpoints[0].id.clone();
+        let stored = |store: &Store| -> Vec<Option<String>> {
+            store
+                .lock()
+                .unwrap()
+                .prepare("SELECT reasoning FROM models ORDER BY position")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(stored(&store), vec![Some("none".to_owned()), None]);
+        // Omitted keeps the stored 'none'.
+        e["id"] = json!(id);
+        for model in e["models"].as_array_mut().unwrap() {
+            model.as_object_mut().unwrap().remove("reasoning");
+        }
+        store
+            .save(request(
+                json!({ "id": saved[0].id, "name": "P", "endpoints": [e] }),
+            ))
+            .unwrap();
+        drop(store);
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(stored(&store), vec![Some("none".to_owned()), None]);
+        let reference = ModelRef {
+            endpoint_id: id,
+            model_id: "claude-sonnet-5-5".into(),
+        };
+        assert!(
+            store.list().unwrap()[0].endpoints[0].models[0]
+                .reasoning
+                .is_none()
+        );
+        assert!(store.resolve(&reference).unwrap().reasoning.is_none());
+        assert!(
+            store.model_options(ModelFilter::default()).unwrap()[0]
+                .reasoning
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn kept_reasoning_is_revalidated_against_the_new_protocol_and_output() {
+        let (_dir, store) = store();
+        let mut e = endpoint(None, "a", &["m1"]);
+        e["protocol"] = json!("anthropic-messages");
+        e["models"][0]["maxOutput"] = json!(8000);
+        e["models"][0]["reasoning"] =
+            json!({ "dialect": "anthropic-budget", "efforts": ["high"], "budgetTokens": 4000 });
+        let saved = store
+            .save(request(json!({ "name": "P", "endpoints": [e.clone()] })))
+            .unwrap();
+        e["id"] = json!(saved[0].endpoints[0].id);
+        e["models"][0].as_object_mut().unwrap().remove("reasoning");
+        let resave = |e: &Value| {
+            store
+                .save(request(
+                    json!({ "id": saved[0].id, "name": "P", "endpoints": [e] }),
+                ))
+                .err()
+                .map(|error| reason(&error).2.map(str::to_owned))
+        };
+        let mut lower = e.clone();
+        lower["models"][0]["maxOutput"] = json!(4000);
+        assert_eq!(resave(&lower), Some(Some("invalid_budget".to_owned())));
+        let mut openai = e.clone();
+        openai["protocol"] = json!("openai-chat");
+        assert_eq!(resave(&openai), Some(Some("protocol_mismatch".to_owned())));
+        let mut image = e.clone();
+        image["models"][0]["modelType"] = json!("image");
+        assert_eq!(resave(&image), Some(Some("invalid_efforts".to_owned())));
+        assert_eq!(resave(&e), None);
+    }
+
+    #[test]
+    fn invalid_model_settings_are_rejected_with_contract_reasons() {
+        let (_dir, store) = store();
+        let tier = |min: u64, price: f64| json!({ "minInputTokens": min, "input": price, "output": 1, "cacheRead": null, "cacheWrite": null });
+        let pricing = |tiers: Vec<Value>| json!({ "currency": "USD", "tiers": tiers });
+        let long = "x".repeat(81);
+        let cases = [
+            (json!({ "name": long }), "openai-chat", "name", "too_long"),
+            (
+                json!({ "groupName": long }),
+                "openai-chat",
+                "groupName",
+                "too_long",
+            ),
+            (
+                json!({ "contextWindow": 0 }),
+                "openai-chat",
+                "contextWindow",
+                "invalid",
+            ),
+            (
+                json!({ "maxOutput": 0 }),
+                "openai-chat",
+                "maxOutput",
+                "invalid",
+            ),
+            (
+                json!({ "maxOutput": 200_000 }),
+                "openai-chat",
+                "maxOutput",
+                "exceeds_context",
+            ),
+            (
+                json!({ "reasoning": { "dialect": "openai", "efforts": [] } }),
+                "openai-chat",
+                "reasoning",
+                "invalid_efforts",
+            ),
+            (
+                json!({ "reasoning": { "dialect": "openai", "efforts": ["low", "low"] } }),
+                "openai-chat",
+                "reasoning",
+                "invalid_efforts",
+            ),
+            (
+                json!({ "reasoning": { "dialect": "openai", "efforts": ["default"] } }),
+                "openai-chat",
+                "reasoning",
+                "invalid_efforts",
+            ),
+            (
+                json!({ "modelType": "image", "reasoning": { "dialect": "openai", "efforts": ["low"] } }),
+                "openai-chat",
+                "reasoning",
+                "invalid_efforts",
+            ),
+            (
+                json!({ "reasoning": { "dialect": "anthropic-adaptive", "efforts": ["low"] } }),
+                "openai-chat",
+                "reasoning",
+                "protocol_mismatch",
+            ),
+            (
+                json!({ "reasoning": { "dialect": "openai", "efforts": ["low"] } }),
+                "anthropic-messages",
+                "reasoning",
+                "protocol_mismatch",
+            ),
+            (
+                json!({ "reasoning": { "dialect": "anthropic-budget", "efforts": ["low"] } }),
+                "anthropic-messages",
+                "reasoning",
+                "invalid_budget",
+            ),
+            (
+                json!({ "reasoning": { "dialect": "anthropic-budget", "efforts": ["low"], "budgetTokens": 1023 } }),
+                "anthropic-messages",
+                "reasoning",
+                "invalid_budget",
+            ),
+            (
+                json!({ "reasoning": { "dialect": "anthropic-budget", "efforts": ["low"], "budgetTokens": 4096 } }),
+                "anthropic-messages",
+                "reasoning",
+                "invalid_budget",
+            ),
+            (
+                json!({ "reasoning": { "dialect": "anthropic-adaptive", "efforts": ["low"], "budgetTokens": 2000 } }),
+                "anthropic-messages",
+                "reasoning",
+                "unexpected_budget",
+            ),
+            (
+                json!({ "modelType": "image", "pricing": pricing(vec![tier(0, 1.0)]) }),
+                "openai-chat",
+                "pricing",
+                "invalid",
+            ),
+            (
+                json!({ "pricing": pricing(vec![]) }),
+                "openai-chat",
+                "pricing",
+                "invalid",
+            ),
+            (
+                json!({ "pricing": pricing((0..9).map(|i| tier(i * 10, 1.0)).collect()) }),
+                "openai-chat",
+                "pricing",
+                "invalid",
+            ),
+            (
+                json!({ "pricing": pricing(vec![tier(5, 1.0)]) }),
+                "openai-chat",
+                "pricing",
+                "invalid",
+            ),
+            (
+                json!({ "pricing": pricing(vec![tier(0, 1.0), tier(0, 1.0)]) }),
+                "openai-chat",
+                "pricing",
+                "invalid",
+            ),
+            (
+                json!({ "pricing": pricing(vec![tier(0, -1.0)]) }),
+                "openai-chat",
+                "pricing",
+                "invalid",
+            ),
+            (
+                json!({ "pricing": pricing(vec![tier(0, 1e6 + 1.0)]) }),
+                "openai-chat",
+                "pricing",
+                "invalid",
+            ),
+        ];
+        for (extra, protocol, field, why) in cases {
+            let mut value = endpoint(None, "a", &["m1"]);
+            value["protocol"] = json!(protocol);
+            for (k, v) in extra.as_object().unwrap() {
+                value["models"][0][k] = v.clone();
+            }
+            let error = store
+                .save(request(json!({ "name": "P", "endpoints": [value] })))
+                .err()
+                .unwrap();
+            assert_eq!(
+                reason(&error),
+                (KitErrorCode::BadRequest, Some(field), Some(why)),
+                "{extra}"
+            );
+        }
+        assert!(store.list().unwrap().is_empty());
     }
 
     #[test]

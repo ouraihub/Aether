@@ -1,6 +1,6 @@
 <script lang="ts">
   // Host-owned model setting (docs/16 §4.1): the value is stored by the app; a deleted model shows as invalid.
-  // Cherry-style picker: search, capability filters, provider groups (label minus ` · modelId`).
+  // Cherry-style picker: search, capability filters, provider groups (label up to its last ` · `).
   import { Command, Popover } from 'bits-ui'
   import EyeIcon from '@lucide/svelte/icons/eye'
   import BrainIcon from '@lucide/svelte/icons/brain'
@@ -49,8 +49,8 @@
   const options = $derived(suppliedOptions === undefined ? loadedOptions : suppliedOptions)
 
   const key = (r: ModelRef) => `${r.endpointId}\n${r.modelId}`
-  const group = (o: ModelOption) =>
-    o.label.endsWith(` · ${o.modelId}`) ? o.label.slice(0, -(o.modelId.length + 3)) : o.label
+  // label is `{provider} · {slug} · {modelId}`; a model's display name never enters it.
+  const group = (o: ModelOption) => o.label.slice(0, Math.max(0, o.label.lastIndexOf(' · '))) || o.label
   type Cap = 'vision' | 'reasoning' | 'tools' | 'web'
   const CAPS = [
     { cap: 'vision', icon: EyeIcon, has: (o: ModelOption) => o.canVision },
@@ -128,7 +128,7 @@
               {#if options === null}
                 <span class="model-name muted">{t('chat.modelsLoading')}</span>
               {:else if current}
-                <span class="model-name">{current.modelId}</span>
+                <span class="model-name">{current.name ?? current.modelId}</span>
                 <span class="model-group">| {group(current)}</span>
               {:else}
                 <span class="model-name muted"
@@ -179,12 +179,14 @@
                     <Command.Item
                       class="model-item"
                       value={key(option)}
-                      keywords={[option.modelId, name]}
+                      keywords={[option.modelId, option.name ?? '', name]}
                       aria-current={value !== null && key(option) === key(value) ? 'true' : undefined}
                       onSelect={() => pick(option)}
                     >
-                      <span class="model-avatar" aria-hidden="true">{option.modelId.charAt(0).toUpperCase()}</span>
-                      <span class="model-name" title={option.label}>{option.modelId}</span>
+                      <span class="model-avatar" aria-hidden="true"
+                        >{(option.name ?? option.modelId).charAt(0).toUpperCase()}</span
+                      >
+                      <span class="model-name" title={option.label}>{option.name ?? option.modelId}</span>
                       <span class="model-tags">
                         {#each CAPS.filter((c) => c.has(option)) as c (c.cap)}
                           <span class="cap-tag cap-{c.cap}" title={t(`providers.cap_${c.cap}`)}

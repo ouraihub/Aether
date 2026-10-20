@@ -101,7 +101,7 @@ async fn illegal_reasoning_config_and_effort_fail_before_network() {
         efforts: vec![ReasoningEffort::High],
         budget_tokens: Some(3_000),
     });
-    rejected(invalid, KitErrorCode::BadRequest, "invalid").await;
+    rejected(invalid, KitErrorCode::BadRequest, "protocol_mismatch").await;
 
     let mut unsupported = local();
     unsupported.reasoning_effort = ReasoningEffort::Low;

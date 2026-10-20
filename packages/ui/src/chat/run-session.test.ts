@@ -446,4 +446,18 @@ describe('RunSession candidate replies', () => {
     void local.session.retry(base, required(local.session.turns[0]).id)
     expect(required(local.runs[1]).request.images).toEqual([{ mime: 'image/gif', data: 'R0lG' }])
   })
+
+  it('takes the streamed cost and sums known costs per currency', async () => {
+    const { session, runs } = setup(false)
+    session.show(null, [stored({ cost: { amount: 0.5, currency: 'USD' } }), stored({ id: 'b', cost: null })], 'b')
+    void session.send(base, 'Priced')
+    const usage = { inputTokens: 10, outputTokens: 2, cacheReadTokens: null, cacheWriteTokens: null }
+    required(runs[0]).emit({ kind: 'usage', ...usage, reasoningTokens: null, cost: { amount: 1, currency: 'CNY' } })
+    expect(session.turns.at(-1)?.cost).toEqual({ amount: 1, currency: 'CNY' })
+    session.turns.push({ ...required(session.turns.at(-1)), id: 'c', cost: { amount: 0.25, currency: 'USD' } })
+    expect(session.cumulativeCost).toEqual([
+      { amount: 0.75, currency: 'USD' },
+      { amount: 1, currency: 'CNY' },
+    ])
+  })
 })

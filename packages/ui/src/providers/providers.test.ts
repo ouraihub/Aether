@@ -1,8 +1,30 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from '../i18n'
-import { createFakePorts, type Endpoint, type Provider, type ProviderPreset, type ProviderSave } from '../ports'
-import { adopt, checkHeaders, newEndpoint, primaryKey, savable, toDraft } from './draft'
+import {
+  createFakePorts,
+  KitClientError,
+  type Endpoint,
+  type Model,
+  type ModelPricing,
+  type Provider,
+  type ProviderPreset,
+  type ProviderSave,
+  type ReasoningConfig,
+} from '../ports'
+import {
+  adopt,
+  checkHeaders,
+  newEndpoint,
+  primaryKey,
+  purposeOf,
+  savable,
+  toDraft,
+  toSave,
+  validateModel,
+  withPurpose,
+  withType,
+} from './draft'
 import Harness from './Harness.test.svelte'
 
 const endpoint: Endpoint = {
@@ -23,6 +45,9 @@ const twoKeys: Endpoint = {
   keys: [...endpoint.keys, { id: 'k2', label: 'backup', enabled: true, masked: 'sk-b****1234', readable: true }],
 }
 const model = {
+  name: null,
+  groupName: null,
+  pricing: null,
   contextWindow: null,
   maxOutput: null,
   canVision: false,
@@ -319,26 +344,112 @@ describe('ProvidersSettings', () => {
     expect(saves).toHaveLength(0)
   })
 
-  it('shows the edit switch for image models and the vision switch for chat models', async () => {
-    const typed = { ...model, group: null, typeSource: 'user', reasoning: null } as const
-    const models = [
+  const typed = { ...model, typeSource: 'user', reasoning: null } as const
+
+  it('maps purpose onto type and vision, edits name and keeps untouched reasoning out of the save', async () => {
+    const models: Model[] = [
       { ...typed, id: 'gpt-image-1', modelType: 'image' },
-      { ...typed, id: 'gpt-4o', modelType: 'chat' },
-    ] as const
-    const { saves } = setup({}, { ...stored, endpoints: [{ ...endpoint, models: [...models] }] })
+      { ...typed, id: 'gpt-4o', modelType: 'chat', reasoning: { dialect: 'openai', efforts: ['low', 'high'] } },
+    ]
+    const { saves } = setup({}, { ...stored, endpoints: [{ ...endpoint, models }] })
     await fireEvent.click(await screen.findByRole('button', { name: 'Settings for gpt-4o' }))
-    let dialog = within(await screen.findByRole('dialog'))
-    expect(dialog.getByRole('switch', { name: 'Vision' })).toBeTruthy()
-    expect(dialog.queryByRole('switch', { name: 'Accepts reference images (editing)' })).toBeNull()
-    await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    await fireEvent.click(screen.getByRole('button', { name: 'Settings for gpt-image-1' }))
-    dialog = within(await screen.findByRole('dialog'))
-    expect(dialog.queryByRole('switch', { name: 'Vision' })).toBeNull()
-    await fireEvent.click(dialog.getByRole('switch', { name: 'Accepts reference images (editing)' }))
+    let dialog = within(await screen.findByRole('dialog', { name: 'Edit model' }))
+    await fireEvent.input(dialog.getByRole('textbox', { name: 'Model name' }), { target: { value: '  GPT 4o  ' } })
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(saves).toHaveLength(1))
-    expect(saves[0]?.endpoints[0]?.models.find((m) => m.id === 'gpt-image-1')?.canVision).toBe(true)
+    const saved = saves[0]?.endpoints[0]?.models.find((m) => m.id === 'gpt-4o')
+    expect(saved?.name).toBe('GPT 4o')
+    expect(saved && 'reasoning' in saved).toBe(false)
+    expect(await screen.findByText('GPT 4o')).toBeTruthy()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings for gpt-image-1' }))
+    dialog = within(await screen.findByRole('dialog', { name: 'Edit model' }))
+    expect((dialog.getByRole('radio', { name: 'Image generation' }) as HTMLInputElement).checked).toBe(true)
+    expect(dialog.queryByRole('button', { name: 'Vision' })).toBeNull()
+    await fireEvent.click(dialog.getByRole('radio', { name: 'Image editing' }))
+    await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saves).toHaveLength(2))
+    expect(saves[1]?.endpoints[0]?.models.find((m) => m.id === 'gpt-image-1')).toMatchObject({
+      modelType: 'image',
+      canVision: true,
+    })
+  })
+
+  it('leaving chat clears reasoning and web search; blocks save while a rule fails', async () => {
+    const chat: Model = {
+      ...typed,
+      id: 'claude',
+      modelType: 'chat',
+      nativeWebSearch: true,
+      reasoning: { dialect: 'anthropic-budget', efforts: ['high'], budgetTokens: 2048 },
+    }
+    const anthropic: Endpoint = { ...endpoint, protocol: 'anthropic-messages', models: [chat] }
+    const { saves } = setup({}, { ...stored, endpoints: [anthropic] })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Settings for claude' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Edit model' }))
+    const save = dialog.getByRole('button', { name: 'Save' })
+    await fireEvent.input(dialog.getByRole('spinbutton', { name: 'Maximum output (tokens)' }), {
+      target: { value: '2048' },
+    })
+    expect(dialog.getByText('Budget must be at least 1024 and below max output (default 4096)')).toBeTruthy()
+    expect(save.hasAttribute('disabled')).toBe(true)
+    await fireEvent.click(dialog.getByRole('button', { name: 'Embedding' }))
+    expect(dialog.queryByRole('button', { name: 'Reasoning' })).toBeNull()
+    expect(save.hasAttribute('disabled')).toBe(false)
+    await fireEvent.click(save)
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0]?.endpoints[0]?.models[0]).toMatchObject({
+      modelType: 'embedding',
+      typeSource: 'user',
+      reasoning: null,
+      nativeWebSearch: false,
+    })
+  })
+
+  it('names the model and the rule when the backend rejects a save', async () => {
+    const save = vi.fn(() =>
+      Promise.reject(
+        new KitClientError({
+          code: 'bad_request',
+          message: 'invalid maxOutput',
+          details: { field: 'maxOutput', reason: 'exceeds_context' },
+        }),
+      ),
+    )
+    const bad: Model = { ...typed, id: 'm1', name: 'Mine', modelType: 'chat', contextWindow: 100, maxOutput: 200 }
+    const { notify } = setup({ save }, { ...stored, endpoints: [{ ...endpoint, models: [bad] }] })
+    const url = await screen.findByRole('textbox', { name: 'API URL' })
+    await fireEvent.input(url, { target: { value: 'https://other.example.com' } })
+    await fireEvent.blur(url)
+    await waitFor(() => expect(save).toHaveBeenCalledOnce())
+    expect(
+      (await screen.findByRole('alert')).textContent?.includes(
+        'Settings for model Mine are invalid: Max output must be smaller than the context window',
+      ),
+    ).toBe(true)
+    expect(notify.toast).not.toHaveBeenCalled()
+  })
+
+  it('a re-probe keeps user tools, name and group; new models take the probe group', async () => {
+    const mine: Model = {
+      ...typed,
+      id: 'text-embedding-3',
+      modelType: 'embedding',
+      supportsTools: false,
+      name: 'Mine',
+      groupName: 'G',
+    }
+    const { saves } = setup({}, { ...stored, endpoints: [{ ...endpoint, models: [mine] }] })
+    const picker = await openPicker()
+    await fireEvent.click(picker.getByRole('button', { name: 'Add gpt-4o' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    const models = saves[0]?.endpoints[0]?.models ?? []
+    expect(models.find((m) => m.id === 'text-embedding-3')).toMatchObject({
+      supportsTools: false,
+      name: 'Mine',
+      groupName: 'G',
+    })
+    expect(models.find((m) => m.id === 'gpt-4o')).toMatchObject({ groupName: 'gpt', name: null })
   })
 
   it('blocks a reserved header with a message', async () => {
@@ -412,5 +523,95 @@ describe('draft helpers', () => {
     expect(checkHeaders([{ name: 'X-A', value: 'a\nb' }])).toEqual({ error: { key: 'headers_invalid' } })
     const many = Array.from({ length: 21 }, (_, i) => ({ name: `X-${i}`, value: '' }))
     expect(checkHeaders(many)).toEqual({ error: { key: 'headers_too_many' } })
+  })
+
+  const chat: Model = { ...model, id: 'm', modelType: 'chat', typeSource: 'inferred', reasoning: null }
+
+  it('validateModel mirrors the backend rules and reason codes (contract §3)', () => {
+    const budget = (budgetTokens?: number): ReasoningConfig => ({
+      dialect: 'anthropic-budget',
+      efforts: ['high'],
+      ...(budgetTokens === undefined ? {} : { budgetTokens }),
+    })
+    const tier = { minInputTokens: 0, input: 1, output: 2, cacheRead: null, cacheWrite: null }
+    const cases: [Partial<Model>, string, string[]][] = [
+      [{}, 'openai-chat', []],
+      [{ name: ' '.repeat(5) + 'x'.repeat(80) }, 'openai-chat', []],
+      [{ name: 'x'.repeat(81) }, 'openai-chat', ['name:too_long']],
+      [{ groupName: '字'.repeat(81) }, 'openai-chat', ['groupName:too_long']],
+      [{ contextWindow: 0 }, 'openai-chat', ['contextWindow:invalid']],
+      [{ maxOutput: 1.5 }, 'openai-chat', ['maxOutput:invalid']],
+      [{ contextWindow: 100, maxOutput: 100 }, 'openai-chat', ['maxOutput:exceeds_context']],
+      [{ modelType: 'image', contextWindow: 100, maxOutput: 100 }, 'openai-chat', []],
+      [{ reasoning: { dialect: 'openai', efforts: [] } }, 'openai-chat', ['reasoning:invalid_efforts']],
+      [{ reasoning: { dialect: 'openai', efforts: ['low', 'low'] } }, 'openai-chat', ['reasoning:invalid_efforts']],
+      [{ reasoning: { dialect: 'openai', efforts: ['default'] } }, 'openai-chat', ['reasoning:invalid_efforts']],
+      [
+        { modelType: 'image', reasoning: { dialect: 'openai', efforts: ['low'] } },
+        'openai-chat',
+        ['reasoning:invalid_efforts'],
+      ],
+      [{ reasoning: { dialect: 'openai', efforts: ['low'] } }, 'anthropic-messages', ['reasoning:protocol_mismatch']],
+      [{ reasoning: budget(2048) }, 'openai-responses', ['reasoning:protocol_mismatch']],
+      [{ reasoning: budget() }, 'anthropic-messages', ['reasoning:invalid_budget']],
+      [{ reasoning: budget(1023) }, 'anthropic-messages', ['reasoning:invalid_budget']],
+      [{ reasoning: budget(4096) }, 'anthropic-messages', ['reasoning:invalid_budget']],
+      [{ reasoning: budget(4095) }, 'anthropic-messages', []],
+      [{ maxOutput: 2048, reasoning: budget(2048) }, 'anthropic-messages', ['reasoning:invalid_budget']],
+      [
+        { reasoning: { dialect: 'anthropic-adaptive', efforts: ['high'], budgetTokens: 2048 } },
+        'anthropic-messages',
+        ['reasoning:unexpected_budget'],
+      ],
+      [{ pricing: { currency: 'USD', tiers: [tier] } }, 'openai-chat', []],
+      [{ modelType: 'image', pricing: { currency: 'USD', tiers: [tier] } }, 'openai-chat', ['pricing:invalid']],
+      [{ pricing: { currency: 'USD', tiers: [] } }, 'openai-chat', ['pricing:invalid']],
+      [{ pricing: { currency: 'USD', tiers: Array(9).fill(tier) } }, 'openai-chat', ['pricing:invalid']],
+      [{ pricing: { currency: 'CNY', tiers: [{ ...tier, minInputTokens: 1 }] } }, 'openai-chat', ['pricing:invalid']],
+      [{ pricing: { currency: 'USD', tiers: [tier, tier] } }, 'openai-chat', ['pricing:invalid']],
+      [{ pricing: { currency: 'USD', tiers: [{ ...tier, input: -1 }] } }, 'openai-chat', ['pricing:invalid']],
+      [{ pricing: { currency: 'USD', tiers: [{ ...tier, output: NaN }] } }, 'openai-chat', ['pricing:invalid']],
+      [{ pricing: { currency: 'USD', tiers: [{ ...tier, cacheRead: 1e6 + 1 }] } }, 'openai-chat', ['pricing:invalid']],
+    ]
+    for (const [patch, protocol, expected] of cases)
+      expect(
+        validateModel({ ...chat, ...patch }, protocol as Endpoint['protocol']).map((e) => `${e.field}:${e.reason}`),
+        JSON.stringify(patch),
+      ).toEqual(expected)
+  })
+
+  it('maps purpose to type and vision, and clears chat-only settings when leaving chat', () => {
+    const reasoning: ReasoningConfig = { dialect: 'openai', efforts: ['low'] }
+    const pricing: ModelPricing = { currency: 'USD', tiers: [] }
+    const rich: Model = { ...chat, reasoning, nativeWebSearch: true, pricing, canVision: true }
+    expect(purposeOf(rich)).toBe('chat')
+    expect(withPurpose(rich, 'image')).toMatchObject({
+      modelType: 'image',
+      typeSource: 'user',
+      canVision: false,
+      reasoning: null,
+      nativeWebSearch: false,
+      pricing: null,
+    })
+    expect(purposeOf(withPurpose(rich, 'edit'))).toBe('edit')
+    expect(purposeOf({ ...chat, modelType: 'embedding' })).toBeNull()
+    expect(withType(rich, 'chat')).toBe(rich)
+    expect(withPurpose(withPurpose(rich, 'edit'), 'chat')).toMatchObject({ modelType: 'chat', canVision: true })
+  })
+
+  it('toSave omits reasoning only when unchanged from the stored model or null on a new one (contract §2)', () => {
+    const reasoning: ReasoningConfig = { dialect: 'openai', efforts: ['low', 'high'] }
+    const saved = { ...chat, reasoning }
+    const draft = toDraft({ ...stored, endpoints: [{ ...endpoint, models: [saved] }] })
+    const first = draft.endpoints[0]
+    if (!first) throw new Error('missing endpoint')
+    const models = (list: Model[]) => toSave({ ...draft, endpoints: [{ ...first, models: list }] }).endpoints[0]?.models
+    expect(models([saved])?.[0]).not.toHaveProperty('reasoning')
+    expect(models([{ ...saved, reasoning: { ...reasoning } }])?.[0]).not.toHaveProperty('reasoning')
+    expect(models([{ ...saved, reasoning: null }])?.[0]).toHaveProperty('reasoning', null)
+    const changed: ReasoningConfig = { dialect: 'openai', efforts: ['high'] }
+    expect(models([{ ...saved, reasoning: changed }])?.[0]).toHaveProperty('reasoning', changed)
+    expect(models([{ ...chat, id: 'new' }])?.[0]).not.toHaveProperty('reasoning')
+    expect(models([{ ...chat, id: 'new', reasoning }])?.[0]).toHaveProperty('reasoning', reasoning)
   })
 })

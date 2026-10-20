@@ -1,0 +1,56 @@
+[
+  {
+    "name": "single tier",
+    "pricing": { "currency": "USD", "tiers": [{ "minInputTokens": 0, "input": 3, "output": 15, "cacheRead": null, "cacheWrite": null }] },
+    "rounds": [{ "inputTokens": 1000, "outputTokens": 500, "cacheReadTokens": null, "cacheWriteTokens": null, "reasoningTokens": null }],
+    "cost": 0.0105
+  },
+  {
+    "name": "tier boundary equal counts in upper tier",
+    "pricing": {
+      "currency": "USD",
+      "tiers": [
+        { "minInputTokens": 0, "input": 2, "output": 8, "cacheRead": null, "cacheWrite": null },
+        { "minInputTokens": 200000, "input": 4, "output": 16, "cacheRead": null, "cacheWrite": null }
+      ]
+    },
+    "rounds": [{ "inputTokens": 200000, "outputTokens": 1000, "cacheReadTokens": null, "cacheWriteTokens": null, "reasoningTokens": null }],
+    "cost": 0.816
+  },
+  {
+    "name": "two rounds crossing tier",
+    "pricing": {
+      "currency": "USD",
+      "tiers": [
+        { "minInputTokens": 0, "input": 2, "output": 8, "cacheRead": null, "cacheWrite": null },
+        { "minInputTokens": 200000, "input": 4, "output": 16, "cacheRead": null, "cacheWrite": null }
+      ]
+    },
+    "rounds": [
+      { "inputTokens": 150000, "outputTokens": 1000, "cacheReadTokens": null, "cacheWriteTokens": null, "reasoningTokens": null },
+      { "inputTokens": 250000, "outputTokens": 2000, "cacheReadTokens": null, "cacheWriteTokens": null, "reasoningTokens": 500 }
+    ],
+    "cost": 1.34
+  },
+  {
+    "name": "cache fallback to input",
+    "pricing": { "currency": "USD", "tiers": [{ "minInputTokens": 0, "input": 3, "output": 15, "cacheRead": null, "cacheWrite": null }] },
+    "rounds": [{ "inputTokens": 10000, "outputTokens": 100, "cacheReadTokens": 4000, "cacheWriteTokens": null, "reasoningTokens": null }],
+    "cost": 0.0315
+  },
+  {
+    "name": "cacheRead and cacheWrite",
+    "pricing": { "currency": "CNY", "tiers": [{ "minInputTokens": 0, "input": 3, "output": 15, "cacheRead": 0.3, "cacheWrite": 3.75 }] },
+    "rounds": [{ "inputTokens": 10000, "outputTokens": 500, "cacheReadTokens": 6000, "cacheWriteTokens": 2000, "reasoningTokens": null }],
+    "cost": 0.0228
+  },
+  {
+    "name": "missing output in any round is null",
+    "pricing": { "currency": "USD", "tiers": [{ "minInputTokens": 0, "input": 3, "output": 15, "cacheRead": null, "cacheWrite": null }] },
+    "rounds": [
+      { "inputTokens": 100, "outputTokens": 100, "cacheReadTokens": null, "cacheWriteTokens": null, "reasoningTokens": null },
+      { "inputTokens": 100, "outputTokens": null, "cacheReadTokens": null, "cacheWriteTokens": null, "reasoningTokens": null }
+    ],
+    "cost": null
+  }
+]
