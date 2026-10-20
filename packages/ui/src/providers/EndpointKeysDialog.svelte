@@ -125,7 +125,7 @@
         <Input
           class="h-8"
           maxlength={40}
-          autocomplete="new-password"
+          autocomplete="off"
           name="provider-api-key-label"
           placeholder={t('providers.keys_label')}
           aria-label={t('providers.keys_label')}
@@ -134,11 +134,11 @@
           onkeydown={keydown}
         />
         <Input
-          type="password"
-          autocomplete="new-password"
+          type="text"
+          autocomplete="off"
           name="provider-api-key"
           spellcheck={false}
-          class="h-8 font-mono"
+          class="h-8 font-mono [-webkit-text-security:disc]"
           maxlength={4096}
           autofocus
           placeholder={isNew ? t('providers.key_placeholder') : t('providers.keys_keep')}

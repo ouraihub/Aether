@@ -105,12 +105,14 @@
 <div class="flex min-w-0 flex-1 flex-col">
   <div class="flex min-w-0 items-start gap-2">
     {#if !primary}
+      <!-- An API key is not a login password: type="password" lets browsers autofill (and auto-save) the login one. -->
       <Input
         {id}
-        type="password"
-        autocomplete="new-password"
+        type="text"
+        autocomplete="off"
+        name="provider-api-key"
         spellcheck={false}
-        class="min-w-0 flex-1 font-mono"
+        class="min-w-0 flex-1 font-mono [-webkit-text-security:disc]"
         placeholder={t('providers.key_placeholder')}
         disabled={!endpoint || busy}
         bind:value={text}

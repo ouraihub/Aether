@@ -181,7 +181,8 @@ describe('ProvidersSettings', () => {
     )
     const keyInput = document.querySelector('input[name="provider-api-key"]')
     expect(revealKey).toHaveBeenCalledWith('k1', '')
-    expect(keyInput?.getAttribute('autocomplete')).toBe('new-password')
+    expect(keyInput?.getAttribute('type')).toBe('text')
+    expect(keyInput?.getAttribute('autocomplete')).toBe('off')
   })
 
   it('copies the trimmed API address from the input copy button', async () => {
