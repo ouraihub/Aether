@@ -32,9 +32,42 @@ if (process.platform === 'darwin' || process.platform === 'linux') {
   const home = join(fixture, 'home')
   mkdirSync(home)
   const binary = resolve(process.env.CARGO_TARGET_DIR || 'target', 'debug/examples/native-secrets')
-  const env = { ...process.env, HOME: home }
+  const env = { ...process.env, ...(process.platform === 'linux' ? { HOME: home } : {}) }
   const run = (mode, path, environment = env) =>
     execFileSync(binary, [mode, path], { stdio: 'inherit', env: environment })
+  let restoreKeychain
+  if (process.platform === 'darwin') {
+    const security = (args) => execFileSync('security', args, { encoding: 'utf8' }).trim()
+    const original = security(['default-keychain', '-d', 'user']).replace(/^"|"$/g, '')
+    const search = [...security(['list-keychains', '-d', 'user']).matchAll(/"([^"]+)"/g)].map((m) => m[1])
+    const keychain = join(fixture, 'smoke.keychain-db')
+    const password = crypto.randomUUID()
+    security(['create-keychain', '-p', password, keychain])
+    restoreKeychain = () => {
+      const errors = []
+      for (const args of [
+        ['default-keychain', '-d', 'user', '-s', original],
+        ['list-keychains', '-d', 'user', '-s', ...search],
+        ['delete-keychain', keychain],
+      ]) {
+        try {
+          security(args)
+        } catch (error) {
+          errors.push(error)
+        }
+      }
+      if (errors.length) throw new AggregateError(errors, 'Cannot restore native test keychain')
+    }
+    try {
+      security(['set-keychain-settings', '-lut', '21600', keychain])
+      security(['unlock-keychain', '-p', password, keychain])
+      security(['list-keychains', '-d', 'user', '-s', keychain])
+      security(['default-keychain', '-d', 'user', '-s', keychain])
+    } catch (error) {
+      restoreKeychain()
+      throw error
+    }
+  }
   try {
     // First access races in real separate processes; all resulting BLOBs must stay readable.
     run('race', join(fixture, 'race'))
@@ -48,6 +81,7 @@ if (process.platform === 'darwin' || process.platform === 'linux') {
     }
     run('forget', file)
   } finally {
+    restoreKeychain?.()
     rmSync(fixture, { recursive: true, force: true })
   }
 }
