@@ -1,5 +1,5 @@
 <script lang="ts">
-  // One endpoint's keys, address and models (Cherry AuthenticationSection + ModelList).
+  // One endpoint's keys, address and models.
   // Fields edit the draft in place; `oncommit` asks the parent to save (docs/33 §3); keys save on their own (docs/34).
   import BrainIcon from '@lucide/svelte/icons/brain'
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'

@@ -14,11 +14,11 @@ id: string,
  */
 name: string, 
 /**
- * Off = its models leave every picker and cannot run (Cherry's provider switch).
+ * Off = its models leave every picker and cannot run.
  */
 enabled: boolean, 
 /**
- * Free-form Markdown notes about this provider's models (Cherry 模型备注).
+ * Free-form Markdown notes about this provider's models.
  */
 notes: string, 
 /**

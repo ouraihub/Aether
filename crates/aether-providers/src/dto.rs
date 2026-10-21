@@ -169,9 +169,9 @@ pub struct Provider {
     pub id: String,
     /// Display name.
     pub name: String,
-    /// Off = its models leave every picker and cannot run (Cherry's provider switch).
+    /// Off = its models leave every picker and cannot run.
     pub enabled: bool,
-    /// Free-form Markdown notes about this provider's models (Cherry 模型备注).
+    /// Free-form Markdown notes about this provider's models.
     pub notes: String,
     /// Host preset this provider belongs to; preset providers cannot be deleted. `None` = user-created.
     pub preset_id: Option<String>,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Cherry's 请求配置 (ProviderCustomHeaderDrawer) for one endpoint: edits a local copy, Save writes it back (docs/36 §4).
+  // Request config (custom headers) for one endpoint: edits a local copy, Save writes it back (docs/36 §4).
   import BracesIcon from '@lucide/svelte/icons/braces'
   import ListIcon from '@lucide/svelte/icons/list'
   import PlusIcon from '@lucide/svelte/icons/plus'

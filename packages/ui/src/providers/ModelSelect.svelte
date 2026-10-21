@@ -1,6 +1,6 @@
 <script lang="ts">
   // Host-owned model setting (docs/16 §4.1): the value is stored by the app; a deleted model shows as invalid.
-  // Cherry-style picker: search, capability filters, provider groups (label up to its last ` · `).
+  // Model picker: search, capability filters, provider groups (label up to its last ` · `).
   import { Command, Popover } from 'bits-ui'
   import EyeIcon from '@lucide/svelte/icons/eye'
   import BrainIcon from '@lucide/svelte/icons/brain'

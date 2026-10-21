@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Per-model settings (Cherry's EditModelDrawer, docs/41 §3–§4). Edits a copy; nothing changes until Save.
+  // Per-model settings (docs/41 §3–§4). Edits a copy; nothing changes until Save.
   import { untrack } from 'svelte'
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
   import MinusIcon from '@lucide/svelte/icons/minus'
@@ -33,7 +33,7 @@
 
   const MAIN_TYPES = ['chat', 'image', 'embedding', 'rerank'] as const
   const OTHER_TYPES: ModelType[] = ['video', 'tts', 'stt', 'unknown']
-  // Cherry's chip values mix decimal and binary sizes, so labels are explicit.
+  // Presets mix decimal and binary sizes, so labels are explicit.
   const CONTEXT_PRESETS: [string, number][] = [
     ['128K', 128000],
     ['200K', 200000],

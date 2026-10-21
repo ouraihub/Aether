@@ -1,5 +1,5 @@
 <script lang="ts">
-  // API key row (Cherry ApiKey): primary key masked with `+N`, show/copy/edit/delete; 🔑 opens key management.
+  // API key row: primary key masked with `+N`, show/copy/edit/delete; 🔑 opens key management.
   import CopyIcon from '@lucide/svelte/icons/copy'
   import EditIcon from '@lucide/svelte/icons/pencil'
   import EyeIcon from '@lucide/svelte/icons/eye'

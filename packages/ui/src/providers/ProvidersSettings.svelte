@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Cherry-style provider settings (docs/33): list on the left, detail on the right, every field saves itself.
+  // Provider settings (docs/33): list on the left, detail on the right, every field saves itself.
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Dialog from '#lib/components/ui/dialog/index.js'
   import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js'
@@ -307,7 +307,7 @@
     const enabled = target.saved?.keys.filter((k) => k.enabled) ?? []
     try {
       if (enabled.length >= 2) {
-        // Cherry's "all keys" check: one probe per enabled key, in order.
+        // "All keys" check: one probe per enabled key, in order.
         const results = []
         let usable: ProbeResult | null = null
         for (const key of enabled) {

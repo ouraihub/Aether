@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Search and filter fetched models; every +/- (Cherry onAddModels/onRemoveModels) applies at once.
+  // Search and filter fetched models; every +/- applies at once.
   import { untrack } from 'svelte'
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import Plus from '@lucide/svelte/icons/plus'

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Key management (Cherry ProviderApiKeyListDrawer, docs/34 §5.2). Every action saves at once; one request at a time.
+  // Key management (docs/34 §5.2): every action saves at once; one request at a time.
   import { untrack } from 'svelte'
   import CheckIcon from '@lucide/svelte/icons/check'
   import CopyIcon from '@lucide/svelte/icons/copy'

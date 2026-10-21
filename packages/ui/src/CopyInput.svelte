@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Input with a hover/focus copy button at the inline end (Cherry ApiHostFields); shown only when non-empty.
+  // Input with a hover/focus copy button at the inline end; shown only when non-empty.
   import CopyIcon from '@lucide/svelte/icons/copy'
   import type { ComponentProps } from 'svelte'
   import { Input } from '#lib/components/ui/input/index.js'

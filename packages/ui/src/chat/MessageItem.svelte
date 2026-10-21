@@ -61,7 +61,7 @@
     onEdit?: (() => void) | undefined
     onBranch?: (() => void) | undefined
     onCopyConversation?: (() => void) | undefined
-    /** Regenerates this reply with the picked model (Cherry's @ menu). */
+    /** Regenerates this reply with the picked model. */
     onSwitchModel?: ((model: ModelRef) => void) | undefined
     modelOptions?: ModelOption[] | null
     sourceModel?: ModelRef | null

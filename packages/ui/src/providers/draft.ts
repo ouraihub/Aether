@@ -262,7 +262,7 @@ export function checkHeaders(
   return { headers }
 }
 
-/** Cherry's primary key: the first enabled one, else the first. */
+/** Primary key: the first enabled one, else the first. */
 export const primaryKey = (keys: readonly EndpointKey[]): EndpointKey | null =>
   keys.find((k) => k.enabled) ?? keys[0] ?? null
 

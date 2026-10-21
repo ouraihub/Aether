@@ -220,7 +220,7 @@ describe('ProvidersSettings', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://copy.example.com/v1'))
   })
 
-  it('row menu edits model notes and deletes the provider (Cherry context menu)', async () => {
+  it('row menu edits model notes and deletes the provider', async () => {
     const remove = vi.fn(() => Promise.resolve([]))
     const { saves } = setup({ remove })
     await fireEvent.click(await screen.findByRole('button', { name: 'More actions for Local' }))
