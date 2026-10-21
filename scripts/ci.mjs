@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path'
 const cargo = (args) => (process.platform === 'win32' ? `scripts\\cargo-msvc.bat ${args}` : `cargo ${args}`)
 
 const steps = [
+  'pnpm exec release-kit check',
   'pnpm run check',
   // tauri::generate_context! in the examples needs each `frontendDist` to exist.
   'pnpm -r --filter "./examples/*/ui" run build',

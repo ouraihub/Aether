@@ -29,3 +29,11 @@
 
 - Rust 命令一律通过 `scripts\cargo-msvc.bat` 运行。Git 自带的 `link.exe` 会挡住 MSVC 的链接器。
 - 在 Git Bash 里运行时，用 `cmd.exe /d /c "call scripts\cargo-msvc.bat test --workspace"`。
+
+## 6. 提交信息和代码注释
+
+`pnpm run ci` 第一步是 `release-kit check`，不合规直接失败。规则全文见 [release-kit 规则](https://github.com/ouraihub/release-kit#规则)，要点：
+
+- 格式 `<type>(<scope>): <摘要>`，一条提交只做一件事，标题不超过 72 个字符。
+- 正文默认不写；只在 diff 看不出原因时写 1–3 行"为什么"。不写文件列表、字段清单、验证记录、AI 署名。
+- 提交、注释、标识符里不写参考或对标项目名（禁用词在 `release-kit.json`）。注释写行为和约束；来源只写进 `docs/`。
