@@ -2,3 +2,4 @@
 export { default as ModelSelect } from './ModelSelect.svelte'
 export { default as ProvidersSettings } from './ProvidersSettings.svelte'
 export { providersRevision } from './revision.svelte'
+export { REASONING_EFFORTS } from './reasoning'

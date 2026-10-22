@@ -107,7 +107,9 @@ interface ChatPanelProps {
   onToolbarChange?: (ids: string[]) => void         // “+”面板底部“输入快捷面板”→自定义工具栏（开关/拖动/↑↓/恢复默认）；宿主决定是否记住
   onExportMarkdown?: (markdown: string) => Promise<void> | void // 桌面宿主原生保存，无回调用Web Blob下载
   onToolPayload?: (tool: string, payload: unknown) => void
-  onOpenSettings?: () => void                       // 没有任何对话模型时显示"打开设置"
+  onOpenSettings?: () => void                       // 没有任何对话模型时显示"打开设置"；思考弹层的"打开设置"会先写settingsTarget，ProvidersSettings挂载时直接打开该模型设置
+  reasoningEffort?: ReasoningEffort                 // 保存的思考档位，省略为default；每个模型按最近的合法档位发送（距离相同取较高），无能力则不发
+  onReasoningEffortChange?: (effort: ReasoningEffort) => void // 用户选档/恢复默认时调用，宿主决定是否记住
   conversationId?: string | null                    // 挂载时恢复的会话；已不存在（not_found）则新对话
   onConversationChange?: (id: string | null) => void  // 显示的会话变化时调用（新运行建会话、打开历史、删除、新对话），应用据此持久化
   onClose?: () => void

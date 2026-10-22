@@ -14,7 +14,7 @@
   import type { Model, ModelType, PricingTier, Protocol, ReasoningDialect, ReasoningEffort } from '../ports'
   import { cn } from '../utils'
   import { idPrefix, purposeOf, validateModel, withPurpose, withType, type ModelField, type Purpose } from './draft'
-  import { REASONING_DIALECTS, REASONING_EFFORTS, emptyReasoning } from './reasoning'
+  import { REASONING_DIALECTS, REASONING_EFFORTS, allowsAuto, dialectFits, emptyReasoning } from './reasoning'
 
   let {
     open = $bindable(false),
@@ -64,11 +64,7 @@
     edit = untrack(() => (model ? $state.snapshot(model) : null))
     more = true
   })
-  const dialects = $derived(
-    REASONING_DIALECTS.filter((dialect) =>
-      protocol === 'anthropic-messages' ? dialect !== 'openai' : dialect === 'openai',
-    ),
-  )
+  const dialects = $derived(REASONING_DIALECTS.filter((dialect) => dialectFits(dialect, protocol)))
   const errors = $derived(edit ? validateModel(edit, protocol) : [])
   const purpose = $derived(edit && purposeOf(edit))
   const count = (value: number) => (Number.isNaN(value) ? null : value)
@@ -305,10 +301,10 @@
       value={dialect}
       onValueChange={(value) => edit && (edit.reasoning = emptyReasoning(value as ReasoningDialect))}
     >
-      <Select.Trigger id="kit-model-dialect" class="w-full">{dialect}</Select.Trigger>
+      <Select.Trigger id="kit-model-dialect" class="w-full">{t(`providers.dialect.${dialect}`)}</Select.Trigger>
       <Select.Content>
         <Select.Group>
-          {#each dialects as item (item)}<Select.Item value={item} label={item} />{/each}
+          {#each dialects as item (item)}<Select.Item value={item} label={t(`providers.dialect.${item}`)} />{/each}
         </Select.Group>
       </Select.Content>
     </Select.Root>
@@ -316,7 +312,7 @@
   <Field.Set>
     <Field.Legend variant="label">{t('providers.reasoning_efforts')}</Field.Legend>
     <div class="flex flex-wrap gap-3">
-      {#each REASONING_EFFORTS as effort (effort)}
+      {#each REASONING_EFFORTS.filter((effort) => effort !== 'auto' || allowsAuto(dialect)) as effort (effort)}
         <label class="flex items-center gap-1 text-kit-sm"
           ><input
             type="checkbox"
@@ -326,15 +322,15 @@
         >
       {/each}
     </div>
-    {#if dialect !== 'anthropic-budget'}<Field.Error errors={errorFor('reasoning')} />{/if}
+    {#if dialect !== 'anthropic-budget' && dialect !== 'qwen'}<Field.Error errors={errorFor('reasoning')} />{/if}
   </Field.Set>
-  {#if dialect === 'anthropic-budget'}
+  {#if dialect === 'anthropic-budget' || dialect === 'qwen'}
     <Field.Field>
       <Field.Label for="kit-model-budget">{t('providers.reasoning_budget')}</Field.Label>
       <Input
         id="kit-model-budget"
         type="number"
-        min="1024"
+        min={dialect === 'qwen' ? '1' : '1024'}
         step="1"
         aria-invalid={errorFor('reasoning').length > 0}
         value={edit?.reasoning?.budgetTokens ?? ''}

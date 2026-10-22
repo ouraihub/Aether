@@ -172,7 +172,11 @@ async fn fetch(
     };
     Ok(parse_ids(&body)
         .filter(|ids| !ids.is_empty())
-        .map(|ids| ids.into_iter().map(|id| probed(id, protocol)).collect())
+        .map(|ids| {
+            ids.into_iter()
+                .map(|id| probed(id, protocol, base_url))
+                .collect()
+        })
         .ok_or_else(|| failure(ProbeErrorKind::InvalidBody)))
 }
 
@@ -218,10 +222,10 @@ fn parse_ids(body: &[u8]) -> Option<Vec<String>> {
     Some(ids)
 }
 
-fn probed(id: String, protocol: Protocol) -> ProbedModel {
+fn probed(id: String, protocol: Protocol, base_url: &str) -> ProbedModel {
     let inferred = infer(&id);
     let reasoning = (inferred.model_type == crate::ModelType::Chat)
-        .then(|| infer_reasoning(&id, protocol, inferred.max_output))
+        .then(|| infer_reasoning(&id, protocol, base_url, inferred.max_output))
         .flatten();
     ProbedModel {
         model: Model {

@@ -17,7 +17,8 @@ import {
 } from '../ports'
 import type ChatPanel from './ChatPanel.svelte'
 import Harness from './Harness.test.svelte'
-import { providersRevision } from '../providers/revision.svelte'
+import { providersRevision, settingsTarget } from '../providers/revision.svelte'
+import { nearestEffort } from '../providers/reasoning'
 
 const model = { endpointId: 'e1', modelId: 'm1' }
 
@@ -831,8 +832,9 @@ describe('ChatPanel', () => {
 
   it('maps sparse slider indices exactly, preserves default on open, and isolates Escape', async () => {
     const onClose = vi.fn()
+    const onReasoningEffortChange = vi.fn()
     const { runs } = setup(false, null, {
-      props: { onClose },
+      props: { onClose, onReasoningEffortChange },
       providers: {
         modelOptions: () =>
           Promise.resolve([
@@ -897,13 +899,60 @@ describe('ChatPanel', () => {
     }
     await fireEvent.keyDown(slider, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('slider')).toBeNull())
+    expect(onReasoningEffortChange).toHaveBeenLastCalledWith('high')
     const models = screen.getByLabelText('Select a model')
-    await fireEvent.click(models)
-    await fireEvent.click(await screen.findByRole('option', { name: /m2/ }))
-    expect(await screen.findByRole('button', { name: 'Reasoning effort: Default' })).toBeTruthy()
+    const pick = async (name: RegExp) => {
+      await fireEvent.click(models)
+      await fireEvent.click(await screen.findByRole('option', { name }))
+    }
+    // The saved choice follows the model: kept where allowed, dropped where unsupported, restored on return.
+    await pick(/m2/)
+    expect(await screen.findByRole('button', { name: 'Reasoning effort: High' })).toBeTruthy()
     await send('changed model')
-    expect(runs[4]?.request).toMatchObject({ model: { endpointId: model.endpointId, modelId: 'm2' } })
-    expect(runs[4]?.request.reasoningEffort).toBe('default')
+    expect(runs[4]?.request).toMatchObject({
+      model: { endpointId: model.endpointId, modelId: 'm2' },
+      reasoningEffort: 'high',
+    })
+    runs[4]?.emit({ kind: 'end', status: 'completed' })
+    await pick(/m3/)
+    expect(await screen.findByRole('button', { name: 'Reasoning effort: Default' })).toBeTruthy()
+    await send('no reasoning')
+    expect(runs[5]?.request.reasoningEffort).toBe('default')
+    runs[5]?.emit({ kind: 'end', status: 'completed' })
+    await pick(/m1/)
+    expect(await screen.findByRole('button', { name: 'Reasoning effort: High' })).toBeTruthy()
+  })
+
+  it('falls back to the nearest allowed effort, preferring the higher one on a tie', () => {
+    expect(nearestEffort('high', ['none', 'low'])).toBe('low')
+    expect(nearestEffort('medium', ['low', 'high'])).toBe('high')
+    expect(nearestEffort('max', ['low', 'medium', 'high'])).toBe('high')
+    expect(nearestEffort('high', [])).toBe('default')
+    expect(nearestEffort('default', ['low'])).toBe('default')
+  })
+
+  it('starts from the saved effort choice', async () => {
+    const { runs } = setup(false, null, {
+      props: { reasoningEffort: 'high' },
+      providers: {
+        modelOptions: () =>
+          Promise.resolve([
+            {
+              ...model,
+              label: 'Reasoner',
+              modelType: 'chat',
+              name: null,
+              supportsTools: null,
+              reasoning: { dialect: 'openai', efforts: ['none', 'low'] },
+              nativeWebSearch: false,
+              canVision: false,
+            },
+          ]),
+      },
+    })
+    expect(await screen.findByRole('button', { name: 'Reasoning effort: Low' })).toBeTruthy()
+    await send('restored')
+    expect(runs[0]?.request.reasoningEffort).toBe('low')
   })
 
   it('groups models by provider, searches, filters by capability and links to settings', async () => {
@@ -969,6 +1018,8 @@ describe('ChatPanel', () => {
     expect(screen.queryByRole('slider')).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
     expect(onOpenSettings).toHaveBeenCalledOnce()
+    expect(settingsTarget.value).toEqual(model)
+    settingsTarget.value = null
     await send('provider default')
     expect(runs[0]?.request.reasoningEffort).toBe('default')
   })

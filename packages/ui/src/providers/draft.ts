@@ -1,5 +1,6 @@
 // Editable form of a provider and its conversion to save/probe requests (docs/11 §3, §7); key helpers (docs/34 §5).
 import type { KitI18n } from '../i18n'
+import { allowsAuto, dialectFits } from './reasoning'
 import {
   isKitClientError,
   type Endpoint,
@@ -176,12 +177,20 @@ export function validateModel(model: Model, protocol: Protocol): ModelError[] {
     add('maxOutput', 'exceeds_context')
   if (reasoning) {
     const { efforts, dialect, budgetTokens } = reasoning
-    if (!chat || !efforts.length || efforts.includes('default') || new Set(efforts).size !== efforts.length)
+    if (
+      !chat ||
+      !efforts.length ||
+      efforts.includes('default') ||
+      (efforts.includes('auto') && !allowsAuto(dialect)) ||
+      new Set(efforts).size !== efforts.length
+    )
       add('reasoning', 'invalid_efforts')
-    else if ((dialect === 'openai') === (protocol === 'anthropic-messages')) add('reasoning', 'protocol_mismatch')
+    else if (!dialectFits(dialect, protocol)) add('reasoning', 'protocol_mismatch')
     else if (dialect === 'anthropic-budget') {
       if (budgetTokens == null || budgetTokens < 1024 || budgetTokens >= (maxOutput ?? 4096))
         add('reasoning', 'invalid_budget')
+    } else if (dialect === 'qwen') {
+      if (budgetTokens === 0) add('reasoning', 'invalid_budget')
     } else if (budgetTokens != null) add('reasoning', 'unexpected_budget')
   }
   if (pricing) {

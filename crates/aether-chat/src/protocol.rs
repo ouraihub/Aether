@@ -2,7 +2,7 @@
 
 use std::iter;
 
-use aether_support::{Connection, Protocol, ReasoningEffort};
+use aether_support::{Connection, Protocol, ReasoningDialect, ReasoningEffort};
 use reqwest::RequestBuilder;
 use reqwest::header::ACCEPT;
 use serde_json::{Map, Value, json};
@@ -17,6 +17,26 @@ pub(crate) const fn path(protocol: Protocol) -> &'static str {
         Protocol::OpenaiChat => "chat/completions",
         Protocol::OpenaiResponses => "responses",
     }
+}
+
+/// Share of a reasoning budget an explicit effort asks for.
+fn scaled(cap: u32, effort: ReasoningEffort) -> u32 {
+    match effort {
+        ReasoningEffort::Minimal => cap / 20,
+        ReasoningEffort::Low => cap / 10,
+        ReasoningEffort::Medium => cap / 2,
+        ReasoningEffort::High => (cap / 5) * 4 + (cap % 5) * 4 / 5,
+        ReasoningEffort::Xhigh => (cap / 10) * 9 + (cap % 10) * 9 / 10,
+        ReasoningEffort::Max => cap,
+        ReasoningEffort::Default | ReasoningEffort::None | ReasoningEffort::Auto => 0,
+    }
+}
+
+/// Whether `base_url` is OpenAI's own API, the only Responses server known to accept `summary`.
+fn official_openai(base_url: &str) -> bool {
+    base_url
+        .strip_prefix("https://api.openai.com")
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// One round's request: auth headers plus the streaming JSON body.
@@ -88,38 +108,46 @@ impl Request<'_> {
                 body
             }
         };
-        if self.reasoning_effort != ReasoningEffort::Default {
+        let effort = self.reasoning_effort;
+        let config = self.connection.reasoning.as_ref();
+        if effort != ReasoningEffort::Default {
             match protocol {
-                Protocol::OpenaiChat => {
-                    body["reasoning_effort"] = json!(self.reasoning_effort);
-                }
+                Protocol::OpenaiChat => match config.map(|config| config.dialect) {
+                    Some(ReasoningDialect::ThinkingType) => {
+                        let on = effort != ReasoningEffort::None;
+                        body["thinking"] =
+                            json!({ "type": if on { "enabled" } else { "disabled" } });
+                        if on && effort != ReasoningEffort::Auto {
+                            body["reasoning_effort"] = json!(effort);
+                        }
+                    }
+                    Some(ReasoningDialect::Qwen) => {
+                        body["enable_thinking"] = json!(effort != ReasoningEffort::None);
+                        if let Some(cap) = config.and_then(|config| config.budget_tokens)
+                            && !matches!(effort, ReasoningEffort::None | ReasoningEffort::Auto)
+                        {
+                            body["thinking_budget"] = json!(scaled(cap, effort).max(1));
+                        }
+                    }
+                    _ => body["reasoning_effort"] = json!(effort),
+                },
                 Protocol::OpenaiResponses => {
-                    body["reasoning"] =
-                        json!({ "effort": self.reasoning_effort, "summary": "auto" });
+                    // Third-party Responses servers may reject `summary` with 400.
+                    body["reasoning"] = if official_openai(&self.connection.base_url) {
+                        json!({ "effort": effort, "summary": "auto" })
+                    } else {
+                        json!({ "effort": effort })
+                    };
                 }
                 Protocol::AnthropicMessages => {
-                    if self.reasoning_effort == ReasoningEffort::None {
+                    if effort == ReasoningEffort::None {
                         body["thinking"] = json!({ "type": "disabled" });
-                    } else if let Some(cap) = self
-                        .connection
-                        .reasoning
-                        .as_ref()
-                        .and_then(|config| config.budget_tokens)
-                    {
-                        let tokens = match self.reasoning_effort {
-                            ReasoningEffort::Minimal => cap / 20,
-                            ReasoningEffort::Low => cap / 10,
-                            ReasoningEffort::Medium => cap / 2,
-                            ReasoningEffort::High => (cap / 5) * 4 + (cap % 5) * 4 / 5,
-                            ReasoningEffort::Xhigh => (cap / 10) * 9 + (cap % 10) * 9 / 10,
-                            ReasoningEffort::Max => cap,
-                            ReasoningEffort::Default | ReasoningEffort::None => 0,
-                        };
-                        let tokens = tokens.max(1024).min(self.max_output - 1);
+                    } else if let Some(cap) = config.and_then(|config| config.budget_tokens) {
+                        let tokens = scaled(cap, effort).max(1024).min(self.max_output - 1);
                         body["thinking"] = json!({ "type": "enabled", "budget_tokens": tokens });
                     } else {
                         body["thinking"] = json!({ "type": "adaptive" });
-                        body["output_config"] = json!({ "effort": self.reasoning_effort });
+                        body["output_config"] = json!({ "effort": effort });
                     }
                 }
             }
@@ -582,4 +610,18 @@ fn citation(value: &Value) -> Decoded {
 
 fn tokens(value: &Value) -> Option<u32> {
     value.as_u64().and_then(|n| u32::try_from(n).ok())
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::official_openai;
+
+    #[test]
+    fn only_openai_itself_gets_reasoning_summaries() {
+        assert!(official_openai("https://api.openai.com/v1"));
+        assert!(official_openai("https://api.openai.com"));
+        assert!(!official_openai("https://api.openai.com.evil.example/v1"));
+        assert!(!official_openai("http://api.openai.com/v1"));
+        assert!(!official_openai("https://openrouter.ai/api/v1"));
+    }
 }

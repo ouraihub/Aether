@@ -126,10 +126,12 @@
       <Field.Field>
         <Field.Label for="kit-endpoint-protocol">{t('providers.protocol')}</Field.Label>
         <Select.Root type="single" value={protocol} onValueChange={(value) => (protocol = value as Protocol)}>
-          <Select.Trigger id="kit-endpoint-protocol" class="w-full">{protocol}</Select.Trigger>
+          <Select.Trigger id="kit-endpoint-protocol" class="w-full"
+            >{t(`providers.protocol.${protocol}`)}</Select.Trigger
+          >
           <Select.Content>
             <Select.Group>
-              {#each PROTOCOLS as p (p)}<Select.Item value={p} label={p} />{/each}
+              {#each PROTOCOLS as p (p)}<Select.Item value={p} label={t(`providers.protocol.${p}`)} />{/each}
             </Select.Group>
           </Select.Content>
         </Select.Root>

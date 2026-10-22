@@ -3,4 +3,4 @@
 /**
  * Provider-specific reasoning request dialect.
  */
-export type ReasoningDialect = "openai" | "anthropic-budget" | "anthropic-adaptive";
+export type ReasoningDialect = "openai" | "anthropic-budget" | "anthropic-adaptive" | "thinking-type" | "qwen";

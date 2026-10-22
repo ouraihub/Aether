@@ -407,10 +407,10 @@ async fn reasoning_default_and_none_are_encoded_per_protocol() {
                 assert_eq!(body["thinking"], serde_json::json!({"type":"disabled"}))
             }
             Protocol::OpenaiChat => assert_eq!(body["reasoning_effort"], "none"),
-            Protocol::OpenaiResponses => assert_eq!(
-                body["reasoning"],
-                serde_json::json!({"effort":"none","summary":"auto"})
-            ),
+            // A non-OpenAI Responses server gets no `summary` (third-party servers may 400).
+            Protocol::OpenaiResponses => {
+                assert_eq!(body["reasoning"], serde_json::json!({"effort":"none"}))
+            }
         }
     }
 }
@@ -442,6 +442,78 @@ async fn reasoning_budget_dialects_clamp_before_encoding() {
         } else {
             assert_eq!(body["thinking"], serde_json::json!({"type":"adaptive"}));
             assert_eq!(body["output_config"]["effort"], "high");
+        }
+    }
+}
+
+#[tokio::test]
+async fn vendor_reasoning_dialects_write_their_own_fields() {
+    use serde_json::json;
+    let cases = [
+        (
+            ReasoningDialect::ThinkingType,
+            None,
+            ReasoningEffort::None,
+            json!({"thinking":{"type":"disabled"}}),
+        ),
+        (
+            ReasoningDialect::ThinkingType,
+            None,
+            ReasoningEffort::Auto,
+            json!({"thinking":{"type":"enabled"}}),
+        ),
+        (
+            ReasoningDialect::ThinkingType,
+            None,
+            ReasoningEffort::High,
+            json!({"thinking":{"type":"enabled"},"reasoning_effort":"high"}),
+        ),
+        (
+            ReasoningDialect::Qwen,
+            Some(10_000),
+            ReasoningEffort::None,
+            json!({"enable_thinking":false}),
+        ),
+        (
+            ReasoningDialect::Qwen,
+            Some(10_000),
+            ReasoningEffort::Auto,
+            json!({"enable_thinking":true}),
+        ),
+        (
+            ReasoningDialect::Qwen,
+            Some(10_000),
+            ReasoningEffort::Low,
+            json!({"enable_thinking":true,"thinking_budget":1_000}),
+        ),
+    ];
+    for (dialect, budget_tokens, effort, expected) in cases {
+        let (base, seen) = upstream(sse(fixture(Protocol::OpenaiChat, "text"))).await;
+        let mut req = input(Protocol::OpenaiChat, base);
+        req.reasoning_effort = effort;
+        req.connection.reasoning = Some(ReasoningConfig {
+            dialect,
+            efforts: vec![effort],
+            budget_tokens,
+        });
+        let (summary, _) = run(&runner(5_000, 5_000), req, false).await;
+        assert_eq!(
+            summary.status,
+            EndStatus::Completed,
+            "{dialect:?} {effort:?}"
+        );
+        let body = request_body(&seen.lock().await[0]);
+        for key in [
+            "thinking",
+            "reasoning_effort",
+            "enable_thinking",
+            "thinking_budget",
+        ] {
+            assert_eq!(
+                body.get(key),
+                expected.get(key),
+                "{dialect:?} {effort:?} {key}"
+            );
         }
     }
 }

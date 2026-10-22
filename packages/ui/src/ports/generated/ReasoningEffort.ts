@@ -3,4 +3,4 @@
 /**
  * Explicit per-run reasoning choice; default leaves provider controls untouched.
  */
-export type ReasoningEffort = "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ReasoningEffort = "default" | "none" | "auto" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";

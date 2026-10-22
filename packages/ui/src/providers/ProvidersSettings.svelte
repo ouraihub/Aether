@@ -23,7 +23,7 @@
   import { adopt, newEndpoint, probeTarget, savable, toDraft, toSave, validateModel, type ProviderDraft } from './draft'
   import EndpointPanel, { type CheckState } from './EndpointPanel.svelte'
   import ModelPickerDialog from './ModelPickerDialog.svelte'
-  import { providersRevision } from './revision.svelte'
+  import { providersRevision, settingsTarget } from './revision.svelte'
 
   let {
     onchanged,
@@ -151,7 +151,16 @@
           endpoints: [{ slug: 'ep-1', baseUrl: preset.baseUrl, protocol: preset.protocol, models: [] }],
         })
       }
-      load(providers[0] ? toDraft(providers[0]) : null)
+      const target = settingsTarget.value
+      const owner = target && providers.find((p) => p.endpoints.some((e) => e.id === target.endpointId))
+      if (!owner) settingsTarget.value = null
+      load(owner ? toDraft(owner) : providers[0] ? toDraft(providers[0]) : null)
+      // EndpointPanel opens the target model's dialog when it mounts (and clears the target).
+      if (owner && target && draft)
+        active = Math.max(
+          0,
+          draft.endpoints.findIndex((e) => e.saved?.id === target.endpointId),
+        )
     } catch (error) {
       notify.toast('error', errorText(error))
     }

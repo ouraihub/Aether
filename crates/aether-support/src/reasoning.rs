@@ -18,6 +18,8 @@ pub enum ReasoningEffort {
     Default,
     /// Explicitly disabled reasoning.
     None,
+    /// Reasoning on, depth left to the provider (`thinking-type` / `qwen` only).
+    Auto,
     /// Minimal effort.
     Minimal,
     /// Low effort.
@@ -43,6 +45,25 @@ pub enum ReasoningDialect {
     AnthropicBudget,
     /// Anthropic adaptive effort.
     AnthropicAdaptive,
+    /// OpenAI Chat `thinking.type` switch (DeepSeek, GLM, Doubao, Kimi); explicit efforts
+    /// also send `reasoning_effort`.
+    ThinkingType,
+    /// OpenAI Chat `enable_thinking` + optional `thinking_budget` (Qwen).
+    Qwen,
+}
+
+impl ReasoningDialect {
+    /// Whether this dialect is written on `protocol`.
+    #[must_use]
+    pub fn fits(self, protocol: Protocol) -> bool {
+        match self {
+            Self::AnthropicBudget | Self::AnthropicAdaptive => {
+                protocol == Protocol::AnthropicMessages
+            }
+            Self::Openai => protocol != Protocol::AnthropicMessages,
+            Self::ThinkingType | Self::Qwen => protocol == Protocol::OpenaiChat,
+        }
+    }
 }
 
 /// User-declared reasoning capabilities of one model.
@@ -74,14 +95,19 @@ impl ReasoningConfig {
     ) -> Result<(), &'static str> {
         let mut seen = HashSet::new();
         if self.efforts.is_empty()
-            || self
-                .efforts
-                .iter()
-                .any(|e| matches!(e, ReasoningEffort::Default) || !seen.insert(*e))
+            || self.efforts.iter().any(|e| {
+                matches!(e, ReasoningEffort::Default)
+                    || !seen.insert(*e)
+                    || (*e == ReasoningEffort::Auto
+                        && !matches!(
+                            self.dialect,
+                            ReasoningDialect::ThinkingType | ReasoningDialect::Qwen
+                        ))
+            })
         {
             return Err("invalid_efforts");
         }
-        if (self.dialect == ReasoningDialect::Openai) == (protocol == Protocol::AnthropicMessages) {
+        if !self.dialect.fits(protocol) {
             return Err("protocol_mismatch");
         }
         match (self.dialect, self.budget_tokens) {
@@ -92,8 +118,9 @@ impl ReasoningConfig {
                     Err("invalid_budget")
                 }
             }
+            (ReasoningDialect::Qwen, Some(0)) => Err("invalid_budget"),
+            (ReasoningDialect::Qwen, _) | (_, None) => Ok(()),
             (_, Some(_)) => Err("unexpected_budget"),
-            (_, None) => Ok(()),
         }
     }
 

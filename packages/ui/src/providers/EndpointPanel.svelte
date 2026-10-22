@@ -27,6 +27,7 @@
   import { groupKey, keyError, maskedText, probeUrl, validUrl, type EndpointDraft } from './draft'
   import ModelSettingsDialog from './ModelSettingsDialog.svelte'
   import RequestConfigDialog from './RequestConfigDialog.svelte'
+  import { settingsTarget } from './revision.svelte'
   import SecretInput from './SecretInput.svelte'
 
   type Outcome = { state: 'ok'; count: number } | { state: 'error'; message: string }
@@ -99,8 +100,14 @@
     urlError = false
   })
   let settingsOpen = $state(false)
-  let modelOpen = $state(false)
-  let editing = $state<Model | null>(null)
+  // A chat "open settings" action names this endpoint's model: open its dialog once.
+  const targeted = settingsTarget.value?.endpointId === endpoint.saved?.id
+  const targetModel = targeted
+    ? (endpoint.models.find((model) => model.id === settingsTarget.value?.modelId) ?? null)
+    : null
+  if (targeted) settingsTarget.value = null
+  let modelOpen = $state(targetModel !== null)
+  let editing = $state<Model | null>(targetModel)
   let addOpen = $state(false)
   let newModelId = $state('')
   let searching = $state(false)

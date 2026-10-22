@@ -98,19 +98,99 @@ pub fn infer(model_id: &str) -> Inferred {
     }
 }
 
-/// Infers reasoning controls for supported model families and protocols.
+/// Infers reasoning controls for supported model families and protocols; `base_url` picks
+/// a vendor's own reasoning fields on its official OpenAI Chat endpoint.
 #[must_use]
 pub fn infer_reasoning(
     model_id: &str,
     protocol: Protocol,
+    base_url: &str,
     max_output: Option<u32>,
 ) -> Option<ReasoningConfig> {
     let id = model_id.to_ascii_lowercase().replace('.', "-");
     let name = id.rsplit('/').next().unwrap_or_default();
     match protocol {
         Protocol::AnthropicMessages => infer_anthropic_reasoning(name, max_output),
-        Protocol::OpenaiChat | Protocol::OpenaiResponses => infer_openai_reasoning(name),
+        Protocol::OpenaiChat => {
+            infer_vendor_reasoning(name, base_url).or_else(|| infer_openai_reasoning(name))
+        }
+        Protocol::OpenaiResponses => infer_openai_reasoning(name),
     }
+}
+
+/// Official vendor endpoints switch reasoning with their own fields (docs/28 RT4); a relay
+/// serving the same model keeps the OpenAI dialect.
+fn infer_vendor_reasoning(name: &str, base_url: &str) -> Option<ReasoningConfig> {
+    use ReasoningEffort as E;
+    let host = base_url
+        .split_once("://")
+        .map_or(base_url, |(_, rest)| rest)
+        .split(['/', ':', '?'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let on = |domains: &[&str]| {
+        domains.iter().any(|domain| {
+            host == *domain
+                || host
+                    .strip_suffix(domain)
+                    .is_some_and(|rest| rest.ends_with('.'))
+        })
+    };
+    let starts = |prefixes: &[&str]| prefixes.iter().any(|prefix| name.starts_with(prefix));
+    let switch = |efforts: &[ReasoningEffort]| ReasoningConfig {
+        dialect: ReasoningDialect::ThinkingType,
+        efforts: efforts.to_vec(),
+        budget_tokens: None,
+    };
+    let toggle = [E::None, E::Auto];
+    if on(&["deepseek.com"]) {
+        if starts(&["deepseek-v4", "deepseek-v5"]) {
+            return Some(switch(&[E::None, E::Low, E::High, E::Max]));
+        }
+        return starts(&["deepseek-chat", "deepseek-v3"]).then(|| switch(&toggle));
+    }
+    if on(&["bigmodel.cn", "z.ai"]) {
+        if starts(&["glm-5-3"]) {
+            return Some(switch(&[E::Low, E::High, E::Max]));
+        }
+        return starts(&["glm-5", "glm-4-5", "glm-4-6", "glm-4-7"]).then(|| switch(&toggle));
+    }
+    if on(&["volces.com"]) {
+        return starts(&["doubao-seed"]).then(|| switch(&toggle));
+    }
+    if on(&["moonshot.cn", "moonshot.ai"]) {
+        if starts(&["kimi-k3"]) {
+            return Some(switch(&[E::None, E::Low, E::High, E::Max]));
+        }
+        return (starts(&[
+            "kimi-k2-5",
+            "kimi-k2-6",
+            "kimi-k2-7",
+            "kimi-k2-8",
+            "kimi-k2-9",
+        ]) && !name.contains("-code"))
+        .then(|| switch(&toggle));
+    }
+    if on(&["aliyuncs.com"])
+        && name.starts_with("qwen3")
+        && !name.starts_with("qwen3-8-")
+        && !["instruct", "coder", "thinking"]
+            .iter()
+            .any(|word| name.contains(word))
+    {
+        let cap = if starts(&["qwen3-max", "qwen3-5", "qwen3-6", "qwen3-7"]) {
+            81_920
+        } else {
+            38_912
+        };
+        return Some(ReasoningConfig {
+            dialect: ReasoningDialect::Qwen,
+            efforts: vec![E::None, E::Auto, E::Low, E::Medium, E::High, E::Max],
+            budget_tokens: Some(cap),
+        });
+    }
+    None
 }
 
 fn infer_anthropic_reasoning(name: &str, max_output: Option<u32>) -> Option<ReasoningConfig> {
@@ -177,49 +257,55 @@ fn infer_anthropic_reasoning(name: &str, max_output: Option<u32>) -> Option<Reas
         .filter(|_| budget_tokens >= 1_024)
 }
 
+/// OpenAI Chat/Responses lines (official or relay) send `reasoning_effort`; a known
+/// family keeps its efforts there, written in the OpenAI dialect.
 fn infer_openai_reasoning(name: &str) -> Option<ReasoningConfig> {
-    if (version_match(name, "o1") && !name.contains("-mini") && !name.contains("-preview"))
-        || version_match(name, "o3")
-        || version_match(name, "o4-mini")
-    {
-        return Some(openai_reasoning(vec![
-            ReasoningEffort::Low,
-            ReasoningEffort::Medium,
-            ReasoningEffort::High,
-        ]));
+    use ReasoningEffort as E;
+    if name.starts_with("claude") {
+        return infer_anthropic_reasoning(name, None)
+            .map(|config| openai_reasoning(config.efforts));
     }
-    if name.contains("-chat") || name.contains("-pro") || name.contains("-codex") {
+    if name.contains("non-reasoning") {
         return None;
     }
-    if version_match(name, "gpt-5") {
-        return Some(openai_reasoning(vec![
-            ReasoningEffort::Minimal,
-            ReasoningEffort::Low,
-            ReasoningEffort::Medium,
-            ReasoningEffort::High,
-        ]));
-    }
-    if version_match(name, "gpt-5-1") {
-        return Some(openai_reasoning(vec![
-            ReasoningEffort::None,
-            ReasoningEffort::Low,
-            ReasoningEffort::Medium,
-            ReasoningEffort::High,
-        ]));
-    }
-    if ["gpt-5-2", "gpt-5-3", "gpt-5-4", "gpt-5-5", "gpt-5-6"]
-        .iter()
-        .any(|prefix| version_match(name, prefix))
-    {
-        return Some(openai_reasoning(vec![
-            ReasoningEffort::None,
-            ReasoningEffort::Low,
-            ReasoningEffort::Medium,
-            ReasoningEffort::High,
-            ReasoningEffort::Xhigh,
-        ]));
-    }
-    None
+    let any = |prefixes: &[&str]| prefixes.iter().any(|prefix| version_match(name, prefix));
+    let efforts: &[ReasoningEffort] =
+        if (version_match(name, "o1") && !name.contains("-mini") && !name.contains("-preview"))
+            || any(&["o3", "o4-mini", "gpt-oss"])
+        {
+            &[E::Low, E::Medium, E::High]
+        } else if any(&["grok-4-3"]) {
+            &[E::None, E::Low, E::Medium, E::High]
+        } else if any(&["grok-4-6", "grok-4-7"]) {
+            &[E::Low, E::Medium, E::High, E::Xhigh]
+        } else if any(&["grok-3-mini"]) {
+            &[E::Low, E::High]
+        } else if any(&["gpt-5-1-codex-max"]) {
+            &[E::Medium, E::High, E::Xhigh]
+        } else if any(&["gpt-5-1-codex"]) {
+            &[E::Medium, E::High]
+        } else if any(&["gpt-5-codex"]) {
+            &[E::Low, E::Medium, E::High]
+        } else if any(&[
+            "gpt-5-2-codex",
+            "gpt-5-3-codex",
+            "gpt-5-4-codex",
+            "gpt-5-5-codex",
+            "gpt-5-6-codex",
+        ]) {
+            &[E::Low, E::Medium, E::High, E::Xhigh]
+        } else if name.contains("-chat") || name.contains("-pro") || name.contains("-codex") {
+            return None;
+        } else if any(&["gpt-5-1"]) {
+            &[E::None, E::Low, E::Medium, E::High]
+        } else if any(&["gpt-5-2", "gpt-5-3", "gpt-5-4", "gpt-5-5", "gpt-5-6"]) {
+            &[E::None, E::Low, E::Medium, E::High, E::Xhigh]
+        } else if any(&["gpt-5"]) {
+            &[E::Minimal, E::Low, E::Medium, E::High]
+        } else {
+            return None;
+        };
+    Some(openai_reasoning(efforts.to_vec()))
 }
 
 fn version_match(name: &str, prefix: &str) -> bool {
@@ -263,39 +349,39 @@ mod tests {
         group: Option<String>,
     }
 
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ReasoningCase {
+        id: String,
+        protocol: Protocol,
+        max_output: Option<u32>,
+        /// Endpoint address; omitted means a relay (`https://relay.example/v1`).
+        base_url: Option<String>,
+        expect: Option<ReasoningConfig>,
+    }
+
     #[test]
-    fn reasoning_inference_respects_protocol_versions_and_budget_limits() {
-        assert!(infer_reasoning("claude-sonnet-5-5", Protocol::OpenaiChat, None).is_none());
-        assert!(infer_reasoning("claude-3-5-sonnet", Protocol::AnthropicMessages, None).is_none());
-        assert!(infer_reasoning("claude-opus-4-9", Protocol::AnthropicMessages, None).is_none());
-        assert!(infer_reasoning("unknown", Protocol::OpenaiChat, None).is_none());
-        assert!(infer_reasoning("o1-mini", Protocol::OpenaiChat, None).is_none());
-        assert!(infer_reasoning("gpt-5-chat-latest", Protocol::OpenaiChat, None).is_none());
-        assert!(
-            !infer_reasoning("gpt-5.1", Protocol::OpenaiResponses, None)
-                .unwrap()
-                .efforts
-                .contains(&ReasoningEffort::Xhigh)
-        );
-        assert!(
-            infer_reasoning("gpt-5.2", Protocol::OpenaiResponses, None)
-                .unwrap()
-                .efforts
-                .contains(&ReasoningEffort::Xhigh)
-        );
-        assert_eq!(
-            infer_reasoning(
-                "vendor/claude-sonnet-4-5",
-                Protocol::AnthropicMessages,
-                Some(4096)
-            )
-            .unwrap()
-            .budget_tokens,
-            Some(4095)
-        );
-        assert!(
-            infer_reasoning("claude-sonnet-4-5", Protocol::AnthropicMessages, Some(1024)).is_none()
-        );
+    fn every_reasoning_fixture_entry_matches() {
+        let text = include_str!("../../../packages/ui/fixtures/reasoning-infer.json");
+        let cases: Vec<ReasoningCase> = serde_json::from_str(text).unwrap();
+        assert!(cases.len() >= 25);
+        for case in cases {
+            assert_eq!(
+                infer_reasoning(
+                    &case.id,
+                    case.protocol,
+                    case.base_url
+                        .as_deref()
+                        .unwrap_or("https://relay.example/v1"),
+                    case.max_output
+                ),
+                case.expect,
+                "{} {:?} {:?}",
+                case.id,
+                case.protocol,
+                case.base_url
+            );
+        }
     }
 
     #[test]

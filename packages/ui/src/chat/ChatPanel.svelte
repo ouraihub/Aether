@@ -41,11 +41,11 @@
     type ReasoningEffort,
   } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
-  import { providersRevision } from '../providers/revision.svelte'
+  import { providersRevision, settingsTarget } from '../providers/revision.svelte'
   import { RunSession, type ChatTurn } from './run-session.svelte'
   import UsageDetails from './UsageDetails.svelte'
   import MessageItem from './MessageItem.svelte'
-  import { REASONING_EFFORTS } from '../providers/reasoning'
+  import { nearestEffort, REASONING_EFFORTS } from '../providers/reasoning'
   import SkillPicker from './SkillPicker.svelte'
 
   let {
@@ -66,6 +66,8 @@
     paintingModel = false,
     toolbar: toolbarProp,
     onToolbarChange,
+    reasoningEffort: reasoningEffortProp,
+    onReasoningEffortChange,
   }: {
     purpose?: string
     model?: ModelRef | null
@@ -88,6 +90,9 @@
     /** Ordered ids of composer tools pinned to the toolbar (docs/38); omitted means the default. */
     toolbar?: string[]
     onToolbarChange?: (ids: string[]) => void
+    /** Saved effort choice (host preference); omitted means `default`. Applied per model as its nearest allowed effort. */
+    reasoningEffort?: ReasoningEffort
+    onReasoningEffortChange?: (effort: ReasoningEffort) => void
   } = $props()
 
   const { ports, i18n, notify } = getKitContext()
@@ -102,8 +107,16 @@
   const capability = $derived(
     modelOptions?.find((item) => item.endpointId === picked?.endpointId && item.modelId === picked?.modelId) ?? null,
   )
-  let reasoningEffort = $state<ReasoningEffort>('default')
+  // The saved choice survives model switches; each model sends its nearest allowed effort (docs/28 RT3).
+  // svelte-ignore state_referenced_locally
+  let chosenEffort = $state<ReasoningEffort>(reasoningEffortProp ?? 'default')
   const allowedEfforts = $derived(REASONING_EFFORTS.filter((effort) => capability?.reasoning?.efforts.includes(effort)))
+  const reasoningEffort = $derived(nearestEffort(chosenEffort, allowedEfforts))
+  function chooseEffort(effort: ReasoningEffort) {
+    if (session?.running || effort === chosenEffort) return
+    chosenEffort = effort
+    onReasoningEffortChange?.(effort)
+  }
   let reasoningOpen = $state(false)
   const reasoningId = $props.id()
   let reasoningTrigger = $state<HTMLButtonElement | null>(null)
@@ -136,19 +149,15 @@
     }
   })
   $effect(() => {
-    if (reasoningEffort !== 'default' && !allowedEfforts.includes(reasoningEffort)) reasoningEffort = 'default'
-  })
-  $effect(() => {
     // A model that turns out not to take tools cannot keep a pending generate_image request.
     if (capability?.supportsTools === false) generateImage = false
   })
   function commitReasoning(event: Event) {
     const effort = allowedEfforts[Number((event.currentTarget as HTMLInputElement).value)]
-    if (effort && !session?.running) reasoningEffort = effort
+    if (effort) chooseEffort(effort)
   }
   function pickModel(next: ModelRef) {
     picked = next
-    reasoningEffort = 'default'
     session?.resetContext()
   }
 
@@ -1156,8 +1165,8 @@
                   <Button
                     variant="secondary"
                     size="xs"
-                    disabled={session.running || reasoningEffort === 'default'}
-                    onclick={() => (reasoningEffort = 'default')}>{t('chat.resetReasoning')}</Button
+                    disabled={session.running || chosenEffort === 'default'}
+                    onclick={() => chooseEffort('default')}>{t('chat.resetReasoning')}</Button
                   >
                 </div>
                 {#if allowedEfforts.length === 0}
@@ -1167,6 +1176,9 @@
                       size="sm"
                       onclick={() => {
                         reasoningOpen = false
+                        settingsTarget.value = picked
+                          ? { endpointId: picked.endpointId, modelId: picked.modelId }
+                          : null
                         onOpenSettings()
                       }}>{t('chat.openSettings')}</Button
                     >{/if}
@@ -1221,7 +1233,7 @@
                           name={reasoningId}
                           value={effort}
                           checked={reasoningEffort === effort}
-                          onchange={() => (reasoningEffort = effort as ReasoningEffort)}
+                          onchange={() => chooseEffort(effort as ReasoningEffort)}
                         />
                         {t(`chat.effort.${effort}`)}
                       </label>

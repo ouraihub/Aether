@@ -433,7 +433,7 @@ ALTER TABLE models ADD COLUMN pricing TEXT;",
     pub fn model_options(&self, filter: ModelFilter) -> Result<Vec<ModelOption>, KitError> {
         let db = self.lock()?;
         let mut stmt = db.prepare_cached(
-            "SELECT p.name, e.slug, m.endpoint_id, m.model_id, m.model_type, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, e.protocol, m.can_vision, m.name
+            "SELECT p.name, e.slug, m.endpoint_id, m.model_id, m.model_type, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, e.protocol, m.can_vision, m.name, e.base_url
              FROM models m JOIN endpoints e ON e.id = m.endpoint_id JOIN providers p ON p.id = e.provider_id
              WHERE p.enabled = 1
              ORDER BY p.position, p.id, e.position, m.position",
@@ -453,6 +453,7 @@ ALTER TABLE models ADD COLUMN pricing TEXT;",
                     row.get::<_, String>(9)?,
                     row.get::<_, bool>(10)?,
                     row.get::<_, Option<String>>(11)?,
+                    row.get::<_, String>(12)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -470,6 +471,7 @@ ALTER TABLE models ADD COLUMN pricing TEXT;",
             protocol,
             can_vision,
             name,
+            base_url,
         ) in rows
         {
             let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
@@ -479,6 +481,7 @@ ALTER TABLE models ADD COLUMN pricing TEXT;",
                 &model_id,
                 model_type,
                 protocol,
+                &base_url,
                 max_output,
             )?;
             if filter.model_type.is_some_and(|wanted| wanted != model_type)
@@ -540,6 +543,7 @@ ALTER TABLE models ADD COLUMN pricing TEXT;",
             &model.model_id,
             model_type,
             protocol,
+            &row.base_url,
             max_output,
         )?;
         let pricing = read_pricing(pricing.as_deref())?;
@@ -806,6 +810,7 @@ fn read_reasoning(
     model_id: &str,
     model_type: ModelType,
     protocol: Protocol,
+    base_url: &str,
     max_output: Option<u32>,
 ) -> Result<Option<ReasoningConfig>, KitError> {
     match stored {
@@ -814,7 +819,7 @@ fn read_reasoning(
             .map(Some)
             .map_err(KitError::internal),
         None => Ok((model_type == ModelType::Chat)
-            .then(|| infer_reasoning(model_id, protocol, max_output))
+            .then(|| infer_reasoning(model_id, protocol, base_url, max_output))
             .flatten()),
     }
 }
@@ -972,7 +977,7 @@ fn write_endpoint(
 
 fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
     let mut models: HashMap<String, Vec<Model>> = HashMap::new();
-    let mut stmt = db.prepare_cached("SELECT m.endpoint_id, m.model_id, m.model_type, m.type_source, m.context_window, m.max_output, m.can_vision, m.supports_tools, m.reasoning, m.native_web_search, e.protocol, m.name, m.group_name, m.pricing FROM models m JOIN endpoints e ON e.id = m.endpoint_id ORDER BY m.endpoint_id, m.position")?;
+    let mut stmt = db.prepare_cached("SELECT m.endpoint_id, m.model_id, m.model_type, m.type_source, m.context_window, m.max_output, m.can_vision, m.supports_tools, m.reasoning, m.native_web_search, e.protocol, m.name, m.group_name, m.pricing, e.base_url FROM models m JOIN endpoints e ON e.id = m.endpoint_id ORDER BY m.endpoint_id, m.position")?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let model_type: String = row.get(2)?;
@@ -982,6 +987,7 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
         let model_type = ModelType::parse(&model_type).ok_or_else(|| corrupt("model_type"))?;
         let max_output = row.get(5)?;
         let model_id: String = row.get(1)?;
+        let base_url: String = row.get(14)?;
         models.entry(row.get(0)?).or_default().push(Model {
             id: model_id.clone(),
             model_type,
@@ -995,6 +1001,7 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
                 &model_id,
                 model_type,
                 protocol,
+                &base_url,
                 max_output,
             )?,
             native_web_search: row.get(9)?,
@@ -1198,8 +1205,13 @@ mod tests {
             endpoint_id: id.clone(),
             model_id: "claude-sonnet-5-5".into(),
         };
-        let expected =
-            infer_reasoning(&reference.model_id, Protocol::AnthropicMessages, None).unwrap();
+        let expected = infer_reasoning(
+            &reference.model_id,
+            Protocol::AnthropicMessages,
+            "https://api.anthropic.com/v1",
+            None,
+        )
+        .unwrap();
         assert_eq!(
             saved[0].endpoints[0].models[1].reasoning.as_ref(),
             Some(&expected)
