@@ -23,4 +23,8 @@ label?: string,
 /**
  * New keys default to enabled.
  */
-enabled?: boolean, };
+enabled?: boolean, 
+/**
+ * `true` clears a set-aside state so the key is tried again.
+ */
+restore?: boolean, };

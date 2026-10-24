@@ -116,6 +116,18 @@ pub struct ModelSave {
     pub pricing: Option<aether_support::ModelPricing>,
 }
 
+/// How an endpoint picks among its enabled keys (docs/43 §3 of the host).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum KeyStrategy {
+    /// Start one key further on every request; failures are not remembered.
+    #[default]
+    RoundRobin,
+    /// Always start at the first key; a key that ran out is skipped until it recovers.
+    FillFirst,
+}
+
 /// One API key of an endpoint as shown to the UI: never the plaintext.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -131,6 +143,11 @@ pub struct EndpointKey {
     pub masked: Option<String>,
     /// `false` when the ciphertext cannot be decrypted (e.g. another Windows user).
     pub readable: bool,
+    /// Unix milliseconds until which `FillFirst` skips this key; `None` = usable.
+    #[ts(type = "number | null")]
+    pub exhausted_until: Option<u64>,
+    /// Why the key was set aside, e.g. `HTTP 429`; `None` when usable.
+    pub exhausted_reason: Option<String>,
 }
 
 /// A stored endpoint as shown to the UI: keys only as masked entries.
@@ -148,6 +165,8 @@ pub struct Endpoint {
     pub protocol: Protocol,
     /// API keys ordered by position.
     pub keys: Vec<EndpointKey>,
+    /// How a request picks among `keys`.
+    pub key_strategy: KeyStrategy,
     /// Where model listing is fetched from.
     pub probe_url: String,
     /// Selected models in display order.
@@ -194,6 +213,10 @@ pub struct EndpointSave {
     pub base_url: String,
     /// Wire protocol.
     pub protocol: Protocol,
+    /// Key selection; absent = keep (new endpoints: `RoundRobin`).
+    #[serde(default)]
+    #[ts(optional)]
+    pub key_strategy: Option<KeyStrategy>,
     /// Selected models in display order.
     pub models: Vec<ModelSave>,
     /// Image generation base URL: empty/null = use `baseUrl`; absent = keep.
@@ -245,6 +268,10 @@ pub struct EndpointKeySave {
     #[serde(default)]
     #[ts(optional)]
     pub enabled: Option<bool>,
+    /// `true` clears a set-aside state so the key is tried again.
+    #[serde(default)]
+    #[ts(optional)]
+    pub restore: Option<bool>,
 }
 
 /// A whole-provider save: endpoints missing from `endpoints` are deleted.

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from '../i18n'
 import {
@@ -33,7 +33,18 @@ const endpoint: Endpoint = {
   slug: 'main',
   baseUrl: 'http://127.0.0.1:9/v1',
   protocol: 'openai-chat',
-  keys: [{ id: 'k1', label: '', enabled: true, masked: 'sk-a****wxyz', readable: true }],
+  keys: [
+    {
+      id: 'k1',
+      label: '',
+      enabled: true,
+      masked: 'sk-a****wxyz',
+      readable: true,
+      exhaustedUntil: null,
+      exhaustedReason: null,
+    },
+  ],
+  keyStrategy: 'round_robin',
   probeUrl: 'http://127.0.0.1:9/v1/models',
   imageBaseUrl: null,
   imageEditBaseUrl: null,
@@ -43,7 +54,18 @@ const endpoint: Endpoint = {
 const stored: Provider = { id: 'p1', name: 'Local', enabled: true, notes: '', presetId: null, endpoints: [endpoint] }
 const twoKeys: Endpoint = {
   ...endpoint,
-  keys: [...endpoint.keys, { id: 'k2', label: 'backup', enabled: true, masked: 'sk-b****1234', readable: true }],
+  keys: [
+    ...endpoint.keys,
+    {
+      id: 'k2',
+      label: 'backup',
+      enabled: true,
+      masked: 'sk-b****1234',
+      readable: true,
+      exhaustedUntil: null,
+      exhaustedReason: null,
+    },
+  ],
 }
 const model = {
   name: null,
@@ -295,6 +317,35 @@ describe('ProvidersSettings', () => {
     await waitFor(() => expect(saveKey).toHaveBeenCalledWith({ endpointId: 'e1', id: 'k2', enabled: false }))
   })
 
+  it('offers the key strategy only when the host stores it, and saves the chosen strategy', async () => {
+    setup()
+    await screen.findByRole('button', { name: 'Manage API keys' })
+    expect(screen.queryByLabelText('Key use')).toBeNull()
+    cleanup()
+    setup({ keyStrategies: true })
+    expect((await screen.findByLabelText('Key use')).textContent).toContain('Rotate')
+    const draft = toDraft({ ...stored, endpoints: [{ ...endpoint, keyStrategy: 'fill_first' }] })
+    expect(toSave(draft).endpoints[0]).toMatchObject({ id: 'e1', keyStrategy: 'fill_first' })
+  })
+
+  it('shows a set-aside key with its recovery time and restores it', async () => {
+    const later = Date.now() + 3_600_000
+    const backup = twoKeys.keys[1]
+    if (!backup) throw new Error('missing key')
+    const paused: Endpoint = {
+      ...twoKeys,
+      keyStrategy: 'fill_first',
+      keys: [twoKeys.keys[0] ?? backup, { ...backup, exhaustedUntil: later, exhaustedReason: 'HTTP 429' }],
+    }
+    const saveKey = vi.fn(() => Promise.resolve([{ ...stored, endpoints: [twoKeys] }]))
+    setup({ saveKey, keyStrategies: true }, { ...stored, endpoints: [paused] })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Manage API keys' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    expect(dialog.getByText(/^Paused until .* · HTTP 429$/)).toBeTruthy()
+    await fireEvent.click(dialog.getByRole('button', { name: 'Restore' }))
+    await waitFor(() => expect(saveKey).toHaveBeenCalledWith({ endpointId: 'e1', id: 'k2', restore: true }))
+  })
+
   it('commits a changed address on blur and rejects an invalid one without a request', async () => {
     const { saves } = setup()
     const url = await screen.findByRole('textbox', { name: 'API URL' })
@@ -525,7 +576,15 @@ describe('draft helpers', () => {
   })
 
   it('picks the first enabled key as primary', () => {
-    const k1 = { id: 'k1', label: '', enabled: false, masked: 'sk-a****wxyz', readable: true }
+    const k1 = {
+      id: 'k1',
+      label: '',
+      enabled: false,
+      masked: 'sk-a****wxyz',
+      readable: true,
+      exhaustedUntil: null,
+      exhaustedReason: null,
+    }
     const k2 = { ...k1, id: 'k2', enabled: true }
     expect(primaryKey([k1, k2])?.id).toBe('k2')
     expect(primaryKey([k1])?.id).toBe('k1')

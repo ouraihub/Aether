@@ -23,4 +23,12 @@ masked: string | null,
 /**
  * `false` when the ciphertext cannot be decrypted (e.g. another Windows user).
  */
-readable: boolean, };
+readable: boolean, 
+/**
+ * Unix milliseconds until which `FillFirst` skips this key; `None` = usable.
+ */
+exhaustedUntil: number | null, 
+/**
+ * Why the key was set aside, e.g. `HTTP 429`; `None` when usable.
+ */
+exhaustedReason: string | null, };

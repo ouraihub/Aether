@@ -5,6 +5,7 @@ import {
   isKitClientError,
   type Endpoint,
   type EndpointKey,
+  type KeyStrategy,
   type EndpointSave,
   type Model,
   type ModelSave,
@@ -21,6 +22,7 @@ export interface EndpointDraft {
   slug: string
   baseUrl: string
   protocol: Protocol
+  keyStrategy: KeyStrategy
   /** `null` = paint at `baseUrl` (docs/36 §3.4). */
   imageBaseUrl: string | null
   /** `null` = edit at `baseUrl` (docs/37 §2). */
@@ -48,6 +50,7 @@ export function toDraft(provider: Provider): ProviderDraft {
       slug: saved.slug,
       baseUrl: saved.baseUrl,
       protocol: saved.protocol,
+      keyStrategy: saved.keyStrategy,
       imageBaseUrl: saved.imageBaseUrl,
       imageEditBaseUrl: saved.imageEditBaseUrl,
       headers: saved.headers,
@@ -62,6 +65,7 @@ export function newEndpoint(taken: readonly EndpointDraft[]): EndpointDraft {
     slug: nextSlug(taken),
     baseUrl: '',
     protocol: 'openai-chat',
+    keyStrategy: 'round_robin',
     imageBaseUrl: null,
     imageEditBaseUrl: null,
     headers: {},
@@ -111,6 +115,7 @@ export function toSave(draft: ProviderDraft): ProviderSave {
       slug: e.slug.trim(),
       baseUrl: e.baseUrl.trim(),
       protocol: e.protocol,
+      keyStrategy: e.keyStrategy,
       imageBaseUrl: e.imageBaseUrl?.trim() || null,
       imageEditBaseUrl: e.imageEditBaseUrl?.trim() || null,
       headers: e.headers,
