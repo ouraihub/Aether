@@ -49,6 +49,9 @@
   })
   const enabled = $derived(endpoint.keys.filter((k) => k.enabled).length)
   const name = (key: EndpointKey) => key.label || maskedText(key, t)
+  /** Set aside by fill-first and not yet recovered; the host clears it lazily, so the time decides. */
+  const paused = (key: EndpointKey) => key.exhaustedUntil !== null && key.exhaustedUntil > Date.now()
+  const until = (ms: number) => new Date(ms).toLocaleString(i18n.locale, { dateStyle: 'short', timeStyle: 'short' })
 
   async function run(action: (port: ProvidersPort) => Promise<Provider[]>): Promise<boolean> {
     if (!ports.providers || busy) return false
@@ -213,7 +216,20 @@
               >
                 {#if key.label}<span class="truncate text-sm">{key.label}</span>{/if}
                 <span class="truncate font-mono text-xs text-muted-foreground">{maskedText(key, t)}</span>
+                {#if paused(key) && key.exhaustedUntil !== null}<span class="text-warning truncate text-xs"
+                    >{t('providers.key_exhausted', { time: until(key.exhaustedUntil) })}{key.exhaustedReason
+                      ? ` · ${key.exhaustedReason}`
+                      : ''}</span
+                  >{/if}
               </button>
+              {#if paused(key)}<Button
+                  variant="outline"
+                  size="xs"
+                  disabled={busy}
+                  onclick={() =>
+                    void run((port) => port.saveKey({ endpointId: endpoint.id, id: key.id, restore: true }))}
+                  >{t('providers.key_restore')}</Button
+                >{/if}
               <Button
                 variant="ghost"
                 size="icon-xs"

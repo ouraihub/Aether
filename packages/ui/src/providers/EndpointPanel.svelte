@@ -22,7 +22,7 @@
   import CopyInput from '../CopyInput.svelte'
   import * as Select from '#lib/components/ui/select/index.js'
   import { getKitContext } from '../context'
-  import type { Model, Provider } from '../ports'
+  import type { KeyStrategy, Model, Provider } from '../ports'
   import { cn } from '../utils'
   import { groupKey, keyError, maskedText, probeUrl, validUrl, type EndpointDraft } from './draft'
   import ModelSettingsDialog from './ModelSettingsDialog.svelte'
@@ -229,6 +229,36 @@
       </p>
     {/if}
   </Field.Field>
+
+  {#if ports.providers?.keyStrategies}
+    <Field.Field class="gap-2">
+      <Field.Label for="kit-endpoint-key-strategy">{t('providers.key_strategy')}</Field.Label>
+      <Select.Root
+        type="single"
+        value={endpoint.keyStrategy}
+        onValueChange={(value) => {
+          if (value === endpoint.keyStrategy) return
+          endpoint.keyStrategy = value as KeyStrategy
+          oncommit()
+        }}
+      >
+        <Select.Trigger id="kit-endpoint-key-strategy" class="w-full sm:w-64"
+          >{t(`providers.key_strategy_${endpoint.keyStrategy}`)}</Select.Trigger
+        >
+        <Select.Content>
+          <Select.Group>
+            {#each ['round_robin', 'fill_first'] as const as strategy (strategy)}<Select.Item
+                value={strategy}
+                label={t(`providers.key_strategy_${strategy}`)}
+              />{/each}
+          </Select.Group>
+        </Select.Content>
+      </Select.Root>
+      <Field.Description class="text-kit-xs"
+        >{t(`providers.key_strategy_${endpoint.keyStrategy}_desc`)}</Field.Description
+      >
+    </Field.Field>
+  {/if}
 
   <Field.Field class="gap-2">
     <div class="flex items-center gap-2">

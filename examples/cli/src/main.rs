@@ -101,6 +101,7 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
             slug: "main".to_owned(),
             base_url,
             protocol,
+            key_strategy: None,
             models: vec![ModelSave {
                 id: model_id.clone(),
                 model_type: ModelType::Chat,
@@ -136,6 +137,7 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
             key: Some(key),
             label: None,
             enabled: None,
+            restore: None,
         })?;
     }
     let connection = store.resolve(&ModelRef {

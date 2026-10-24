@@ -15,8 +15,8 @@ use rusqlite::{Connection as Db, OptionalExtension, params};
 use zeroize::Zeroizing;
 
 use crate::dto::{
-    Endpoint, EndpointKey, EndpointKeySave, EndpointSave, Model, ModelFilter, ModelOption,
-    ModelRef, ModelType, Provider, ProviderSave, TypeSource,
+    Endpoint, EndpointKey, EndpointKeySave, EndpointSave, KeyStrategy, Model, ModelFilter,
+    ModelOption, ModelRef, ModelType, Provider, ProviderSave, TypeSource,
 };
 use crate::{api_base, infer_reasoning};
 
@@ -1023,6 +1023,9 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
             enabled: row.get(3)?,
             readable: masked.is_some(),
             masked,
+            // ponytail: desktop keeps round-robin only and never sets keys aside; persist both when the desktop relay lands.
+            exhausted_until: None,
+            exhausted_reason: None,
         });
     }
     let mut endpoints: HashMap<String, Vec<Endpoint>> = HashMap::new();
@@ -1036,6 +1039,7 @@ fn list(db: &Db) -> Result<Vec<Provider>, KitError> {
             slug: row.get(2)?,
             protocol: parse_protocol(&protocol)?,
             keys: keys.remove(&id).unwrap_or_default(),
+            key_strategy: KeyStrategy::RoundRobin,
             probe_url: format!("{}/models", api_base(&base_url)),
             models: models.remove(&id).unwrap_or_default(),
             image_base_url: row.get(5)?,

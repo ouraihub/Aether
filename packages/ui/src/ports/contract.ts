@@ -61,6 +61,8 @@ export interface ProviderPreset {
 export interface ProvidersPort {
   /** Browser asks for the current password; desktop uses its local credential boundary. */
   readonly revealNeedsPassword: boolean
+  /** Host stores `keyStrategy` and key set-aside state (web); `false` = rotation only, fields ignored. */
+  readonly keyStrategies: boolean
   list(): Promise<Provider[]>
   setEnabled(id: string, enabled: boolean): Promise<Provider[]>
   save(provider: ProviderSave): Promise<Provider[]>
