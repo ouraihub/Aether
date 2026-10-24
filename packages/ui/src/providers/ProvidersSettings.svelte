@@ -21,7 +21,7 @@
   import { isKitClientError, type ProbeResult, type Provider, type ProviderPreset } from '../ports'
   import { cn } from '../utils'
   import { adopt, newEndpoint, probeTarget, savable, toDraft, toSave, validateModel, type ProviderDraft } from './draft'
-  import EndpointPanel, { type CheckState } from './EndpointPanel.svelte'
+  import EndpointPanel, { type CheckOutcome, type CheckState } from './EndpointPanel.svelte'
   import ModelPickerDialog from './ModelPickerDialog.svelte'
   import { providersRevision, settingsTarget } from './revision.svelte'
 
@@ -293,9 +293,9 @@
     if (wasSaved) void commit()
   }
 
-  function outcome(result: ProbeResult): { state: 'ok'; count: number } | { state: 'error'; message: string } {
+  function outcome(result: ProbeResult): CheckOutcome {
     const e = result.error
-    if (!e) return { state: 'ok', count: result.models.length }
+    if (!e) return { state: 'ok', count: result.models.length, suggested: result.suggestedProtocol }
     const message = [
       t(`providers.probe.${e.kind}`, { status: e.status ?? '' }),
       e.hint ? t(e.hint) : '',

@@ -213,7 +213,7 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       removeKey: () => Promise.resolve([]),
       remove: () => Promise.resolve([]),
       modelOptions: () => Promise.resolve([]),
-      probe: () => Promise.resolve({ probeUrl: '', models: [], error: null }),
+      probe: () => Promise.resolve({ probeUrl: '', models: [], error: null, suggestedProtocol: null }),
       ...options.providers,
     },
     chat: {

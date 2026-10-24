@@ -81,7 +81,7 @@ interface EndpointKeySave { endpointId: string; id?: string /* 缺省 = 新增 *
 interface ProviderSave { id?: string; name: string; enabled?: boolean /* 缺省 = 保持；新建默认 true */; endpoints: EndpointSave[] }
 interface ModelRef { endpointId: string; modelId: string }
 interface ModelOption extends ModelRef { label: string /* "服务商 · 线路 · 模型" */; modelType: ModelType; supportsTools: boolean | null; reasoning: ReasoningConfig | null; nativeWebSearch: boolean }
-interface ProbeResult { probeUrl: string; models: (Model & { group: string | null })[]; error: ProbeError | null }
+interface ProbeResult { probeUrl: string; models: (Model & { group: string | null })[]; error: ProbeError | null; suggestedProtocol: Protocol | null }
 interface ProbeError { kind: 'missing_key' | 'unauthorized' | 'not_found' | 'rate_limited' | 'status' | 'timeout' | 'connect' | 'blocked_address' | 'invalid_body';
   status: number | null; message: string | null /* 上游原文，已打码，≤300 字符 */; hint: string | null /* i18n key */ }
 ```
@@ -135,6 +135,7 @@ pub fn api_base(base_url: &str) -> String;  // 去尾 '/'，未以 /v1 结尾则
 - 解析 `{data:[{id}]}`、`{models:[{id}|{name}]}`、`[string]`；去重排序；空列表 → `invalid_body`。
 - 错误：无密钥且非回环 → `missing_key`（不发请求）；401/403 `unauthorized`；404 `not_found`；429 `rate_limited`；其他非 2xx `status`；超时 `timeout`；DNS/连接/TLS `connect`；JSON 失败 `invalid_body`。
 - `hint`：404 且地址未含 `/v1` → `providers.hint.missing_v1`；`connect` 且主机为 IP → `providers.hint.check_network`；`unauthorized` → `providers.hint.check_key`。
+- 协议建议：列表成功、当前协议不是 `anthropic-messages`、且列出了 `claude` 组模型时，用列表里第一个 claude 模型和本次成功的密钥再发 `POST api_base + "/messages"`，请求体 `messages: []`。返回 400/422 说明这条线路支持 Messages：中转先校验 messages 再路由，不调用模型、不计 token，此时 `suggestedProtocol = "anthropic-messages"`；404/401/5xx/网络失败一律为 `null`。模型 id 必须是列表里真实存在的，new-api 一类中转会先按模型找渠道，假 id 只会返回 503。UI 在检测结果下方给出「改用 Anthropic 协议」，点一下改协议并保存；Claude 的图片和思考在 OpenAI 兼容入口常被中转丢弃。
 - 探测不写库；用户在 UI 挑选后随 `save` 落库。可取消。
 
 ## 6. 推断

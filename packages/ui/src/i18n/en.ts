@@ -385,6 +385,9 @@ export const en: Messages = {
   'providers.headers_too_many': 'At most 20 headers',
   'providers.check': 'Check',
   'providers.check_ok': 'Connected · {count} models available',
+  'providers.suggest_protocol':
+    'This endpoint also speaks Anthropic Messages; Claude images and thinking work natively there',
+  'providers.suggest_protocol_apply': 'Use Anthropic protocol',
   'providers.sync_models': 'Sync models',
   'providers.add_model_manual': 'Add model',
   'providers.model_id': 'Model ID',

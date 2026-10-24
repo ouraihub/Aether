@@ -136,6 +136,84 @@ async fn parses_the_three_shapes_sorted_and_deduplicated() {
     }
 }
 
+/// A loopback upstream: `GET …/models` lists `listed`, `POST …/messages` answers `messages`.
+async fn relay(listed: &'static str, messages: &'static str) -> (String, Seen) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    let seen = Seen::default();
+    let log = Arc::clone(&seen);
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut head = Vec::new();
+            let mut buf = [0_u8; 1024];
+            while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                match socket.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => head.extend_from_slice(&buf[..n]),
+                }
+            }
+            let head = String::from_utf8_lossy(&head).to_lowercase();
+            let reply = if head.starts_with("post /v1/messages ") {
+                http(messages, r#"{"error":{"type":"invalid_request_error"}}"#)
+            } else {
+                http("200 OK", listed)
+            };
+            log.lock().await.push(head);
+            let _ = socket.write_all(&reply.unwrap()).await;
+            let _ = socket.shutdown().await;
+        }
+    });
+    (base, seen)
+}
+
+#[tokio::test]
+async fn suggests_messages_only_when_claude_relay_answers_there() {
+    let (_dir, store) = store();
+    let claude = r#"{"data":[{"id":"claude-sonnet-5-5"},{"id":"gpt-6-sol"}]}"#;
+    // Relay validates the empty request on /messages: switch is suggested, with the key sent.
+    let endpoint = keyed(&store, "https://unused.example.com", &[KEY]);
+    for status in ["400 Bad Request", "422 Unprocessable Entity"] {
+        let (base, seen) = relay(claude, status).await;
+        let result = probe(&store, draft(&base, Protocol::OpenaiChat, Some(&endpoint))).await;
+        assert_eq!(
+            result.suggested_protocol,
+            Some(Protocol::AnthropicMessages),
+            "{status}"
+        );
+        let seen = seen.lock().await;
+        let post = seen
+            .iter()
+            .find(|h| h.starts_with("post /v1/messages "))
+            .unwrap();
+        assert!(
+            post.contains(&format!("x-api-key: {}", KEY.to_lowercase())),
+            "{post}"
+        );
+        assert!(post.contains("anthropic-version: 2023-06-01"), "{post}");
+    }
+    // No /messages route, or the key is refused there: nothing to suggest.
+    for status in [
+        "404 Not Found",
+        "401 Unauthorized",
+        "500 Internal Server Error",
+    ] {
+        let (base, _) = relay(claude, status).await;
+        let result = probe(&store, draft(&base, Protocol::OpenaiChat, None)).await;
+        assert_eq!(result.error, None);
+        assert_eq!(result.suggested_protocol, None, "{status}");
+    }
+    // Already on Messages, or no claude model listed: /messages is never asked.
+    for (listed, protocol) in [
+        (claude, Protocol::AnthropicMessages),
+        (r#"{"data":[{"id":"gpt-6-sol"}]}"#, Protocol::OpenaiChat),
+    ] {
+        let (base, seen) = relay(listed, "400 Bad Request").await;
+        let result = probe(&store, draft(&base, protocol, None)).await;
+        assert_eq!(result.suggested_protocol, None);
+        assert_eq!(seen.lock().await.len(), 1, "only GET /models");
+    }
+}
+
 #[tokio::test]
 async fn maps_upstream_statuses_with_hints_and_masked_text() {
     let (_dir, store) = store();

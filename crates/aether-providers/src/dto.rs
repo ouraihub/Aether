@@ -489,4 +489,7 @@ pub struct ProbeResult {
     pub models: Vec<ProbedModel>,
     /// Set on failure.
     pub error: Option<ProbeError>,
+    /// `anthropic-messages` when listed `claude-*` models also answer on `/messages`
+    /// while the endpoint uses another protocol (images and thinking work natively there).
+    pub suggested_protocol: Option<Protocol>,
 }

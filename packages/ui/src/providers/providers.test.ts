@@ -95,6 +95,7 @@ function setup(
         Promise.resolve({
           probeUrl: endpoint.probeUrl,
           error: null,
+          suggestedProtocol: null,
           models: [
             { ...model, id: 'gpt-4o', group: 'gpt', modelType: 'chat', typeSource: 'inferred', reasoning: null },
             {
@@ -357,6 +358,23 @@ describe('ProvidersSettings', () => {
     await fireEvent.blur(url)
     await waitFor(() => expect(saves).toHaveLength(1))
     expect(saves[0]?.endpoints[0]).toMatchObject({ id: 'e1', baseUrl: 'https://api.example.com/v1' })
+  })
+
+  it('offers the suggested protocol after a check and saves the switch', async () => {
+    const probe = vi.fn(() =>
+      Promise.resolve({
+        probeUrl: endpoint.probeUrl,
+        error: null,
+        models: [],
+        suggestedProtocol: 'anthropic-messages' as const,
+      }),
+    )
+    const { saves } = setup({ probe })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Check' }))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Use Anthropic protocol' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0]?.endpoints[0]).toMatchObject({ id: 'e1', protocol: 'anthropic-messages' })
+    expect(screen.queryByRole('button', { name: 'Use Anthropic protocol' })).toBeNull()
   })
 
   it('keeps local edits and offers a retry when a save fails', async () => {

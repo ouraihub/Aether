@@ -22,7 +22,7 @@
   import CopyInput from '../CopyInput.svelte'
   import * as Select from '#lib/components/ui/select/index.js'
   import { getKitContext } from '../context'
-  import type { KeyStrategy, Model, Provider } from '../ports'
+  import type { KeyStrategy, Model, Protocol, Provider } from '../ports'
   import { cn } from '../utils'
   import { groupKey, keyError, maskedText, probeUrl, validUrl, type EndpointDraft } from './draft'
   import ModelSettingsDialog from './ModelSettingsDialog.svelte'
@@ -30,12 +30,13 @@
   import { settingsTarget } from './revision.svelte'
   import SecretInput from './SecretInput.svelte'
 
-  type Outcome = { state: 'ok'; count: number } | { state: 'error'; message: string }
+  export type CheckOutcome =
+    { state: 'ok'; count: number; suggested: Protocol | null } | { state: 'error'; message: string }
   export type CheckState =
     | { state: 'running' }
-    | Outcome
+    | CheckOutcome
     /** One probe per enabled key when there are at least two (docs/34 §5.3). */
-    | { state: 'keys'; results: { keyId: string; value: Outcome }[] }
+    | { state: 'keys'; results: { keyId: string; value: CheckOutcome }[] }
 
   let {
     endpoint = $bindable(),
@@ -173,6 +174,13 @@
     newModelId = ''
     addOpen = false
   }
+  /** First probe suggestion: the whole check or any key's (all keys share one relay). */
+  const suggested = $derived.by((): Protocol | null => {
+    if (check?.state === 'ok') return check.suggested
+    if (check?.state !== 'keys') return null
+    for (const { value } of check.results) if (value.state === 'ok' && value.suggested) return value.suggested
+    return null
+  })
 </script>
 
 <div class="flex min-w-0 flex-col gap-5">
@@ -227,6 +235,21 @@
       >
         {check.state === 'ok' ? t('providers.check_ok', { count: check.count }) : check.message}
       </p>
+    {/if}
+    {#if suggested && suggested !== endpoint.protocol}
+      {@const next = suggested}
+      <div role="status" class="bg-info/10 flex min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-kit-xs">
+        <span class="min-w-0 flex-1">{t('providers.suggest_protocol')}</span>
+        <Button
+          variant="outline"
+          size="sm"
+          class="shrink-0"
+          onclick={() => {
+            endpoint.protocol = next
+            oncommit()
+          }}>{t('providers.suggest_protocol_apply')}</Button
+        >
+      </div>
     {/if}
   </Field.Field>
 

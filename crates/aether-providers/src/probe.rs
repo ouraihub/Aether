@@ -7,7 +7,7 @@ use aether_support::connection::custom_headers;
 use aether_support::error::upstream_excerpt;
 use aether_support::net::{self, AddressPolicy};
 use aether_support::{KitError, Protocol};
-use reqwest::header::{AUTHORIZATION, HeaderValue};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
@@ -65,7 +65,9 @@ impl Store {
         let known: Vec<&str> = keys.iter().map(|key| key.as_str()).collect();
         let attempts = keys.len().max(1);
         let mut outcome = Ok(Vec::new());
+        let mut used = 0;
         for attempt in 0..attempts {
+            used = attempt;
             outcome = cancel
                 .run_until_cancelled(fetch(
                     &probe_url,
@@ -86,12 +88,60 @@ impl Store {
             Ok(models) => (models, None),
             Err(error) => (Vec::new(), Some(error)),
         };
+        // Relays resolve the model before validating the body, so ask with a listed one.
+        let claude = models
+            .iter()
+            .find(|m| m.group.as_deref() == Some("claude"))
+            .map(|m| m.model.id.as_str());
+        let suggested_protocol = match claude {
+            Some(model) if protocol != Protocol::AnthropicMessages => cancel
+                .run_until_cancelled(speaks_messages(&base_url, model, keys.get(used), &headers))
+                .await
+                .ok_or_else(KitError::cancelled)?
+                .then_some(Protocol::AnthropicMessages),
+            _ => None,
+        };
         Ok(ProbeResult {
             probe_url,
             models,
             error,
+            suggested_protocol,
         })
     }
+}
+
+/// Whether `POST <api_base>/messages` exists for this key: an empty `messages` list is
+/// rejected as invalid (400/422) before any model runs, so no tokens are spent.
+async fn speaks_messages(
+    base_url: &str,
+    model: &str,
+    key: Option<&Zeroizing<String>>,
+    headers: &[(String, String)],
+) -> bool {
+    let policy = AddressPolicy::default();
+    let Ok(url) = net::check_url(&format!("{}/messages", api_base(base_url)), &policy) else {
+        return false;
+    };
+    let Ok(client) = net::client(policy, CONNECT_TIMEOUT) else {
+        return false;
+    };
+    let body = serde_json::json!({ "model": model, "max_tokens": 1, "messages": [] });
+    let mut request = custom_headers(client.post(url).timeout(TOTAL_TIMEOUT), headers)
+        .header("anthropic-version", "2023-06-01")
+        .header(CONTENT_TYPE, "application/json")
+        .body(body.to_string());
+    if let Some(key) = key {
+        let (Ok(bearer), Ok(api_key)) = (
+            sensitive(&Zeroizing::new(format!("Bearer {}", key.as_str()))),
+            sensitive(key),
+        ) else {
+            return false;
+        };
+        request = request
+            .header(AUTHORIZATION, bearer)
+            .header("x-api-key", api_key);
+    }
+    matches!(request.send().await, Ok(r) if matches!(r.status().as_u16(), 400 | 422))
 }
 
 async fn fetch(

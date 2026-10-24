@@ -376,6 +376,8 @@ export const zhCN: Messages = {
   'providers.headers_too_many': '最多 20 个请求头',
   'providers.check': '检测',
   'providers.check_ok': '连接正常 · 可用 {count} 个模型',
+  'providers.suggest_protocol': '这条线路支持 Anthropic 原生协议（Messages），Claude 模型的图片和思考走原生格式更稳定',
+  'providers.suggest_protocol_apply': '改用 Anthropic 协议',
   'providers.sync_models': '同步模型',
   'providers.add_model_manual': '添加模型',
   'providers.model_id': '模型 ID',
