@@ -31,9 +31,10 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+      - run: pnpm install --frozen-lockfile
       - name: Enforce runner compiler ownership
         shell: cmd
-        run: call scripts\msvc-env.bat
+        run: call node_modules\@ouraihub\msvc-kit\msvc-env.bat
       # Every check lives in scripts/ci.mjs; locally run the same `pnpm run ci` before pushing.
       - run: pnpm run ci
 
