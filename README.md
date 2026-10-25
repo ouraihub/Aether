@@ -19,11 +19,11 @@ A Rust + Tauri 2 framework for AI desktop apps with model providers, streaming c
 
 ```bat
 pnpm install
-node_modules\@ouraihub\msvc-kit\cargo-msvc.bat check --workspace --all-features
+node_modules\@ouraihub\desktop-kit\msvc\cargo-msvc.bat check --workspace --all-features
 pnpm run check
 ```
 
-本地构建固定使用便携 MSVC（由 [msvc-kit](https://github.com/ouraihub/msvc-kit) 提供；默认 `D:\Applications\msvc-portable\msvc`，可用 `PORTABLE_MSVC_ROOT` 覆盖；首次运行 `node_modules\@ouraihub\msvc-kit\setup-msvc.bat` 安装）。
+本地构建固定使用便携 MSVC（由 [desktop-kit](https://github.com/ouraihub/desktop-kit) 提供；默认 `D:\Applications\msvc-portable\msvc`，可用 `PORTABLE_MSVC_ROOT` 覆盖；首次运行 `node_modules\@ouraihub\desktop-kit\msvc\setup-msvc.bat` 安装）。
 
 ## macOS / Linux 凭据与完整检查
 

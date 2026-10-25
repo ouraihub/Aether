@@ -52,7 +52,7 @@ if errorlevel 2 goto busy
 if errorlevel 1 exit /b 1
 echo.
 echo Done. Next build recompiles from scratch:
-echo   node_modules\@ouraihub\msvc-kit\cargo-msvc.bat check --workspace --all-features
+echo   node_modules\@ouraihub\desktop-kit\msvc\cargo-msvc.bat check --workspace --all-features
 goto end
 
 :usage
