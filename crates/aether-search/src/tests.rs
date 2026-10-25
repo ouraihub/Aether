@@ -374,6 +374,7 @@ async fn fetch_retries_keys_but_network_and_cancel_do_not() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (no_retry_tx, no_retry_rx) = tokio::sync::oneshot::channel();
+    let (sent_tx, sent_rx) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         for (status, key) in [(403, "one-key"), (200, "two-key")] {
             let (mut stream, _) = listener.accept().await.unwrap();
@@ -399,6 +400,7 @@ async fn fetch_retries_keys_but_network_and_cancel_do_not() {
         no_retry_tx.send(()).unwrap();
         let (mut stream, _) = listener.accept().await.unwrap();
         assert!(stream.read(&mut bytes).await.unwrap() > 0);
+        sent_tx.send(()).unwrap();
         // Wait for cancellation to close the request, then ensure no next key was sent.
         assert_eq!(stream.read(&mut bytes).await.unwrap(), 0);
         assert!(
@@ -432,14 +434,12 @@ async fn fetch_retries_keys_but_network_and_cancel_do_not() {
         KitErrorCode::Network
     );
     no_retry_rx.await.unwrap();
-    assert!(
-        timeout(
-            Duration::from_millis(300),
-            store.fetch("https://example.com")
-        )
-        .await
-        .is_err()
-    );
+    // Cancel only once the request reached the server: a wall-clock budget also covers the
+    // keyring read, which on a cold Linux Secret Service can outlast it before any byte is sent.
+    tokio::select! {
+        _ = store.fetch("https://example.com") => panic!("fetch finished instead of being cancelled"),
+        _ = sent_rx => {}
+    }
     server.await.unwrap();
 }
 
