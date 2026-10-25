@@ -1,5 +1,7 @@
 # aether
 
+[![CI](https://github.com/ouraihub/Aether/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ouraihub/Aether/actions/workflows/ci.yml)
+
 A Rust + Tauri 2 framework for AI desktop apps with model providers, streaming chat, tool approval, Skills, MCP client/server, observability, and Svelte UI.
 
 - 设计与任务：`docs/00-概要设计.md` → 各详细设计 → `docs/90-开发任务清单.md`（开发唯一入口）。
