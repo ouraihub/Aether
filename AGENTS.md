@@ -27,8 +27,8 @@
 
 ## 5. Windows 环境
 
-- Rust 命令一律通过 `node_modules\@ouraihub\msvc-kit\cargo-msvc.bat` 运行（先 `pnpm install`）。Git 自带的 `link.exe` 会挡住 MSVC 的链接器。
-- 在 Git Bash 里运行时，用 `cmd.exe /d /c "call node_modules\@ouraihub\msvc-kit\cargo-msvc.bat test --workspace"`。
+- Rust 命令一律通过 `node_modules\@ouraihub\desktop-kit\msvc\cargo-msvc.bat` 运行（先 `pnpm install`）。Git 自带的 `link.exe` 会挡住 MSVC 的链接器。
+- 在 Git Bash 里运行时，用 `cmd.exe /d /c "call node_modules\@ouraihub\desktop-kit\msvc\cargo-msvc.bat test --workspace"`。
 
 ## 6. 提交信息和代码注释
 

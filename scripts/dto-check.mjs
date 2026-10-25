@@ -15,7 +15,7 @@ const fresh = mkdtempSync(join(tmpdir(), 'kit-dto-'))
 const test = ['test', '--workspace', '--all-features', 'export_bindings']
 const [command, args] =
   process.platform === 'win32'
-    ? ['cmd.exe', ['/d', '/c', 'node_modules\\@ouraihub\\msvc-kit\\cargo-msvc.bat', ...test]]
+    ? ['cmd.exe', ['/d', '/c', 'node_modules\\@ouraihub\\desktop-kit\\msvc\\cargo-msvc.bat', ...test]]
     : ['cargo', test]
 
 try {

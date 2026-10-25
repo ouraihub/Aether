@@ -169,9 +169,9 @@ importers:
       '@eslint/js':
         specifier: 10.0.1
         version: 10.0.1(eslint@10.11.0(jiti@2.7.0))
-      '@ouraihub/msvc-kit':
-        specifier: github:ouraihub/msvc-kit#60cfbc1a0a463df647aa62d02a9449165903a492
-        version: https://codeload.github.com/ouraihub/msvc-kit/tar.gz/60cfbc1a0a463df647aa62d02a9449165903a492
+      '@ouraihub/desktop-kit':
+        specifier: github:ouraihub/desktop-kit#c7c8281885dc0e88293abda4f67fd5570dee37db
+        version: https://codeload.github.com/ouraihub/desktop-kit/tar.gz/c7c8281885dc0e88293abda4f67fd5570dee37db
       '@ouraihub/release-kit':
         specifier: github:ouraihub/release-kit#f5703e5ee7c348e91d22178a3ba1a106da5fa0aa
         version: https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa
@@ -539,9 +539,11 @@ packages:
       '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
       '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
 
-  '@ouraihub/msvc-kit@https://codeload.github.com/ouraihub/msvc-kit/tar.gz/60cfbc1a0a463df647aa62d02a9449165903a492':
-    resolution: {gitHosted: true, integrity: sha512-pjqEt1XpiH5bb2E5r1QzU/o6cuC6VHFAHJfiMwSzTdgs6+Si5xRHLMlR17sFPaHVzTdqi9WuGbDMzHDrFuN61Q==, tarball: https://codeload.github.com/ouraihub/msvc-kit/tar.gz/60cfbc1a0a463df647aa62d02a9449165903a492}
-    version: 0.1.0
+  '@ouraihub/desktop-kit@https://codeload.github.com/ouraihub/desktop-kit/tar.gz/c7c8281885dc0e88293abda4f67fd5570dee37db':
+    resolution: {gitHosted: true, integrity: sha512-E606ivfsSZgRFKNn+zTW24vsxkWATzScZdlxUcMCyj4JK/5RxwdijUgS0JosBOxyZLynnSgLvy87wfhQSwOVKw==, tarball: https://codeload.github.com/ouraihub/desktop-kit/tar.gz/c7c8281885dc0e88293abda4f67fd5570dee37db}
+    version: 0.2.0
+    engines: {node: '>=22.18'}
+    hasBin: true
 
   '@ouraihub/release-kit@https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa':
     resolution: {gitHosted: true, integrity: sha512-3EwXtN6QBYjuReIVtZljVO7OhCsk9u1TRqf4HIoXCqWAmxN3+pKQx56wZSvp4rr3vJB8BeCbxilTA0JqVwAEMQ==, tarball: https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa}
@@ -2281,7 +2283,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
-  '@ouraihub/msvc-kit@https://codeload.github.com/ouraihub/msvc-kit/tar.gz/60cfbc1a0a463df647aa62d02a9449165903a492': {}
+  '@ouraihub/desktop-kit@https://codeload.github.com/ouraihub/desktop-kit/tar.gz/c7c8281885dc0e88293abda4f67fd5570dee37db': {}
 
   '@ouraihub/release-kit@https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa': {}
 
