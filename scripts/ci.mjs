@@ -4,8 +4,9 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-// Git for Windows ships a link.exe that shadows the MSVC linker; cargo goes through the wrapper.
-const cargo = (args) => (process.platform === 'win32' ? `scripts\\cargo-msvc.bat ${args}` : `cargo ${args}`)
+// Git for Windows ships a link.exe that shadows the MSVC linker; cargo goes through msvc-kit.
+const cargo = (args) =>
+  process.platform === 'win32' ? `node_modules\\@ouraihub\\msvc-kit\\cargo-msvc.bat ${args}` : `cargo ${args}`
 
 const steps = [
   'pnpm exec release-kit check',

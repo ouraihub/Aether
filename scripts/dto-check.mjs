@@ -14,7 +14,9 @@ const fresh = mkdtempSync(join(tmpdir(), 'kit-dto-'))
 // An explicit TS_RS_EXPORT_DIR wins over .cargo/config.toml [env] (no `force`).
 const test = ['test', '--workspace', '--all-features', 'export_bindings']
 const [command, args] =
-  process.platform === 'win32' ? ['cmd.exe', ['/d', '/c', 'scripts\\cargo-msvc.bat', ...test]] : ['cargo', test]
+  process.platform === 'win32'
+    ? ['cmd.exe', ['/d', '/c', 'node_modules\\@ouraihub\\msvc-kit\\cargo-msvc.bat', ...test]]
+    : ['cargo', test]
 
 try {
   execFileSync(command, args, {

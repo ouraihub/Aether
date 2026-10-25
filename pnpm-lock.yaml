@@ -169,6 +169,9 @@ importers:
       '@eslint/js':
         specifier: 10.0.1
         version: 10.0.1(eslint@10.11.0(jiti@2.7.0))
+      '@ouraihub/msvc-kit':
+        specifier: github:ouraihub/msvc-kit#60cfbc1a0a463df647aa62d02a9449165903a492
+        version: https://codeload.github.com/ouraihub/msvc-kit/tar.gz/60cfbc1a0a463df647aa62d02a9449165903a492
       '@ouraihub/release-kit':
         specifier: github:ouraihub/release-kit#f5703e5ee7c348e91d22178a3ba1a106da5fa0aa
         version: https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa
@@ -535,6 +538,10 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
       '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
+
+  '@ouraihub/msvc-kit@https://codeload.github.com/ouraihub/msvc-kit/tar.gz/60cfbc1a0a463df647aa62d02a9449165903a492':
+    resolution: {gitHosted: true, integrity: sha512-pjqEt1XpiH5bb2E5r1QzU/o6cuC6VHFAHJfiMwSzTdgs6+Si5xRHLMlR17sFPaHVzTdqi9WuGbDMzHDrFuN61Q==, tarball: https://codeload.github.com/ouraihub/msvc-kit/tar.gz/60cfbc1a0a463df647aa62d02a9449165903a492}
+    version: 0.1.0
 
   '@ouraihub/release-kit@https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa':
     resolution: {gitHosted: true, integrity: sha512-3EwXtN6QBYjuReIVtZljVO7OhCsk9u1TRqf4HIoXCqWAmxN3+pKQx56wZSvp4rr3vJB8BeCbxilTA0JqVwAEMQ==, tarball: https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa}
@@ -2273,6 +2280,8 @@ snapshots:
       '@emnapi/runtime': 1.10.0
       '@tybys/wasm-util': 0.10.4
     optional: true
+
+  '@ouraihub/msvc-kit@https://codeload.github.com/ouraihub/msvc-kit/tar.gz/60cfbc1a0a463df647aa62d02a9449165903a492': {}
 
   '@ouraihub/release-kit@https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa': {}
 

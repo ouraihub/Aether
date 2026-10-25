@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@ouraihub/msvc-kit": "github:ouraihub/msvc-kit#60cfbc1a0a463df647aa62d02a9449165903a492",
     "@ouraihub/release-kit": "github:ouraihub/release-kit#f5703e5ee7c348e91d22178a3ba1a106da5fa0aa",
     "eslint": "10.11.0",
     "eslint-plugin-import-x": "4.17.1",
