@@ -127,11 +127,22 @@ jobs:
           node-version: 24
           cache: pnpm
       - name: Install native desktop and Secret Service dependencies
+        timeout-minutes: 8
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential curl wget file libxdo-dev libssl-dev \
+          # The regional Azure mirror can sustain only tens of KB/s for WebKit.
+          sudo "$(command -v node)" --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+          const files = ['/etc/apt/sources.list', ...readdirSync('/etc/apt/sources.list.d').filter(name => /\.(list|sources)$/.test(name)).map(name => `/etc/apt/sources.list.d/${name}`)];
+          for (const file of files) {
+            const source = readFileSync(file, 'utf8');
+            const updated = source.replaceAll('azure.archive.ubuntu.com', 'archive.ubuntu.com');
+            if (updated !== source) writeFileSync(file, updated);
+          }
+          NODE
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update --error-on=any
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends build-essential curl wget file libxdo-dev libssl-dev \
             librsvg2-dev libayatana-appindicator3-dev libwebkit2gtk-4.1-dev patchelf \
-            libdbus-1-dev gnome-keyring dbus-x11 xvfb
+            libdbus-1-dev gnome-keyring dbus-x11 xvfb xauth
       - name: Install the pinned Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2

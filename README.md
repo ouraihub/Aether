@@ -36,6 +36,8 @@ Windows DPAPI 格式保持不变。macOS 使用用户 Keychain，Linux 使用已
 
 Linux 原生编译需 `libdbus-1-dev`，完整 Tauri workspace 另需 GTK/WebKitGTK 4.1、AppIndicator、OpenSSL 和打包工具（依赖清单见 `.github/workflows/ci.yml`，Ubuntu 22.04 基线）。在桌面已解锁的 Secret Service 会话中直接运行 `pnpm install --frozen-lockfile && pnpm run ci`；headless runner 用真实服务：
 
+Linux CI 的 apt 使用 Ubuntu 官方归档源而非 Azure 区域镜像，禁用推荐包并显式安装 `xauth`；安装步骤限时 8 分钟，HTTP(S) 无响应限时 30 秒。下载异常会失败而非消耗整个任务时限，不能当作平台检查已通过。
+
 ```sh
 dbus-run-session -- xvfb-run -a bash -euc '
   export XDG_RUNTIME_DIR="$(mktemp -d)"
