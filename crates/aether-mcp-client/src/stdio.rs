@@ -8,18 +8,15 @@ use std::process::Stdio;
 
 use aether_support::error::upstream_excerpt;
 use aether_support::{KitError, KitErrorCode};
+use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{ChildStdin, ChildStdout};
 
 use crate::protocol::{MAX_MESSAGE_BYTES, RpcError, Transport, find, too_large};
 
 /// stderr kept for the log summary; the rest is read and discarded.
 const MAX_STDERR_BYTES: usize = 64 * 1024;
-#[cfg(windows)]
-const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// What to start; validated when saved (docs/13 §4).
 pub(crate) struct Launch<'a> {
@@ -33,8 +30,9 @@ pub(crate) struct Launch<'a> {
 
 /// One running server process.
 pub(crate) struct StdioLink {
-    /// `None` once terminated.
-    child: Option<Child>,
+    /// The root inside its Job Object (Windows) or process group (Unix); `None` once
+    /// terminated.
+    child: Option<Box<dyn ChildWrapper>>,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     /// The line being read; kept when a read is dropped mid-way.
@@ -48,22 +46,30 @@ impl StdioLink {
     pub(crate) fn spawn(launch: &Launch<'_>, known: Vec<String>) -> Result<Self, KitError> {
         let env = child_env(std::env::vars_os(), launch.env);
         let program = resolve_program(launch.command, &env);
-        let mut command = Command::new(program);
-        command
-            .args(launch.args)
-            .env_clear()
-            .envs(env)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        if let Some(cwd) = launch.cwd {
-            command.current_dir(cwd);
-        }
+        let mut command = CommandWrap::with_new(program, |command| {
+            command
+                .args(launch.args)
+                .env_clear()
+                .envs(env)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            if let Some(cwd) = launch.cwd {
+                command.current_dir(cwd);
+            }
+        });
+        // Every descendant joins the root's Job Object or process group and stays there
+        // after the root exits, so the whole tree can still be ended. On Windows
+        // `KillOnDrop` also makes the job kill-on-close.
         #[cfg(windows)]
-        command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        command
+            .wrap(process_wrap::tokio::CreationFlags(
+                windows::Win32::System::Threading::CREATE_NO_WINDOW,
+            ))
+            .wrap(process_wrap::tokio::JobObject);
         #[cfg(unix)]
-        command.process_group(0);
+        command.wrap(process_wrap::tokio::ProcessGroup::leader());
+        command.wrap(KillOnDrop);
         let mut child = command.spawn().map_err(|error| {
             let kind = error.kind();
             if kind == ErrorKind::NotFound {
@@ -76,9 +82,11 @@ impl StdioLink {
                     .with_cause(error)
             }
         })?;
-        let (Some(stdin), Some(stdout), Some(stderr)) =
-            (child.stdin.take(), child.stdout.take(), child.stderr.take())
-        else {
+        let (Some(stdin), Some(stdout), Some(stderr)) = (
+            child.stdin().take(),
+            child.stdout().take(),
+            child.stderr().take(),
+        ) else {
             return Err(KitError::new(KitErrorCode::Internal, "child pipes missing"));
         };
         tokio::spawn(drain_stderr(
@@ -155,31 +163,24 @@ impl StdioLink {
         self.send(&reply).await
     }
 
-    /// Ends the process tree. The tree goes first: once the root is gone its children can
-    /// no longer be found. Runs on the runtime so dropping never blocks.
+    /// Ends the process tree, also when the root has already exited: the Job Object or
+    /// process group still holds every descendant. Reaping runs on the runtime so
+    /// dropping never blocks.
     fn terminate(&mut self) {
         self.alive = false;
         let Some(mut child) = self.child.take() else {
             return;
         };
-        // An exited root was reaped by `try_wait`; its pid may already belong to another
-        // process, so only a running root is used to find the tree.
-        if !matches!(child.try_wait(), Ok(None)) {
-            return;
+        if let Err(error) = child.start_kill() {
+            tracing::debug!(error = %error, "mcp.client.stdio_kill_tree_failed");
         }
-        let Some(pid) = child.id() else {
-            return;
-        };
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(async move {
-                if let Err(error) = kill_tree(pid).status().await {
-                    tracing::debug!(error = %error, "mcp.client.stdio_kill_tree_failed");
-                }
-                // Already gone after a successful tree kill; this also reaps it.
-                let _ = child.kill().await;
+                let _ = child.wait().await;
             });
         }
-        // Without a runtime `child` is dropped here and `kill_on_drop` ends the root.
+        // Without a runtime `child` is dropped here; the tree was already killed, and on
+        // Windows closing the kill-on-close job ends it too.
     }
 }
 
@@ -295,31 +296,6 @@ pub(crate) fn resolve_program(command: &str, env: &[(OsString, OsString)]) -> Os
 #[cfg(not(windows))]
 pub(crate) fn resolve_program(command: &str, _env: &[(OsString, OsString)]) -> OsString {
     command.into()
-}
-
-#[cfg(windows)]
-fn kill_tree(pid: u32) -> Command {
-    let mut command = Command::new("taskkill");
-    command
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .creation_flags(CREATE_NO_WINDOW);
-    quiet(command)
-}
-
-#[cfg(not(windows))]
-fn kill_tree(pid: u32) -> Command {
-    // The child leads its own process group (`process_group(0)`), so `-pid` is the tree.
-    let mut command = Command::new("kill");
-    command.args(["-s", "KILL", "--", &format!("-{pid}")]);
-    quiet(command)
-}
-
-fn quiet(mut command: Command) -> Command {
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    command
 }
 
 /// Reads stderr to the end so the process never blocks on it; logs a redacted excerpt of

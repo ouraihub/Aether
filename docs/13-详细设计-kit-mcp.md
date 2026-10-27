@@ -63,7 +63,8 @@ ALTER TABLE servers ADD COLUMN cwd TEXT;      -- stdio：绝对目录，NULL = �
 ### 3.1 stdio
 
 - 一次 `McpSession` 内按需启动一个进程，会话结束（drop/取消）即结束；不常驻、不复用到下一次运行。进程意外退出 → 该服务本次报 `server_exited`，下次会话重新启动。
-- 启动：tokio `Command`，参数原样传入、**不经过 shell**；`kill_on_drop`。Windows 下裸命令名（无路径分隔符、无扩展名）按子进程环境的 `PATH` 与 `PATHEXT` 查找，使 `npx`、`uvx` 这类 `.cmd` 启动器可用（std 对 `.cmd`/`.bat` 参数做安全转义）；用 `CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`，结束时 `taskkill /T /F` 结束整棵进程树。Unix 子进程自成进程组，结束时 `kill -KILL -<pgid>`。
+- 启动：tokio `Command` 经 `process-wrap`（`=10.0.1`）包装，参数原样传入、**不经过 shell**。Windows 下裸命令名（无路径分隔符、无扩展名）按子进程环境的 `PATH` 与 `PATHEXT` 查找，使 `npx`、`uvx` 这类 `.cmd` 启动器可用（std 对 `.cmd`/`.bat` 参数做安全转义）；加 `CREATE_NO_WINDOW`。
+- 进程树：Windows 把根进程放进 kill-on-close 的 Job Object，Unix 让它自成进程组；后代默认留在其中，根进程先退出也一样。会话结束、取消或断开时同步结束整个 Job Object / 进程组（`TerminateJobObject` / `killpg(SIGKILL)`），回收放到运行时上，drop 不阻塞；Windows 关闭 Job 句柄时也会结束其中全部进程。不调用 `taskkill`、`kill` 等外部命令。用 `process-wrap` 而不自写 Job Object，是因为工作区只允许 DPAPI 一处 `unsafe`。主动脱离 Job 或另建进程组/会话的后代不在此列。
 - 环境：清空后复制父进程环境，去掉名字（不区分大小写）以 `_KEY`、`_TOKEN`、`_SECRET` 结尾或含 `PASSWORD` 的变量，再叠加配置的 `env`。
 - 线路：stdout 每行一条 JSON-RPC，单行 ≤ 2 MiB，超过即断开并报错；非 JSON 行忽略（记 `debug`）。stdin 每行一条。stderr 持续读完，防止子进程阻塞；只把前 64 KiB 打码后的摘要记 `info`，**不进错误消息**。
 - 超时：启动到 `initialize` 完成 10s；调用与发现沿用上面的限制。

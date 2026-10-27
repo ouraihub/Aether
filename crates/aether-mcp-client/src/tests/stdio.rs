@@ -25,7 +25,9 @@ const FIXTURE_ARGS: [&str; 5] = [
 ];
 /// Configured explicitly, so it reaches the child although its name looks like a secret.
 const CONFIGURED: &str = "FIXTURE_API_TOKEN";
-const PAGE_TWO: [&str; 7] = ["pid", "spawn", "slow", "big", "exit", "env", "pinged"];
+const PAGE_TWO: [&str; 8] = [
+    "pid", "spawn", "orphan", "slow", "big", "exit", "env", "pinged",
+];
 
 #[test]
 #[ignore = "child-process fixture for the stdio tests"]
@@ -118,17 +120,17 @@ fn serve() {
                     }
                     "pid" => std::process::id().to_string(),
                     "spawn" => {
-                        let child = std::process::Command::new(std::env::current_exe().unwrap())
-                            .args(FIXTURE_ARGS)
-                            .env(FIXTURE_ENV, "sleep")
-                            .stdin(std::process::Stdio::null())
-                            .stdout(std::process::Stdio::null())
-                            .stderr(std::process::Stdio::null())
-                            .spawn()
-                            .unwrap();
+                        let child = spawn_sleeper();
                         let pids = format!("{} {}", std::process::id(), child.id());
                         children.push(child);
                         pids
+                    }
+                    // Leaves a long sleeper behind and exits right after answering.
+                    "orphan" => {
+                        let child = spawn_sleeper();
+                        let pids = format!("{} {}", std::process::id(), child.id());
+                        send(&mut out, &text(&id, &pids));
+                        std::process::exit(0)
                     }
                     "slow" => {
                         std::thread::sleep(Duration::from_secs(30));
@@ -165,6 +167,18 @@ fn secret_like(name: &str) -> bool {
         || name.ends_with("_TOKEN")
         || name.ends_with("_SECRET")
         || name.contains("PASSWORD")
+}
+
+/// This binary again in `sleep` mode, detached from the fixture's pipes.
+fn spawn_sleeper() -> std::process::Child {
+    std::process::Command::new(std::env::current_exe().unwrap())
+        .args(FIXTURE_ARGS)
+        .env(FIXTURE_ENV, "sleep")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap()
 }
 
 fn exe() -> String {
@@ -224,12 +238,13 @@ fn alive(pid: u32) -> bool {
     }
     #[cfg(not(windows))]
     {
-        std::process::Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .stderr(std::process::Stdio::null())
-            .status()
-            .unwrap()
-            .success()
+        // A zombie has ended; it only waits for whoever reaps it.
+        let out = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        let stat = String::from_utf8_lossy(&out.stdout);
+        !stat.trim().is_empty() && !stat.trim_start().starts_with('Z')
     }
 }
 
@@ -361,6 +376,23 @@ async fn dropping_the_session_ends_the_process() {
         .unwrap();
     drop(session);
     assert_ends(pid).await;
+}
+
+/// A process the server started outlives the server itself and still ends with the
+/// session: the tree is owned by a Job Object / process group, not found from the root.
+#[tokio::test]
+async fn dropping_the_session_ends_descendants_of_an_exited_server() {
+    let (_dir, store) = super::store();
+    store.save(stdio("o", "normal")).unwrap();
+    let cancel = CancellationToken::new();
+    let mut session = store.session(&cancel, None).await;
+    let pids = ok_text(session.call("mcp_o_orphan", json!({}), &cancel).await);
+    let pids: Vec<u32> = pids.split(' ').map(|pid| pid.parse().unwrap()).collect();
+    // The server exits right after answering; its sleeper keeps running.
+    assert_ends(pids[0]).await;
+    assert!(alive(pids[1]), "the sleeper outlives the server");
+    drop(session);
+    assert_ends(pids[1]).await;
 }
 
 /// A line over 2 MiB disconnects; a server that exits mid-call is `unknown` too.
