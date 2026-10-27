@@ -53,7 +53,7 @@ jobs:
         run: pnpm exec release-kit check
       - run: echo "The exact merged tree already passed all three native jobs; commit-dependent checks ran here. See the reuse job summary for provenance."
 
-  windows:
+  build-windows:
     needs: reuse
     if: ${{ !cancelled() && (github.event_name != 'push' || github.ref != 'refs/heads/main' || needs.reuse.outputs.reuse != 'true') }}
     runs-on: windows-latest
@@ -88,7 +88,7 @@ jobs:
           retention-days: 14
 
   # Native stores and the full quality gate run on both shipping Unix targets.
-  macos-core:
+  build-macos:
     needs: reuse
     if: ${{ !cancelled() && (github.event_name != 'push' || github.ref != 'refs/heads/main' || needs.reuse.outputs.reuse != 'true') }}
     runs-on: macos-latest
@@ -139,7 +139,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  linux-core:
+  build-linux:
     needs: reuse
     if: ${{ !cancelled() && (github.event_name != 'push' || github.ref != 'refs/heads/main' || needs.reuse.outputs.reuse != 'true') }}
     runs-on: ubuntu-22.04
@@ -177,3 +177,63 @@ jobs:
           path: .ci-receipt/linux-core.json
           if-no-files-found: error
           retention-days: 14
+
+  windows:
+    needs: [reuse, reused-ci, build-windows]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require native build or verified reuse and merged-commit checks
+        env:
+          REUSE: ${{ needs.reuse.outputs.reuse }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REUSE_RESULT: ${{ needs.reuse.result }}
+          MERGE_RESULT: ${{ needs.reused-ci.result }}
+          BUILD_RESULT: ${{ needs.build-windows.result }}
+        run: |
+          if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ] && [ "$REUSE" = true ]; then
+            test "$REUSE_RESULT" = success && test "$MERGE_RESULT" = success
+          else
+            test "$BUILD_RESULT" = success
+          fi
+
+  macos-core:
+    needs: [reuse, reused-ci, build-macos]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require native build or verified reuse and merged-commit checks
+        env:
+          REUSE: ${{ needs.reuse.outputs.reuse }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REUSE_RESULT: ${{ needs.reuse.result }}
+          MERGE_RESULT: ${{ needs.reused-ci.result }}
+          BUILD_RESULT: ${{ needs.build-macos.result }}
+        run: |
+          if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ] && [ "$REUSE" = true ]; then
+            test "$REUSE_RESULT" = success && test "$MERGE_RESULT" = success
+          else
+            test "$BUILD_RESULT" = success
+          fi
+
+  linux-core:
+    needs: [reuse, reused-ci, build-linux]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require native build or verified reuse and merged-commit checks
+        env:
+          REUSE: ${{ needs.reuse.outputs.reuse }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REUSE_RESULT: ${{ needs.reuse.result }}
+          MERGE_RESULT: ${{ needs.reused-ci.result }}
+          BUILD_RESULT: ${{ needs.build-linux.result }}
+        run: |
+          if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ] && [ "$REUSE" = true ]; then
+            test "$REUSE_RESULT" = success && test "$MERGE_RESULT" = success
+          else
+            test "$BUILD_RESULT" = success
+          fi

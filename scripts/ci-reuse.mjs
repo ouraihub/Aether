@@ -14,6 +14,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const platforms = ['windows', 'macos-core', 'linux-core']
+const nativeJobs = { windows: 'build-windows', 'macos-core': 'build-macos', 'linux-core': 'build-linux' }
 const workflow = '.github/workflows/ci.yml'
 const hash = (value) => typeof value === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value)
 const positive = (value) =>
@@ -171,7 +172,7 @@ export function resolveReuse({
     const runAttempt = String(run.run_attempt)
     const jobs = completePage(api(`${root}/actions/runs/${runId}/attempts/${runAttempt}/jobs?per_page=100`), 'jobs')
     for (const platform of platforms) {
-      const matching = jobs.filter((job) => job?.name === platform)
+      const matching = jobs.filter((job) => job?.name === nativeJobs[platform])
       requireEvidence(matching.length === 1, `Missing or duplicate ${platform} job`)
       const job = matching[0]
       requireEvidence(

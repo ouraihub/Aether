@@ -33,6 +33,8 @@ PR 和手动 CI 始终执行完整三平台质量门；每个成功的平台任�
 
 复用只省去相同代码树的重复平台构建与测试；`reused-ci` 仍对实际 main 合并提交执行 `release-kit check`，不复用依赖提交历史的检查。`actions: read` 只授予凭据判定任务，原有三平台任务仍仅有 `contents: read`。
 
+原生任务为 `build-windows`、`build-macos`、`build-linux`，凭据判定核验这些任务的真实成功结果。三个原有必需检查名称保持不变且始终执行：完整构建路径要求对应原生任务成功；复用路径要求 `reuse` 和 `reused-ci` 均成功。失败、取消或意外跳过都不能使必需检查通过。
+
 ## macOS / Linux 凭据与完整检查
 
 Windows DPAPI 格式保持不变。macOS 使用用户 Keychain，Linux 使用已解锁的持久 Secret Service（例如 GNOME Keyring）；没有服务或服务锁定就拒绝保存凭据，不影响不需要凭据的离线功能，不回落普通文件主密钥或明文。宿主可复用 `aether_providers::secrets::{protect, unprotect}` 的字节接口，具体格式和错误见 [基础设计 §2](docs/10-详细设计-基础与可观测性.md#2-secret决策-d3windows--macos--linux-原生存储)。

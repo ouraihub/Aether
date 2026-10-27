@@ -57,7 +57,7 @@ function fixture() {
   const jobs = {
     total_count: 3,
     jobs: platforms.map((name) => ({
-      name,
+      name: { windows: 'build-windows', 'macos-core': 'build-macos', 'linux-core': 'build-linux' }[name],
       run_id: 10,
       run_attempt: 2,
       head_sha: head,
