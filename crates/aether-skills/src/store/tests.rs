@@ -371,11 +371,13 @@ fn concurrent_duplicate_keeps_instructions_and_script_from_one_revision() {
     writer
         .busy_timeout(std::time::Duration::from_secs(5))
         .unwrap();
-    let start = Barrier::new(2);
-    std::thread::scope(|scope| {
-        let replacing = scope.spawn(|| {
-            start.wait();
-            for round in 0..100 {
+    // Race one replace against one copy per round; a copy loop can starve the
+    // independent writer past SQLite's busy timeout on slower Windows runners.
+    for round in 0..100 {
+        let start = Barrier::new(2);
+        std::thread::scope(|scope| {
+            let replacing = scope.spawn(|| {
+                start.wait();
                 let tx = writer
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .unwrap();
@@ -395,10 +397,8 @@ fn concurrent_duplicate_keeps_instructions_and_script_from_one_revision() {
                 )
                 .unwrap();
                 tx.commit().unwrap();
-            }
-        });
-        start.wait();
-        for round in 0..100 {
+            });
+            start.wait();
             let name = format!("copy-{round}");
             let list = reader.duplicate(&id, &name).unwrap();
             let copy = list.iter().find(|skill| skill.name == name).unwrap();
@@ -407,9 +407,9 @@ fn concurrent_duplicate_keeps_instructions_and_script_from_one_revision() {
                 .file(&copy.id, copy.revision, "scripts/run.py")
                 .unwrap();
             assert_eq!(body.as_bytes(), script, "mixed source revisions in {name}");
-        }
-        replacing.join().unwrap();
-    });
+            replacing.join().unwrap();
+        });
+    }
 }
 
 #[test]
