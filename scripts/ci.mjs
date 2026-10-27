@@ -42,8 +42,16 @@ if (scope !== 'docs') {
     if (!platform || !arch) throw new Error('Unsupported actionlint platform')
     const archive = `actionlint_1.7.12_${platform}_${arch}.${platform === 'windows' ? 'zip' : 'tar.gz'}`
     execFileSync(
-      'gh',
-      ['release', 'download', 'v1.7.12', '--repo', 'rhysd/actionlint', '--pattern', archive, '--dir', directory],
+      'curl',
+      [
+        '--fail',
+        '--location',
+        '--max-time',
+        '60',
+        '--output',
+        join(directory, archive),
+        `https://github.com/rhysd/actionlint/releases/download/v1.7.12/${archive}`,
+      ],
       { stdio: 'inherit' },
     )
     execFileSync('tar', ['-xf', join(directory, archive), '-C', directory], { stdio: 'inherit' })
