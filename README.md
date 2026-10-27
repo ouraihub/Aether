@@ -21,13 +21,14 @@ A Rust + Tauri 2 framework for AI desktop apps with model providers, streaming c
 
 ```bat
 pnpm install
-node_modules\@ouraihub\desktop-kit\msvc\cargo-msvc.bat check --workspace --all-features
-pnpm run check
+pnpm run ci
 ```
 
 本地构建固定使用便携 MSVC（由 [desktop-kit](https://github.com/ouraihub/desktop-kit) 提供；默认 `D:\Applications\msvc-portable\msvc`，可用 `PORTABLE_MSVC_ROOT` 覆盖；首次运行 `node_modules\@ouraihub\desktop-kit\msvc\setup-msvc.bat` 安装）。
 
-合并到 `main` 必须通过 `windows`、`macos-core`、`linux-core` 和 `AI review`，四项检查均由 GitHub Actions 提供。分支必须包含最新 `main`，管理员也受同样约束；不使用管理员绕过合并。历史失败运行保留用于追溯，验收以 PR 最新提交的全部检查为准。
+合并到 `main` 必须通过确定性 `CI gate`，分支须包含最新 `main`，管理员也受约束。普通文档仅运行策略／提交检查；纯 `packages/ui/src` 手写 TS/Svelte/CSS 运行前端 lint、格式、类型、测试、示例构建及 i18n；Rust、依赖、生成 DTO、CI／构建／代理规则和未知路径完整运行三平台。混合改动取最高风险，无法确定范围完整执行；最终门禁要求所有适用任务真实成功，不把意外 skipped 算通过。
+
+本地 `pnpm run ci` 默认完整执行；显式 `node scripts/ci.mjs --scope docs|frontend` 与远端轻检查复用相同步骤。手动触发始终完整检查。同 PR 新提交取消旧运行；不实现历史凭据复用，不新增 `actions: read`。AI review 保留辅助意见，但不作为必需检查或自动合并裁判；维护者或获授权助手须处理实质问题后通过正常 PR 合并，不使用管理员绕过。历史失败记录保留，验收看最新提交适用检查。
 
 ## macOS / Linux 凭据与完整检查
 

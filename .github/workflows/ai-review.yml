@@ -29,4 +29,3 @@ jobs:
           base-url: ${{ secrets.AI_BASE_URL }}
           api-key: ${{ secrets.AI_API_KEY }}
           model: ${{ vars.AI_MODEL }}
-          merge-token: ${{ secrets.RELEASE_TOKEN }}

@@ -1,34 +1,43 @@
-// One quality gate for local checks and every native runner; no platform skips existing checks.
+// Local CI defaults to the full gate; remote lightweight paths use explicit scopes.
 import { execFileSync, execSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
+const scope =
+  process.argv.length === 2 ? 'full' : process.argv[2] === '--scope' && process.argv.length === 4 ? process.argv[3] : ''
+if (!['docs', 'frontend', 'full'].includes(scope)) throw new Error('Usage: ci.mjs [--scope docs|frontend|full]')
+
 // Git for Windows ships a link.exe that shadows the MSVC linker; cargo goes through desktop-kit.
 const cargo = (args) =>
   process.platform === 'win32' ? `node_modules\\@ouraihub\\desktop-kit\\msvc\\cargo-msvc.bat ${args}` : `cargo ${args}`
 
-const steps = [
-  'pnpm exec release-kit check',
-  'pnpm run check',
-  // tauri::generate_context! in the examples needs each `frontendDist` to exist.
-  'pnpm -r --filter "./examples/*/ui" run build',
-  'pnpm run kit:check-deps',
-  'pnpm run kit:dto-check',
-  'pnpm run kit:i18n',
-  cargo('fmt --all -- --check'),
-  cargo('clippy --workspace --all-targets --all-features -- -D warnings'),
-  cargo('test --workspace --all-features'),
-  ...['providers', 'chat', 'skills', 'mcp-client', 'mcp-server'].map((feature) =>
-    cargo(`check -p tauri-plugin-aether --no-default-features --features ${feature}`),
-  ),
-]
+const common = ['node --test scripts/ci-scope.test.mjs scripts/ci-gate.test.mjs', 'pnpm exec release-kit check']
+const frontend = ['pnpm run check', 'pnpm -r --filter "./examples/*/ui" run build', 'pnpm run kit:i18n']
+const steps =
+  scope === 'docs'
+    ? common
+    : scope === 'frontend'
+      ? [...common, ...frontend]
+      : [
+          ...common,
+          ...frontend,
+          // tauri::generate_context! in the examples needs each frontendDist to exist.
+          'pnpm run kit:check-deps',
+          'pnpm run kit:dto-check',
+          cargo('fmt --all -- --check'),
+          cargo('clippy --workspace --all-targets --all-features -- -D warnings'),
+          cargo('test --workspace --all-features'),
+          ...['providers', 'chat', 'skills', 'mcp-client', 'mcp-server'].map((feature) =>
+            cargo(`check -p tauri-plugin-aether --no-default-features --features ${feature}`),
+          ),
+        ]
 
 for (const step of steps) {
   console.log(`\n=== ${step}`)
   execSync(step, { stdio: 'inherit' })
 }
-if (process.platform === 'darwin' || process.platform === 'linux') {
+if (scope === 'full' && (process.platform === 'darwin' || process.platform === 'linux')) {
   execSync(cargo('build -p aether-providers --example native-secrets'), { stdio: 'inherit' })
   const fixture = mkdtempSync(join(tmpdir(), 'aether-native-secrets-'))
   const home = join(fixture, 'home')

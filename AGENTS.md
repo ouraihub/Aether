@@ -1,10 +1,11 @@
 # AGENTS.md：给 AI 编码助手的硬性规则
 
-## 1. 推送前必须通过 `pnpm run ci`
+## 1. 推送前按影响范围验证
 
-- `pnpm run ci`（`scripts/ci.mjs`）就是 GitHub CI 的 windows job，两边执行同一份步骤：前端检查、示例构建、依赖规则、DTO、i18n、`cargo fmt`、`clippy -D warnings`、**整个 workspace** 的 `cargo test`、插件各 feature 单独编译。
-- 只跑改动 crate 的测试（`-p xxx`）不算验证。曾经出过的事故：删掉 `EndpointSave.apiKey` 后只测了 `aether-providers`，`tauri-plugin-aether` 的测试夹具还在用旧字段，CI 挂了 5 个测试。
-- `pnpm run ci` 不通过，不提交、不推送、不汇报“已完成”。
+- 默认 `pnpm run ci` 仍完整执行所有检查；本地与远端都使用 `scripts/ci.mjs`，不维护两套步骤。
+- 用户于 2026-10-27 批准风险分层：普通文档执行 `node scripts/ci.mjs --scope docs`；纯 UI 源码执行 `node scripts/ci.mjs --scope frontend`；Rust、依赖、生成 DTO、构建／CI／代理规则及未知路径必须完整三平台。分类依据提交差异，不接受 PR 自报类别。
+- 完整检查保留前端、示例构建、依赖、DTO、i18n、Rust fmt/clippy、整个 workspace 测试与插件各 feature 编译；不以只测单 crate 代替。
+- 对应检查不通过，不提交、不推送、不汇报完成。无法确认范围时完整执行。
 
 ## 2. 改契约时，全仓库找旧名字
 
@@ -19,6 +20,7 @@
 - 不删除、跳过或放宽测试，不加 `#[ignore]`、`.skip`、`allow(...)` 来让 CI 通过。测试失败时，先判断是代码错了还是测试过时了：测试过时，就按新行为改写它，不能直接删掉。
 - 不从 `scripts/ci.mjs` 或 `.github/workflows/` 里删步骤、降低严格程度。确实需要调整时，先说明理由并取得用户同意。
 - 新增检查只加到 `scripts/ci.mjs`，工作流会自动跟上，不要只改其中一边。
+- 合并必需检查为确定性 `CI gate`，分类失败或任一适用任务失败／取消／意外跳过都拒绝。AI review 为辅助意见，不能启用自动合并；由维护者或获授权助手结合审查意见与 CI 决定合并。不增 Actions 读取权限、不部署凭据复用策略。此为用户批准的门禁简化，不得继续扩大豁免范围。
 
 ## 4. 推送之后
 
