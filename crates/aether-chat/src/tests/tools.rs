@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::{PROTOCOLS, Reply, end, fixture, input, run, runner, upstream};
 use crate::protocol::{Decoder, Round};
-use crate::{EndStatus, Message, ToolCall, ToolSource, ToolSpec, Usage};
+use crate::{EndStatus, Message, ToolCall, ToolEffect, ToolSource, ToolSpec, Usage};
 
 fn call(id: &str, name: &str, args: Value) -> ToolCall {
     ToolCall {
@@ -185,6 +185,7 @@ async fn tool_calls_round_trip_through_the_next_request() {
             description: "Reads a file".to_owned(),
             parameters: schema.clone(),
             approval: Approval::Auto,
+            effect: ToolEffect::Read,
             source: ToolSource::Host,
         }];
         let (summary, events) = run(&runner(5_000, 5_000), first, false).await;

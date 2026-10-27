@@ -111,6 +111,8 @@ interface ChatPanelProps {
   onOpenSettings?: () => void                       // 没有任何对话模型时显示"打开设置"；思考弹层的"打开设置"会先写settingsTarget，ProvidersSettings挂载时直接打开该模型设置
   reasoningEffort?: ReasoningEffort                 // 保存的思考档位，省略为default；每个模型按最近的合法档位发送（距离相同取较高），无能力则不发
   onReasoningEffortChange?: (effort: ReasoningEffort) => void // 用户选档/恢复默认时调用，宿主决定是否记住
+  permissionModes?: PermissionMode[]                // 宿主允许列表，默认 default/plan/accept_edits；须与后端 permission_modes 一致
+  permissionMode?: PermissionMode                   // bindable 的非危险偏好，持久化由宿主决定；不输出／恢复 full_access
   conversationId?: string | null                    // 挂载时恢复的会话；已不存在（not_found）则新对话
   onConversationChange?: (id: string | null) => void  // 显示的会话变化时调用（新运行建会话、打开历史、删除、新对话），应用据此持久化
   onClose?: () => void
@@ -132,6 +134,8 @@ interface ChatPanelProps {
 - 工具：`tool_call` 显示"正在调用 <name>"（MCP 标服务名）；`approval_required` 显示 `ApprovalCard`（工具名、来源、参数预览、"允许本次 / 拒绝"）；`tool_result` 折叠为一行，`unknown` 标"结果未知，可能已执行"，`denied` 标"已拒绝"。
 - `end`：`completed` + `exhausted` 时显示"已达到工具调用轮数上限"；`failed` 显示错误与"重试"；`cancelled` 显示"已停止"。
 - 一次性生成（如编辑器润色）不用 ChatPanel：应用直接调 `ChatPort.run({ purpose: 'polish', ... })`，自己处理 `text_delta`。
+- 权限模式：输入区 shadcn 下拉仅列出 `permissionModes`，每项一行名称＋一行说明，完全访问用危险语义色；运行中不可切换。五项为逐次确认／仅规划／自动接受编辑／智能批准／完全访问，矩阵见 12 §5.1。Plan 在输入框旁显示“仅规划”。审批卡片继续由服务端事件驱动，模式不隐藏宿主要求的审批。
+- 完全访问仅用户点击并 `notify.confirm({ danger: true })` 后在组件私有状态启用，不写进 bindable 偏好；外部传入 `permissionMode='full_access'` 不会激活。只消费下一次 send／retry／换模型重答／translation，发起时即重置（受理失败也不复用）；之后的运行回到非危险偏好。宿主不得保存 FullAccess 为默认，不应用于后台或非交互入口。每次发送带上 `RunRequest.permissionMode`，服务端仍独立校验允许列表。
 
 ### 4.3 skills
 

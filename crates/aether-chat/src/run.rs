@@ -12,7 +12,7 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 use crate::protocol::{Decoded, Decoder, Request, Round, path};
-use crate::tools::{self, Approver, Settled, TRUNCATED_NOTE, ToolExecutor};
+use crate::tools::{self, Approver, AuthorizeContext, Settled, TRUNCATED_NOTE, ToolExecutor};
 use crate::types::{
     Approval, EndStatus, Message, RunEvent, RunInput, ToolCall, ToolSource, ToolSourceKind,
     ToolSpec,
@@ -260,7 +260,20 @@ impl Runner {
             source,
             server,
         });
-        let allowed = match run.tools.authorize(call, spec.approval) {
+        let ctx = AuthorizeContext {
+            mode: run.input.permission_mode,
+            purpose: &run.input.purpose,
+            run_id: &run.input.run_id,
+            effect: spec.effect,
+            source: &spec.source,
+            proposed: tools::proposed(run.input.permission_mode, spec),
+        };
+        // A catalogue `Deny` is final: no mode and no host answer turns it into a run.
+        let decision = match spec.approval {
+            Approval::Deny => Approval::Deny,
+            Approval::Auto | Approval::Ask => run.tools.authorize(call, &ctx),
+        };
+        let allowed = match decision {
             Approval::Auto => true,
             Approval::Deny => false,
             Approval::Ask => {

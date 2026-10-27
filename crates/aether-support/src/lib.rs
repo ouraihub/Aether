@@ -17,7 +17,7 @@ pub mod secret;
 pub mod sse;
 
 pub use connection::{Connection, Protocol};
-pub use contract::{Approval, SkillRef};
+pub use contract::{Approval, PermissionMode, SkillRef, ToolEffect};
 pub use error::{Details, KitError, KitErrorCode};
 pub use pricing::{Cost, Currency, ModelPricing, PricingTier, cost};
 pub use reasoning::{

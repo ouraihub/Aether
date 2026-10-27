@@ -8,15 +8,29 @@ use tokio_util::sync::CancellationToken;
 
 use super::tools::{expected, limited};
 use super::{PROTOCOLS, Reply, end, fixture, input, runner, script, sse};
-use crate::tools::{DENIED_NOTE, TRUNCATED_NOTE, UNKNOWN_NOTE};
+use crate::tools::{DENIED_NOTE, TRUNCATED_NOTE, UNKNOWN_NOTE, proposed};
+use crate::validate::PLAN_NOTICE;
 use crate::{
-    Approver, BoxFuture, EndStatus, Message, RunEvent, RunInput, RunSummary, ToolCall,
-    ToolExecution, ToolExecutor, ToolOutcome, ToolSource, ToolSpec,
+    Approver, AuthorizeContext, BoxFuture, EndStatus, Message, PermissionMode, RunEvent, RunInput,
+    RunSummary, ToolCall, ToolEffect, ToolExecution, ToolExecutor, ToolOutcome, ToolSource,
+    ToolSpec,
 };
+
+/// What one `authorize` call saw.
+#[derive(Debug, Clone, PartialEq)]
+struct Authorized {
+    mode: PermissionMode,
+    purpose: String,
+    run_id: String,
+    effect: ToolEffect,
+    source: ToolSource,
+    proposed: Approval,
+}
 
 /// Fake host: records executions and approval requests.
 struct Host {
-    approval: Approval,
+    /// Answer of `authorize`; `None` passes `ctx.proposed` through, like the default host.
+    approval: Option<Approval>,
     /// Answer of the approver; `None` waits until the run is cancelled.
     allow: Option<bool>,
     reply: ToolExecution,
@@ -24,12 +38,20 @@ struct Host {
     cancel_in_execute: Option<CancellationToken>,
     executed: StdMutex<Vec<String>>,
     asked: StdMutex<Vec<String>>,
+    authorized: StdMutex<Vec<Authorized>>,
 }
 
 impl Host {
     fn new(approval: Approval) -> Self {
         Self {
-            approval,
+            approval: Some(approval),
+            ..Self::proposing()
+        }
+    }
+    /// Answers `authorize` with the proposed approval.
+    fn proposing() -> Self {
+        Self {
+            approval: None,
             allow: Some(true),
             reply: ToolExecution::Ok {
                 text: "contents".to_owned(),
@@ -38,10 +60,17 @@ impl Host {
             cancel_in_execute: None,
             executed: StdMutex::default(),
             asked: StdMutex::default(),
+            authorized: StdMutex::default(),
         }
     }
     fn executed(&self) -> Vec<String> {
         log(&self.executed).clone()
+    }
+    fn authorized(&self) -> Vec<Authorized> {
+        self.authorized
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -52,13 +81,19 @@ fn log(list: &StdMutex<Vec<String>>) -> std::sync::MutexGuard<'_, Vec<String>> {
 
 #[async_trait::async_trait]
 impl ToolExecutor for Host {
-    fn authorize(&self, _call: &ToolCall, default: Approval) -> Approval {
-        assert_eq!(
-            default,
-            Approval::Auto,
-            "catalogue default is passed through"
-        );
-        self.approval
+    fn authorize(&self, _call: &ToolCall, ctx: &AuthorizeContext<'_>) -> Approval {
+        self.authorized
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(Authorized {
+                mode: ctx.mode,
+                purpose: ctx.purpose.to_owned(),
+                run_id: ctx.run_id.to_owned(),
+                effect: ctx.effect,
+                source: ctx.source.clone(),
+                proposed: ctx.proposed,
+            });
+        self.approval.unwrap_or(ctx.proposed)
     }
     async fn execute(&self, call: &ToolCall, _cancel: &CancellationToken) -> ToolExecution {
         log(&self.executed).push(call.id.clone());
@@ -90,13 +125,18 @@ impl Approver for Host {
 }
 
 fn read_file() -> Vec<ToolSpec> {
-    vec![ToolSpec {
-        name: "read_file".to_owned(),
-        description: "Reads a file".to_owned(),
+    vec![spec("read_file", Approval::Auto, ToolEffect::Read)]
+}
+
+fn spec(name: &str, approval: Approval, effect: ToolEffect) -> ToolSpec {
+    ToolSpec {
+        name: name.to_owned(),
+        description: format!("{name} tool"),
         parameters: json!({ "type": "object" }),
-        approval: Approval::Auto,
+        approval,
+        effect,
         source: ToolSource::Host,
-    }]
+    }
 }
 
 /// Input whose upstream answers `replies` in order, with the `read_file` tool.
@@ -291,4 +331,224 @@ async fn cancel_during_a_tool_starts_no_further_tool() {
         assert_eq!(seen.lock().await.len(), 1, "{protocol:?}");
         assert_eq!(end(&events).0, EndStatus::Cancelled);
     }
+}
+
+const MODES: [PermissionMode; 5] = [
+    PermissionMode::Default,
+    PermissionMode::Plan,
+    PermissionMode::AcceptEdits,
+    PermissionMode::Auto,
+    PermissionMode::FullAccess,
+];
+const EFFECTS: [ToolEffect; 4] = [
+    ToolEffect::Read,
+    ToolEffect::Edit,
+    ToolEffect::Exec,
+    ToolEffect::Other,
+];
+
+#[test]
+fn mode_matrix_relaxes_only_ask_and_never_deny() {
+    use PermissionMode::{AcceptEdits, Auto, Default, FullAccess, Plan};
+    let mcp = ToolSource::Mcp {
+        server: "docs".to_owned(),
+    };
+    for mode in MODES {
+        for effect in EFFECTS {
+            for source in [ToolSource::Host, mcp.clone()] {
+                let tool = |approval| ToolSpec {
+                    source: source.clone(),
+                    ..spec("t", approval, effect)
+                };
+                // `Auto` and `Deny` are never changed by a mode.
+                assert_eq!(proposed(mode, &tool(Approval::Auto)), Approval::Auto);
+                assert_eq!(proposed(mode, &tool(Approval::Deny)), Approval::Deny);
+                let relaxed = match mode {
+                    Default | Plan => false,
+                    AcceptEdits => effect == ToolEffect::Edit,
+                    Auto => source == ToolSource::Host,
+                    FullAccess => true,
+                };
+                let want = if relaxed {
+                    Approval::Auto
+                } else {
+                    Approval::Ask
+                };
+                assert_eq!(
+                    proposed(mode, &tool(Approval::Ask)),
+                    want,
+                    "{mode:?} {effect:?} {source:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The tool names and system text of the first request of a run in `mode`.
+async fn first_request(protocol: Protocol, mode: PermissionMode) -> (Vec<String>, String) {
+    let (mut input, seen) = scripted(protocol, vec![text(protocol)]).await;
+    input.permission_mode = mode;
+    input.tools = EFFECTS
+        .iter()
+        .map(|&effect| spec(&format!("{effect:?}_tool"), Approval::Ask, effect))
+        .collect();
+    let host = Host::proposing();
+    let (_, events) = run_with(&host, input, &CancellationToken::new(), false).await;
+    assert_eq!(end(&events).0, EndStatus::Completed);
+    let raw = seen.lock().await[0].clone();
+    let body = super::request_body(&raw);
+    let names = body["tools"]
+        .as_array()
+        .map(|tools| {
+            tools
+                .iter()
+                .map(|tool| {
+                    tool.pointer("/function/name")
+                        .or_else(|| tool.get("name"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap()
+                        .to_owned()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    (names, raw)
+}
+
+#[tokio::test]
+async fn plan_offers_only_read_tools_and_says_so() {
+    for protocol in PROTOCOLS {
+        for mode in MODES {
+            let (names, raw) = first_request(protocol, mode).await;
+            if mode == PermissionMode::Plan {
+                assert_eq!(names, ["Read_tool"], "{protocol:?}");
+                assert!(raw.contains(PLAN_NOTICE), "{protocol:?}");
+            } else {
+                assert_eq!(
+                    names,
+                    ["Read_tool", "Edit_tool", "Exec_tool", "Other_tool"],
+                    "{protocol:?} {mode:?}"
+                );
+                assert!(!raw.contains(PLAN_NOTICE), "{protocol:?} {mode:?}");
+            }
+        }
+    }
+}
+
+/// `read_file` with `approval` and `effect`, asked for twice by the multi-tool fixture.
+async fn mode_run(
+    protocol: Protocol,
+    mode: PermissionMode,
+    host: &Host,
+    tool: ToolSpec,
+) -> Vec<RunEvent> {
+    let (mut input, _) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
+    input.permission_mode = mode;
+    input.purpose = "notes".to_owned();
+    input.tools = vec![tool];
+    run_with(host, input, &CancellationToken::new(), false)
+        .await
+        .1
+}
+
+#[tokio::test]
+async fn authorize_sees_the_mode_and_its_answer_is_final() {
+    let protocol = Protocol::OpenaiChat;
+    let (a, b) = ids(protocol);
+    let mcp = ToolSource::Mcp {
+        server: "docs".to_owned(),
+    };
+    for mode in [
+        PermissionMode::Default,
+        PermissionMode::AcceptEdits,
+        PermissionMode::Auto,
+        PermissionMode::FullAccess,
+    ] {
+        for (effect, source) in [
+            (ToolEffect::Edit, ToolSource::Host),
+            (ToolEffect::Exec, ToolSource::Host),
+            (ToolEffect::Other, mcp.clone()),
+        ] {
+            let tool = ToolSpec {
+                source: source.clone(),
+                ..spec("read_file", Approval::Ask, effect)
+            };
+            let want = proposed(mode, &tool);
+            let host = Host::proposing();
+            let events = mode_run(protocol, mode, &host, tool).await;
+            let seen = host.authorized();
+            assert_eq!(seen.len(), 2, "{mode:?} {effect:?}");
+            assert_eq!(
+                seen[0],
+                Authorized {
+                    mode,
+                    purpose: "notes".to_owned(),
+                    run_id: "r1".to_owned(),
+                    effect,
+                    source: source.clone(),
+                    proposed: want,
+                }
+            );
+            // A proposed `Auto` runs without asking; `Ask` waits for the user.
+            let asked = log(&host.asked).len();
+            assert_eq!(asked, if want == Approval::Ask { 2 } else { 0 });
+            assert_eq!(host.executed(), [a.clone(), b.clone()]);
+            assert_eq!(outcomes(&events).len(), 2);
+        }
+    }
+
+    // The host turns a proposed `Auto` back into `Ask` (rules) or `Deny`.
+    let tool = spec("read_file", Approval::Ask, ToolEffect::Exec);
+    let mut host = Host::new(Approval::Ask);
+    host.allow = Some(false);
+    let events = mode_run(protocol, PermissionMode::FullAccess, &host, tool.clone()).await;
+    assert_eq!(host.authorized()[0].proposed, Approval::Auto);
+    assert_eq!(log(&host.asked).len(), 2);
+    assert!(host.executed().is_empty());
+    assert_eq!(outcomes(&events)[0].1, ToolOutcome::Denied);
+    let host = Host::new(Approval::Deny);
+    let events = mode_run(protocol, PermissionMode::FullAccess, &host, tool).await;
+    assert!(log(&host.asked).is_empty());
+    assert!(host.executed().is_empty());
+    assert_eq!(outcomes(&events)[1].1, ToolOutcome::Denied);
+}
+
+#[tokio::test]
+async fn catalogue_deny_is_never_relaxed() {
+    let protocol = Protocol::OpenaiChat;
+    for mode in MODES {
+        // Even a host answering `Auto` to everything cannot run a denied tool.
+        let host = Host::new(Approval::Auto);
+        let tool = spec("read_file", Approval::Deny, ToolEffect::Read);
+        let events = mode_run(protocol, mode, &host, tool).await;
+        assert!(host.executed().is_empty(), "{mode:?}");
+        assert!(host.authorized().is_empty(), "{mode:?}");
+        assert!(log(&host.asked).is_empty(), "{mode:?}");
+        assert!(
+            outcomes(&events)
+                .iter()
+                .all(|(_, outcome)| *outcome == ToolOutcome::Denied),
+            "{mode:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn plan_call_to_a_hidden_tool_is_unknown_and_never_runs() {
+    let protocol = Protocol::OpenaiChat;
+    let (input, seen) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
+    let mut input = input;
+    input.permission_mode = PermissionMode::Plan;
+    // The model names `read_file`, which is an edit tool here and so not in the Plan catalogue.
+    input.tools = vec![spec("read_file", Approval::Auto, ToolEffect::Edit)];
+    let host = Host::proposing();
+    let (summary, _) = run_with(&host, input, &CancellationToken::new(), false).await;
+    assert!(host.executed().is_empty());
+    assert!(host.authorized().is_empty());
+    assert!(
+        fed_back(&summary)
+            .iter()
+            .all(|(_, text)| text.contains("unknown_tool"))
+    );
+    assert_eq!(seen.lock().await.len(), 2);
 }

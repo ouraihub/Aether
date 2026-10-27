@@ -7,8 +7,9 @@
 use std::io::Write;
 
 use aether_chat::{
-    AddressPolicy, Approval, Approver, BoxFuture, Budget, CancellationToken, EndStatus, RunEvent,
-    RunInput, Runner, ToolCall, ToolExecution, ToolExecutor, ToolSource, ToolSpec,
+    AddressPolicy, Approval, Approver, AuthorizeContext, BoxFuture, Budget, CancellationToken,
+    EndStatus, PermissionMode, RunEvent, RunInput, Runner, ToolCall, ToolEffect, ToolExecution,
+    ToolExecutor, ToolSource, ToolSpec,
 };
 use aether_observability::LogConfig;
 use aether_providers::{
@@ -26,9 +27,9 @@ struct CliTools;
 
 #[async_trait::async_trait]
 impl ToolExecutor for CliTools {
-    fn authorize(&self, call: &ToolCall, default: Approval) -> Approval {
+    fn authorize(&self, call: &ToolCall, ctx: &AuthorizeContext<'_>) -> Approval {
         if call.name == TOOL {
-            default
+            ctx.proposed
         } else {
             Approval::Deny
         }
@@ -152,6 +153,7 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
             description: "Returns today's secret word.".to_owned(),
             parameters: serde_json::json!({ "type": "object", "properties": {} }),
             approval: Approval::Auto,
+            effect: ToolEffect::Read,
             source: ToolSource::Host,
         }]
     } else {
@@ -159,6 +161,8 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
     };
     let input = RunInput {
         run_id: "cli".to_owned(),
+        purpose: "chat".to_owned(),
+        permission_mode: PermissionMode::Default,
         budget: Budget::default().for_connection(&connection),
         connection,
         system: Vec::new(),

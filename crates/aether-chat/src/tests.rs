@@ -25,8 +25,9 @@ use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 use crate::{
-    Approval, Approver, BoxFuture, Budget, EndStatus, ImagePart, Message, RunEvent, RunInput,
-    RunSummary, Runner, SystemPart, ToolCall, ToolExecution, ToolExecutor, Usage,
+    Approval, Approver, AuthorizeContext, BoxFuture, Budget, EndStatus, ImagePart, Message,
+    PermissionMode, RunEvent, RunInput, RunSummary, Runner, SystemPart, ToolCall, ToolExecution,
+    ToolExecutor, Usage,
 };
 
 const KEY: &str = "sk-test-0123456789abcdefghijkl";
@@ -161,7 +162,7 @@ struct NoTools;
 
 #[async_trait::async_trait]
 impl ToolExecutor for NoTools {
-    fn authorize(&self, _call: &ToolCall, _default: Approval) -> Approval {
+    fn authorize(&self, _call: &ToolCall, _ctx: &AuthorizeContext<'_>) -> Approval {
         Approval::Deny
     }
     async fn execute(&self, _call: &ToolCall, _cancel: &CancellationToken) -> ToolExecution {
@@ -200,6 +201,8 @@ fn input(protocol: Protocol, base_url: String) -> RunInput {
     };
     RunInput {
         run_id: "r1".to_owned(),
+        purpose: "chat".to_owned(),
+        permission_mode: PermissionMode::Default,
         budget: Budget::default().for_connection(&connection),
         connection,
         system: vec![SystemPart::Host("be brief".to_owned())],

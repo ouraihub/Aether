@@ -1,12 +1,12 @@
 //! Host tools of the example (docs/90 CH4-3): `read_note` (read-only, auto) and
-//! `write_note` (writes, ask) over one in-memory note.
+//! `write_note` (edits, ask) over one in-memory note. All five permission modes are offered.
 
 use std::sync::{Mutex, PoisonError};
 
 use serde_json::json;
 use tauri_plugin_aether::{
-    Approval, CancellationToken, HostTool, KitHost, RunRequest, ToolCall, ToolError, ToolOutput,
-    ToolSource, ToolSpec,
+    Approval, CancellationToken, HostTool, KitHost, PermissionMode, RunRequest, ToolCall,
+    ToolEffect, ToolError, ToolOutput, ToolSource, ToolSpec,
 };
 
 /// The host: every other `KitHost` method keeps its default.
@@ -20,6 +20,7 @@ fn tool(
     description: &str,
     parameters: serde_json::Value,
     approval: Approval,
+    effect: ToolEffect,
 ) -> HostTool {
     HostTool {
         spec: ToolSpec {
@@ -27,6 +28,7 @@ fn tool(
             description: description.to_owned(),
             parameters,
             approval,
+            effect,
             source: ToolSource::Host,
         },
     }
@@ -34,20 +36,32 @@ fn tool(
 
 #[async_trait::async_trait]
 impl KitHost for AssistantHost {
-    fn tools(&self, _req: &RunRequest) -> Vec<HostTool> {
+    fn tools(&self, _req: &RunRequest, _run_id: &str) -> Vec<HostTool> {
         vec![
             tool(
                 "read_note",
                 "Read the user's note.",
                 json!({ "type": "object", "properties": {} }),
                 Approval::Auto,
+                ToolEffect::Read,
             ),
             tool(
                 "write_note",
                 "Replace the user's note with `text`.",
                 json!({ "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] }),
                 Approval::Ask,
+                ToolEffect::Edit,
             ),
+        ]
+    }
+
+    fn permission_modes(&self, _req: &RunRequest) -> Vec<PermissionMode> {
+        vec![
+            PermissionMode::Default,
+            PermissionMode::Plan,
+            PermissionMode::AcceptEdits,
+            PermissionMode::Auto,
+            PermissionMode::FullAccess,
         ]
     }
 

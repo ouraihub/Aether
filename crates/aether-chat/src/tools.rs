@@ -5,7 +5,10 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
-use crate::types::{Approval, ToolCall, ToolExecution, ToolOutcome, ToolSource, ToolSpec};
+use crate::types::{
+    Approval, PermissionMode, ToolCall, ToolEffect, ToolExecution, ToolOutcome, ToolSource,
+    ToolSpec,
+};
 use crate::validate;
 
 /// A boxed `Send` future, as returned by [`Approver::wait`].
@@ -14,11 +17,53 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// Runs the tools of one run's catalogue; composed by the integration layer.
 #[async_trait]
 pub trait ToolExecutor: Send + Sync {
-    /// Final say before execution (host policy, read-only mode). `Deny` never executes.
-    fn authorize(&self, call: &ToolCall, default: Approval) -> Approval;
+    /// Final say before execution (host policy and rules); `ctx.proposed` is the mode
+    /// matrix's suggestion. Synchronous and in-memory. `Deny` never executes.
+    fn authorize(&self, call: &ToolCall, ctx: &AuthorizeContext<'_>) -> Approval;
     /// Executes a catalogued, authorized call. `cancel` fires when the run is cancelled;
     /// the tool decides whether it can stop.
     async fn execute(&self, call: &ToolCall, cancel: &CancellationToken) -> ToolExecution;
+}
+
+/// What `authorize` knows about a call besides the call itself (docs/12 §5.1).
+#[derive(Debug, Clone, Copy)]
+pub struct AuthorizeContext<'a> {
+    /// The run's mode, fixed when it was accepted.
+    pub mode: PermissionMode,
+    /// App-defined label of the run.
+    pub purpose: &'a str,
+    /// Run id.
+    pub run_id: &'a str,
+    /// The tool's declared effect.
+    pub effect: ToolEffect,
+    /// Where the tool runs.
+    pub source: &'a ToolSource,
+    /// The catalogue approval after the mode matrix. A catalogue `Deny` stays `Deny`, and the
+    /// runner never executes it whatever `authorize` returns.
+    pub proposed: Approval,
+}
+
+/// Whether `mode` offers `spec` to the model at all: `Plan` keeps only `Read` tools.
+pub(crate) fn offered(mode: PermissionMode, spec: &ToolSpec) -> bool {
+    mode != PermissionMode::Plan || spec.effect == ToolEffect::Read
+}
+
+/// The mode matrix of docs/12 §5.1: only `Ask` is ever relaxed, `Auto` and `Deny` stay.
+pub(crate) fn proposed(mode: PermissionMode, spec: &ToolSpec) -> Approval {
+    if spec.approval != Approval::Ask {
+        return spec.approval;
+    }
+    let relaxed = match mode {
+        PermissionMode::Default | PermissionMode::Plan => false,
+        PermissionMode::AcceptEdits => spec.effect == ToolEffect::Edit,
+        PermissionMode::Auto => spec.source == ToolSource::Host,
+        PermissionMode::FullAccess => true,
+    };
+    if relaxed {
+        Approval::Auto
+    } else {
+        Approval::Ask
+    }
 }
 
 /// Waits for the user to allow (`true`) or deny an `Ask` call.

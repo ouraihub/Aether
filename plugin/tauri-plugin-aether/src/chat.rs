@@ -17,7 +17,9 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, Runtime, Window};
 use ts_rs::TS;
 
-use crate::host::{Ack, CancellationToken, KitHost, RunAccepted, RunRequest, SkillRef};
+use crate::host::{
+    Ack, CancellationToken, KitHost, PermissionMode, RunAccepted, RunRequest, SkillRef,
+};
 use crate::providers::Providers;
 use crate::tools::{Approvals, HostTools};
 
@@ -75,6 +77,18 @@ pub(crate) struct Chat {
 struct Active {
     cancel: CancellationToken,
     window: String,
+}
+
+/// Owns host snapshot cleanup through assembly, rejection and the background task.
+pub(crate) struct HostRun {
+    pub(crate) host: Arc<dyn KitHost>,
+    pub(crate) run_id: String,
+}
+
+impl Drop for HostRun {
+    fn drop(&mut self) {
+        self.host.run_finished(&self.run_id);
+    }
 }
 
 impl Chat {
@@ -333,6 +347,7 @@ pub(crate) fn assemble(
         effective.model = source_model;
     }
     effective.input.clone_from(&input);
+    let permission_mode = permission_mode(host, &effective)?;
     let selected = host.select_model(&effective)?;
     let model = if req.retry_turn_id.is_some() || req.translate_turn_id.is_some() || req.regenerate
     {
@@ -375,23 +390,42 @@ pub(crate) fn assemble(
         .saturating_sub(budget.max_output)
         .saturating_sub(used);
     let reasoning_effort = req.reasoning_effort.unwrap_or_default();
+    let tools = host
+        .tools(&effective, &run_id)
+        .into_iter()
+        .map(|tool| tool.spec)
+        .collect();
     let input = RunInput {
         run_id,
+        purpose: req.purpose.clone(),
+        permission_mode,
         connection,
         system,
         history: trim_history(&turns, room),
         input,
         images,
-        tools: host
-            .tools(&effective)
-            .into_iter()
-            .map(|tool| tool.spec)
-            .collect(),
+        tools,
         budget,
         reasoning_effort,
         native_web_search: false,
     };
     Ok((input, turns))
+}
+
+/// The requested mode, if this host allows it for this run (docs/15 §3.1).
+///
+/// # Errors
+/// `bad_request{field:"permission_mode", reason:"not_allowed"}`.
+pub(crate) fn permission_mode(
+    host: &dyn KitHost,
+    req: &RunRequest,
+) -> Result<PermissionMode, KitError> {
+    let mode = req.permission_mode.unwrap_or_default();
+    if host.permission_modes(req).contains(&mode) {
+        Ok(mode)
+    } else {
+        Err(KitError::bad_request("permission_mode", "not_allowed"))
+    }
 }
 
 /// The skill store, or an uninhabited stand-in so `chat` without `skills` compiles the same call.
@@ -451,7 +485,11 @@ pub(crate) async fn chat_run<R: Runtime>(
     #[cfg(not(feature = "skills"))]
     let skill_store: Option<Arc<SkillStore>> = None;
     let task_run_id = run_id.clone();
-    let (mut input, path, mut request) = blocking(move || {
+    let (mut input, path, mut request, guard) = blocking(move || {
+        let guard = HostRun {
+            host: Arc::clone(&host),
+            run_id: task_run_id.clone(),
+        };
         let mut request = request;
         if let (Some(store), Some(id)) = (store.as_deref(), request.conversation_id.as_deref())
             && request.reply_to_id.is_none()
@@ -484,7 +522,7 @@ pub(crate) async fn chat_run<R: Runtime>(
             &request,
             task_run_id,
         )?;
-        Ok((input, path, request))
+        Ok((input, path, request, guard))
     })
     .await?;
     let skill_refs = request.skills.clone();
@@ -529,14 +567,10 @@ pub(crate) async fn chat_run<R: Runtime>(
     }
     // Before `validate`, so a name clash with a host tool is rejected (docs/15 §4 step 5).
     #[cfg(feature = "mcp-client")]
-    let mut executor = {
-        let (specs, session) = crate::tools::mcp_tools(&app, &cancel).await;
-        input.tools.extend(specs);
-        HostTools {
-            mcp: Some(tokio::sync::Mutex::new(session)),
-            ..executor
-        }
-    };
+    let mut executor = crate::tools::with_mcp(executor, &mut input.tools, &request, || {
+        crate::tools::mcp_tools(&app, &cancel)
+    })
+    .await;
     chat.runner.validate(&mut input)?;
 
     // Store metadata only after runner validation; rejected requests leave no row.
@@ -648,6 +682,7 @@ pub(crate) async fn chat_run<R: Runtime>(
     let model_id = input.connection.model_id.clone();
     let task_run_id = run_id.clone();
     tauri::async_runtime::spawn(async move {
+        let _run_guard = guard;
         let chat = app.state::<Chat>();
         #[cfg(feature = "search")]
         if web_search && !input.native_web_search {

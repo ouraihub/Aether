@@ -44,7 +44,10 @@
     <Button variant="outline" onclick={() => (logsOpen = !logsOpen)}>{i18n.t('logs.title')}</Button>
   </header>
   {#if chatOpen}
-    <ChatPanel onClose={() => (chatOpen = false)} />
+    <ChatPanel
+      permissionModes={['default', 'plan', 'accept_edits', 'auto', 'full_access']}
+      onClose={() => (chatOpen = false)}
+    />
   {/if}
   {#if logsOpen}
     <LogSettings />

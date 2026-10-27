@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use crate::run::{next_key, transport};
-use crate::types::{Approval, ImagePart, MAX_IMAGE_BYTES, ToolSource, ToolSpec};
+use crate::types::{Approval, ImagePart, MAX_IMAGE_BYTES, ToolEffect, ToolSource, ToolSpec};
 use aether_support::net::{self, AddressPolicy};
 use aether_support::{Connection, KitError};
 use base64::Engine as _;
@@ -68,6 +68,8 @@ pub fn generate_image_spec(choices: &[ImageOrigin]) -> ToolSpec {
             "additionalProperties": false
         }),
         approval: Approval::Auto,
+        // Calls a paid upstream and stores an image: not offered in `Plan`.
+        effect: ToolEffect::Other,
         source: ToolSource::Host,
     }
 }

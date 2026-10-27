@@ -127,6 +127,24 @@ export const en: Messages = {
   'chat.effort.high': 'High',
   'chat.effort.xhigh': 'Very high',
   'chat.effort.max': 'Maximum',
+  'chat.mode.label': 'Permission mode',
+  'chat.mode.default': 'Ask each time',
+  'chat.mode.defaultHint': 'Each tool keeps its own approval policy; requested approvals wait for you.',
+  'chat.mode.plan': 'Plan only',
+  'chat.mode.planHint': 'Only reading tools are available; the reply is a plan, nothing is changed.',
+  'chat.mode.accept_edits': 'Accept edits',
+  'chat.mode.accept_editsHint':
+    'Edits that would ask run automatically; other tool policies and host restrictions stay in place.',
+  'chat.mode.auto': 'Smart approval',
+  'chat.mode.autoHint':
+    'App tools that would ask run automatically unless host rules require approval; MCP tool policies stay unchanged.',
+  'chat.mode.full_access': 'Full access',
+  'chat.mode.full_accessHint':
+    'Every tool that would ask runs without asking, MCP tools included. Blocked tools stay blocked.',
+  'chat.mode.planBadge': 'Plan only',
+  'chat.mode.fullAccessTitle': 'Allow full access for this run?',
+  'chat.mode.fullAccessBody':
+    'For this run only, tools may change data and execute commands without asking. Blocked tools stay blocked. This choice is not saved.',
   'providers.max_output': 'Maximum output (tokens)',
   'search.search': 'Web search',
   'search.fetch': 'Read webpage',

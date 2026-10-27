@@ -4,6 +4,7 @@
 
 mod painting;
 mod protocol;
+pub mod risk;
 mod run;
 mod store;
 mod tools;
@@ -23,7 +24,7 @@ pub use store::{
     Conversation, ConversationStore, ConversationSummary, SqliteStore, Turn, TurnHandle, TurnImage,
     TurnRecord, TurnStatus, history_path, translation_input, trim_history,
 };
-pub use tools::{Approver, BoxFuture, ToolExecutor};
+pub use tools::{Approver, AuthorizeContext, BoxFuture, ToolExecutor};
 pub use types::*;
 pub use validate::check_images;
 
