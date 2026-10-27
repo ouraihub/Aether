@@ -25,8 +25,8 @@ const FIXTURE_ARGS: [&str; 5] = [
 ];
 /// Configured explicitly, so it reaches the child although its name looks like a secret.
 const CONFIGURED: &str = "FIXTURE_API_TOKEN";
-const PAGE_TWO: [&str; 8] = [
-    "pid", "spawn", "orphan", "slow", "big", "exit", "env", "pinged",
+const PAGE_TWO: [&str; 9] = [
+    "pid", "spawn", "orphan", "quit", "slow", "big", "exit", "env", "pinged",
 ];
 
 #[test]
@@ -130,6 +130,11 @@ fn serve() {
                         let child = spawn_sleeper();
                         let pids = format!("{} {}", std::process::id(), child.id());
                         send(&mut out, &text(&id, &pids));
+                        std::process::exit(0)
+                    }
+                    // Answers, then exits before the next request arrives.
+                    "quit" => {
+                        send(&mut out, &text(&id, &std::process::id().to_string()));
                         std::process::exit(0)
                     }
                     "slow" => {
@@ -393,6 +398,24 @@ async fn dropping_the_session_ends_descendants_of_an_exited_server() {
     assert!(alive(pids[1]), "the sleeper outlives the server");
     drop(session);
     assert_ends(pids[1]).await;
+}
+
+/// A request written to a server that has exited is `unknown`, not a failure: a failed
+/// write or flush may still have delivered the request.
+#[tokio::test]
+async fn request_to_an_exited_server_is_unknown() {
+    let (_dir, store) = super::store();
+    store.save(stdio("q", "normal")).unwrap();
+    let cancel = CancellationToken::new();
+    let mut session = store.session(&cancel, None).await;
+    let pid: u32 = ok_text(session.call("mcp_q_quit", json!({}), &cancel).await)
+        .parse()
+        .unwrap();
+    assert_ends(pid).await;
+    assert_eq!(
+        session.call("mcp_q_echo", json!({}), &cancel).await,
+        unknown("network")
+    );
 }
 
 /// A line over 2 MiB disconnects; a server that exits mid-call is `unknown` too.

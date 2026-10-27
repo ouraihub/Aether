@@ -186,7 +186,9 @@ impl StdioLink {
 
 impl Transport for StdioLink {
     async fn request(&mut self, message: &Value, id: u64) -> Result<Value, RpcError> {
-        self.send(message).await.map_err(RpcError::Failed)?;
+        // A failed write may still have delivered the whole line (or flush may fail after
+        // it), so the server could be running the request: never a definite failure.
+        self.send(message).await.map_err(RpcError::Unknown)?;
         loop {
             let line = self.read_line().await.map_err(RpcError::Unknown)?;
             let Ok(reply) = serde_json::from_slice::<Value>(&line) else {
