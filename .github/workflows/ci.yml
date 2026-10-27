@@ -30,7 +30,7 @@ jobs:
 
   light:
     needs: scope
-    if: needs.scope.outputs.scope == 'docs' || needs.scope.outputs.scope == 'frontend'
+    if: needs.scope.outputs.scope != 'full'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -40,6 +40,13 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Validate workflow syntax
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.7.12 --repo rhysd/actionlint --pattern actionlint_1.7.12_linux_amd64.tar.gz --dir "$RUNNER_TEMP/actionlint"
+          tar -xzf "$RUNNER_TEMP/actionlint/actionlint_1.7.12_linux_amd64.tar.gz" -C "$RUNNER_TEMP/actionlint"
+          "$RUNNER_TEMP/actionlint/actionlint" -shellcheck= -pyflakes=
       - run: node scripts/ci.mjs --scope "$CI_SCOPE"
         env:
           CI_SCOPE: ${{ needs.scope.outputs.scope }}
@@ -70,95 +77,9 @@ jobs:
       # Every check lives in scripts/ci.mjs; locally run the same `pnpm run ci` before pushing.
       - run: pnpm run ci
 
-  # Native stores and the full quality gate run on both shipping Unix targets.
-  macos-core:
-    needs: scope
-    if: needs.scope.outputs.scope == 'full'
-    runs-on: macos-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-      - name: Install the pinned Rust toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-      - run: >
-          cargo check -p aether-support -p aether-observability -p aether-providers -p aether-chat
-          -p aether-skills -p aether-mcp-client -p aether-mcp-server -p example-cli
-      - name: Create unlocked native test keychain
-        run: |
-          security default-keychain -d user > "$RUNNER_TEMP/aether-original-keychain"
-          security create-keychain -p aether-ci "$RUNNER_TEMP/aether-ci.keychain-db"
-          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/aether-ci.keychain-db"
-          security unlock-keychain -p aether-ci "$RUNNER_TEMP/aether-ci.keychain-db"
-          security list-keychains -d user -s "$RUNNER_TEMP/aether-ci.keychain-db"
-          security default-keychain -d user -s "$RUNNER_TEMP/aether-ci.keychain-db"
-          # Workspace tests are different executables: pre-authorize only this disposable test key.
-          account=$(printf '%s' "$(cd "$HOME" && pwd -P)" | shasum -a 256 | cut -d' ' -f1)
-          key=$(openssl rand -hex 32)
-          security add-generic-password -a "$account" -s com.ouraihub.aether.credentials.v1 \
-            -X "$key" -A "$RUNNER_TEMP/aether-ci.keychain-db"
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run ci
-      - name: Remove native test keychain
-        if: always()
-        run: |
-          if [ -f "$RUNNER_TEMP/aether-original-keychain" ]; then
-            original=$(tr -d '"' < "$RUNNER_TEMP/aether-original-keychain" | xargs)
-            security default-keychain -d user -s "$original"
-            security list-keychains -d user -s "$original"
-          fi
-          security delete-keychain "$RUNNER_TEMP/aether-ci.keychain-db"
-
-  linux-core:
-    needs: scope
-    if: needs.scope.outputs.scope == 'full'
-    runs-on: ubuntu-22.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-      - name: Install native desktop and Secret Service dependencies
-        timeout-minutes: 8
-        run: |
-          # The regional Azure mirror can sustain only tens of KB/s for WebKit.
-          sudo "$(command -v node)" --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
-          const files = ['/etc/apt/sources.list', ...readdirSync('/etc/apt/sources.list.d').filter(name => /\.(list|sources)$/.test(name)).map(name => `/etc/apt/sources.list.d/${name}`)];
-          for (const file of files) {
-            const source = readFileSync(file, 'utf8');
-            const updated = source.replaceAll('azure.archive.ubuntu.com', 'archive.ubuntu.com');
-            if (updated !== source) writeFileSync(file, updated);
-          }
-          NODE
-          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update --error-on=any
-          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends build-essential curl wget file libxdo-dev libssl-dev \
-            librsvg2-dev libayatana-appindicator3-dev libwebkit2gtk-4.1-dev patchelf \
-            libdbus-1-dev gnome-keyring dbus-x11 xvfb xauth
-      - name: Install the pinned Rust toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-      - run: pnpm install --frozen-lockfile
-      - name: Full gate in unlocked native Secret Service session
-        run: |
-          dbus-run-session -- xvfb-run -a bash -euc '
-            export XDG_RUNTIME_DIR="$(mktemp -d)"
-            chmod 700 "$XDG_RUNTIME_DIR"
-            eval "$(printf "%s" aether-ci | gnome-keyring-daemon --unlock --components=secrets)"
-            pnpm run ci
-          '
-
   ci:
     name: CI gate
-    needs: [scope, light, windows, macos-core, linux-core]
+    needs: [scope, light, windows]
     if: always()
     runs-on: ubuntu-24.04
     steps:

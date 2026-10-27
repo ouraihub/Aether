@@ -6,7 +6,8 @@ import { join, resolve } from 'node:path'
 
 const scope =
   process.argv.length === 2 ? 'full' : process.argv[2] === '--scope' && process.argv.length === 4 ? process.argv[3] : ''
-if (!['docs', 'frontend', 'full'].includes(scope)) throw new Error('Usage: ci.mjs [--scope docs|frontend|full]')
+if (!['docs', 'automation', 'frontend', 'full'].includes(scope))
+  throw new Error('Usage: ci.mjs [--scope docs|automation|frontend|full]')
 
 // Git for Windows ships a link.exe that shadows the MSVC linker; cargo goes through desktop-kit.
 const cargo = (args) =>
@@ -15,7 +16,7 @@ const cargo = (args) =>
 const common = ['node --test scripts/ci-scope.test.mjs scripts/ci-gate.test.mjs', 'pnpm exec release-kit check']
 const frontend = ['pnpm run check', 'pnpm -r --filter "./examples/*/ui" run build', 'pnpm run kit:i18n']
 const steps =
-  scope === 'docs'
+  scope === 'docs' || scope === 'automation'
     ? common
     : scope === 'frontend'
       ? [...common, ...frontend]

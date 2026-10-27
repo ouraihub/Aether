@@ -3,9 +3,10 @@
 ## 1. 推送前按影响范围验证
 
 - 默认 `pnpm run ci` 仍完整执行所有检查；本地与远端都使用 `scripts/ci.mjs`，不维护两套步骤。
-- 用户于 2026-10-27 批准风险分层：普通文档执行 `node scripts/ci.mjs --scope docs`；纯 UI 源码执行 `node scripts/ci.mjs --scope frontend`；Rust、依赖、生成 DTO、构建／CI／代理规则及未知路径必须完整三平台。分类依据提交差异，不接受 PR 自报类别。
+- 用户于 2026-10-27 批准风险分层及夜间原生验证：普通文档执行 `node scripts/ci.mjs --scope docs`；工作流、根 AGENTS 和 CI 调度／门禁脚本执行 `--scope automation`（语法、行为及提交检查，不编译产品）；纯 UI 源码执行 `--scope frontend`；Rust、依赖、生成 DTO、产品构建脚本及未知路径在日常 CI 执行 Windows 完整检查。macOS/Linux 移至独立 `unix.yml`，仅手动或每天北京时间 02:00 定时运行，不阻塞 PR 合并。分类依据提交差异，不接受 PR 自报类别；实际编译参数／工具链变化须手动验证受影响平台。
 - 完整检查保留前端、示例构建、依赖、DTO、i18n、Rust fmt/clippy、整个 workspace 测试与插件各 feature 编译；不以只测单 crate 代替。
 - 对应检查不通过，不提交、不推送、不汇报完成。无法确认范围时完整执行。
+- 发版前确认待发布提交的 macOS/Linux 完整检查通过；夜间失败必须处理，不能把未运行当通过。GitHub 定时运行可能延迟，02:00 是计划时间而非准点保证。
 
 ## 2. 改契约时，全仓库找旧名字
 
