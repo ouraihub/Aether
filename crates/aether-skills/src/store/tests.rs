@@ -319,6 +319,47 @@ fn packaged_files_are_listed_and_readable_by_revision() {
 }
 
 #[test]
+fn reads_by_revision_never_mix_in_a_concurrent_replace() {
+    let dir = TempDir::new().unwrap();
+    let reader = Store::open(dir.path(), &[]).unwrap();
+    let writer = Store::open(dir.path(), &[]).unwrap();
+    // Odd revisions hold one file, even revisions two, each with its own bytes.
+    let odd = zip_skill("tool", &[("scripts/run.py", b"print(1)\n")]);
+    let even = zip_skill(
+        "tool",
+        &[
+            ("references/two.md", b"two\n"),
+            ("scripts/run.py", b"print(2)\n"),
+        ],
+    );
+    let id = install(&writer, &odd, false)[0].id.clone();
+
+    std::thread::scope(|scope| {
+        let replacing = scope.spawn(|| {
+            for round in 0..60 {
+                install(&writer, if round % 2 == 0 { &even } else { &odd }, true);
+            }
+        });
+        while !replacing.is_finished() {
+            let revision = reader.list().unwrap()[0].revision;
+            let (script, count): (&[u8], usize) = if revision % 2 == 1 {
+                (b"print(1)\n", 1)
+            } else {
+                (b"print(2)\n", 2)
+            };
+            match reader.file(&id, revision, "scripts/run.py") {
+                Ok(content) => assert_eq!(content, script, "revision {revision}"),
+                Err(error) => assert_eq!(error.details().reason(), Some("skill_changed")),
+            }
+            match reader.files(&id, revision) {
+                Ok(files) => assert_eq!(files.len(), count, "revision {revision}"),
+                Err(error) => assert_eq!(error.details().reason(), Some("skill_changed")),
+            }
+        }
+    });
+}
+
+#[test]
 fn a_changed_file_alone_bumps_the_revision() {
     let dir = TempDir::new().unwrap();
     let store = Store::open(dir.path(), &[]).unwrap();

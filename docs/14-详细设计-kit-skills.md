@@ -180,7 +180,7 @@ interface Preview { digest: string; name: string; description: string; version: 
 interface ManualSave { id?: string; expectedRevision?: number; name: string; description: string; version?: string | null; body: string }
 ```
 
-- `files`/`file` 供宿主（例如执行脚本前的审批与运行环境）按固定修订读取：`revision` 与当前不符或技能已删除 → `conflict{reason:"skill_changed", entity:id}`；路径不存在 → `not_found{entity:"skill_file"}`。本 crate 不执行、不落盘；`SkillSnapshot` 不变，Chat 只注入正文。Tauri 插件不新增 `skills_*` 命令，DTO 变化随生成类型生效。
+- `files`/`file` 供宿主（例如执行脚本前的审批与运行环境）按固定修订读取：`revision` 与当前不符或技能已删除 → `conflict{reason:"skill_changed", entity:id}`；路径不存在 → `not_found{entity:"skill_file"}`。修订检查与读取在同一个 SQLite 读事务（WAL 快照）里完成，另一个连接在两条语句之间替换技能也不会读到新修订的文件；`get` 的元数据与文件列表同理。本 crate 不执行、不落盘；`SkillSnapshot` 不变，Chat 只注入正文。Tauri 插件不新增 `skills_*` 命令，DTO 变化随生成类型生效。
 - `save_manual` 编辑时 `expectedRevision` 必须等于当前修订，否则 `conflict{reason:"revision_changed"}`（防两个窗口互相覆盖）；缺省 → `bad_request{field:"expectedRevision"}`。新名称已被占用 → `conflict{reason:"exists"}`（内置名为 `builtin_name`）。
 
 ## 7. 陷阱

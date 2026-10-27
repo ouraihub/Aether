@@ -128,12 +128,13 @@ impl Store {
         list(&*self.lock()?)
     }
 
-    /// One skill with its body and file list.
+    /// One skill with its body and file list, both read from one snapshot.
     ///
     /// # Errors
     /// `not_found{entity:"skill"}`; `internal` when SQLite fails.
     pub fn get(&self, id: &str) -> Result<SkillDto, KitError> {
-        let db = self.lock()?;
+        let mut db = self.lock()?;
+        let db = db.transaction()?;
         let (meta, body, license, extra) = db
             .query_row(
                 &format!("SELECT {META_COLUMNS}, body, license, extra FROM skills WHERE id = ?1"),
@@ -158,25 +159,30 @@ impl Store {
         })
     }
 
-    /// The file list of revision `revision` of a skill.
+    /// The file list of revision `revision` of a skill. The revision check and the
+    /// read share one snapshot, so another connection replacing the skill in between
+    /// cannot hand out the newer list.
     ///
     /// # Errors
     /// `conflict{reason:"skill_changed", entity:<id>}` when the revision differs or the
     /// skill was deleted; `internal`.
     pub fn files(&self, id: &str, revision: u32) -> Result<Vec<SkillFileMeta>, KitError> {
-        let db = self.lock()?;
+        let mut db = self.lock()?;
+        let db = db.transaction()?;
         ensure_revision(&db, id, revision)?;
         file_list(&db, id)
     }
 
     /// Content of one packaged file of revision `revision`. Nothing is executed or
-    /// written to disk; running scripts is the host's decision.
+    /// written to disk; running scripts is the host's decision. The revision check and
+    /// the read share one snapshot, as in [`Store::files`].
     ///
     /// # Errors
     /// `conflict{reason:"skill_changed", entity:<id>}` when the revision differs or the
     /// skill was deleted; `not_found{entity:"skill_file"}` for an unknown path; `internal`.
     pub fn file(&self, id: &str, revision: u32, path: &str) -> Result<Vec<u8>, KitError> {
-        let db = self.lock()?;
+        let mut db = self.lock()?;
+        let db = db.transaction()?;
         ensure_revision(&db, id, revision)?;
         db.query_row(
             "SELECT content FROM skill_files WHERE skill_id = ?1 AND path = ?2",
