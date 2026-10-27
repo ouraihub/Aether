@@ -2,6 +2,7 @@
 import type { ContextRef } from "./ContextRef";
 import type { ImagePart } from "./ImagePart";
 import type { ModelRef } from "./ModelRef";
+import type { PermissionMode } from "./PermissionMode";
 import type { ReasoningEffort } from "./ReasoningEffort";
 import type { SkillRef } from "./SkillRef";
 
@@ -76,4 +77,8 @@ reasoningEffort?: ReasoningEffort,
 /**
  * Offer the `generate_image` tool this run (docs/20 §2).
  */
-generateImage?: boolean, };
+generateImage?: boolean, 
+/**
+ * Permission mode of this run; omitted = `default`. Fixed once the run is accepted.
+ */
+permissionMode?: PermissionMode, };

@@ -14,6 +14,8 @@
 ```rust
 pub struct RunInput {
     pub run_id: String,
+    pub purpose: String,                     // 宿主定义的运行用途
+    pub permission_mode: PermissionMode,      // 接纳时固定，默认 Default
     pub connection: aether_support::Connection,  // 由 providers 解析得到（类型定义在 support，避免 chat 依赖 providers）
     pub system: Vec<SystemPart>,              // 按序拼接
     pub history: Vec<Message>,                // 已存会话的完整轮次（由 store 读出并裁剪）
@@ -41,13 +43,16 @@ pub struct ToolSpec {
     pub description: String,      // ≤ 1024 字符
     pub parameters: Value,        // JSON Schema（object）
     pub approval: Approval,       // 目录默认；执行前还会经宿主终裁
+    pub effect: ToolEffect,       // Read | Edit | Exec | Other；MCP 一律 Other
     pub source: ToolSource,       // Host | Mcp { server }：只用于展示与外部内容包装
 }
 pub enum Approval { Auto, Ask, Deny }
+pub enum PermissionMode { Default, Plan, AcceptEdits, Auto, FullAccess }
+pub enum ToolEffect { Read, Edit, Exec, Other }
 ```
 
 > `Connection` 类型放在 aether-support，providers 产出、chat 消费，两者都不必互相依赖。11 文档中的 `Connection` 即此类型。
-> `Approval` 同理定义在 `aether_support::contract`（chat 与 mcp-client 都用，二者互不依赖），两边各自 `pub use`。只有 `RunEvent` 及其枚举经 ts-rs 导出；`RunInput`/`ToolSpec`/`ToolExecution` 只在后端，不派生 `Serialize`；`Message`/`ToolCall` 派生 serde 仅用于写 `chat.db`，不导出 TS。
+> `Approval`、`PermissionMode`、`ToolEffect` 定义在 `aether_support::contract` 并由 chat 与插件重导出；后两者以 snake_case 经 ts-rs 导出。`RunEvent` 及其枚举同样导出；`RunInput`/`ToolSpec`/`ToolExecution` 只在后端，不派生 `Serialize`；`Message`/`ToolCall` 派生 serde 仅用于写 `chat.db`，不导出 TS。
 
 ### 2.1 运行前校验（`validate`，失败走请求错误）
 
@@ -104,11 +109,19 @@ type ToolOutcome = 'ok' | 'error' | 'denied' | 'unknown'   // unknown：执行�
 ```rust
 #[async_trait]
 pub trait ToolExecutor: Send + Sync {
-    /// 执行前终裁（宿主策略、只读模式等）。返回 Deny 时不执行。
-    fn authorize(&self, call: &ToolCall, default: Approval) -> Approval;
+    /// 同步、纯内存的宿主终裁；目录 Deny 不进入此方法。
+    fn authorize(&self, call: &ToolCall, ctx: &AuthorizeContext<'_>) -> Approval;
     async fn execute(&self, call: &ToolCall, cancel: &CancellationToken) -> ToolExecution;
 }
 pub struct ToolCall { pub id: String, pub name: String, pub args: Value }
+pub struct AuthorizeContext<'a> {
+    pub mode: PermissionMode,
+    pub purpose: &'a str,
+    pub run_id: &'a str,
+    pub effect: ToolEffect,
+    pub source: &'a ToolSource,
+    pub proposed: Approval,
+}
 pub enum ToolExecution { Ok { text: String, payload: Option<Value> }, Error { code: String, message: String }, Unknown { reason: String } }
 
 pub trait Approver: Send + Sync { fn wait(&self, run_id: &str, call: &ToolCall, cancel: &CancellationToken) -> BoxFuture<'_, bool>; }
@@ -124,7 +137,7 @@ pub trait Approver: Send + Sync { fn wait(&self, run_id: &str, call: &ToolCall, 
 4. 截断 → 本轮的工具调用**一个都不执行**；追加一条 user 说明（"上一条回复被截断，工具参数不完整，已全部作废，请重新发起、参数写短一些"）；进入下一轮。
 5. 工具调用 → **按顺序**逐个：
    - 不在目录 → 结果 `error{code:"unknown_tool"}` 回灌，不执行。
-   - 发 `tool_call`；`authorize(call, spec.approval)`：`Deny` → `denied`；`Ask` → 发 `approval_required` 并 `Approver::wait`，拒绝 → `denied`；`Auto` → 执行。
+   - 发 `tool_call`；目录 `Deny` 直接拒绝，否则按 §5.1 算出 `ctx.proposed` 再 `authorize(call, &ctx)`：`Deny` → `denied`；`Ask` → 发 `approval_required` 并 `Approver::wait`，拒绝 → `denied`；`Auto` → 执行。
    - `execute`；结果截到 `tool_output_chars`（末尾 `…(truncated N chars)`）；`source=Mcp` 的结果包外部内容边界；发 `tool_result`；追加 tool 消息。
    - `unknown` 结果回灌给模型的文本为"执行结果未知，可能已生效，不要自动重试"；**aether 不自动重试**。
 6. **继续策略**：所有调用都有结果后，若 `round < max_rounds` 进入下一轮；否则停止，`end{status:'completed', exhausted:true}`，最后的文字为固定说明（i18n），不编答案。继续是循环里的显式判断，不在事件回调里递归。
@@ -133,6 +146,34 @@ pub trait Approver: Send + Sync { fn wait(&self, run_id: &str, call: &ToolCall, 
 - 调用 ID 去重范围是一次运行：同一 `callId` 第二次出现直接回灌上次结果，不重复执行。不承诺跨进程 exactly-once。
 - 工具执行失败不是运行失败：`error` 结果回灌让模型修参数。
 - 上游不支持 tools（`supports_tools == None` 且返回明确的"不支持 tools"类 400）→ 去掉工具重试本轮一次（**仅在本轮尚未输出任何文本时**），记 `info`。
+
+### 5.1 按次权限模式
+
+模式在运行受理时固定；模型输出、工具结果、技能正文都不能修改它。仅 `Ask` 可被矩阵放宽，目录 `Deny` 在任何模式下都拒绝，宿主终裁也不能放开。
+
+| 模式（wire） | 提供给模型的目录 | `proposed` |
+| --- | --- | --- |
+| `default` | 全部 | 工具自身 approval |
+| `plan` | 仅 `effect=Read` | 工具自身 approval |
+| `accept_edits` | 全部 | Edit 的 Ask → Auto，其余不变 |
+| `auto` | 全部 | Host 的 Ask → Auto，MCP 不变 |
+| `full_access` | 全部 | 所有 Ask → Auto，包括 MCP |
+
+宿主 `authorize` 可以把建议的 Auto 改回 Ask 或 Deny；不能借任何模式扩大资源范围。MCP 工具一律 `effect=Other`，不信任 `readOnlyHint`。Plan 在 system 追加固定读取与规划说明，需要执行时请用户切换模式；无退出规划工具。目录过滤同时约束执行：模型猜测非读取工具名也只会得到 unknown_tool。
+
+### 5.2 风险规则辅助
+
+`aether_chat::risk` 公开 `Risk { reason: &'static str }`、`ScriptLanguage::{Shell, PowerShell, Python, JavaScript}` 与三个纯函数：
+
+```rust
+pub fn shell_risk(command: &str) -> Option<Risk>;
+pub fn script_risk(language: ScriptLanguage, source: &str) -> Option<Risk>;
+pub fn within(path: &Path, roots: &[PathBuf]) -> bool;
+```
+
+Shell 以命令／管道分段，跳过变量赋值和常见包装程序后检查真实程序名；识别删除、磁盘／系统、git 破坏性操作、递归权限修改／强制结束进程、发布／全局安装、提权、下载管道执行、主目录引用。Python／JavaScript 检查进程启动、文件删除与网络 API。稳定 reason：`delete`、`disk`、`git_destructive`、`permissions`、`publish`、`global_install`、`elevation`、`download_exec`、`home_path`、`process_spawn`、`network`、`file_delete`。相近但无风险的命令（`echo "rm"`、`git restore --staged`、`npm publish --dry-run`）不命中。
+
+`within` 仅词法处理绝对路径的 `.`／`..`，按路径段判断而非字符串前缀；相对路径不匹配。需要符号链接安全时，宿主在 I/O 位置预先 canonicalize 路径与 roots。**规则是可用性护栏，不是安全边界或沙箱**：无命中不保证文件／网络隔离，不能据此放宽 Deny、工作区边界或敏感环境变量过滤。
 
 ## 6. 会话存储（可选）
 

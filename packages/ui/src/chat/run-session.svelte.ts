@@ -29,7 +29,7 @@ export interface ToolItem {
   summary: string
 }
 
-import type { ContextUsage, Cost, TokenUsage, ReasoningEffort } from '../ports'
+import type { ContextUsage, Cost, TokenUsage, ReasoningEffort, PermissionMode } from '../ports'
 
 export interface ChatTurn {
   id: string
@@ -76,6 +76,8 @@ export interface RunBase {
   reasoningEffort?: ReasoningEffort
   /** Offer the `generate_image` tool (docs/20). */
   generateImage?: boolean
+  /** Permission mode of the run (docs/16 §4.2); omitted is `default`. */
+  permissionMode?: PermissionMode
 }
 
 export class RunSession {
@@ -480,6 +482,7 @@ export class RunSession {
       regenerate: false,
       language: base.language,
       reasoningEffort: base.reasoningEffort ?? 'default',
+      permissionMode: base.permissionMode ?? 'default',
       ...(base.generateImage && !action.translateTurnId ? { generateImage: true } : {}),
       ...(base.purpose === 'chat' && this.#stored && !action.retryTurnId && !action.translateTurnId
         ? { replyToId: this.selectedTurnId }

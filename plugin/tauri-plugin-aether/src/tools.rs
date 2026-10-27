@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use aether_chat::{Approver, BoxFuture, ToolExecution, ToolExecutor};
+use aether_chat::{Approver, AuthorizeContext, BoxFuture, ToolExecution, ToolExecutor};
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::oneshot;
 
@@ -194,8 +194,8 @@ impl HostTools {
 #[async_trait::async_trait]
 impl ToolExecutor for HostTools {
     // Called inline, not in `spawn_blocking`: the runner's `authorize` is synchronous.
-    fn authorize(&self, call: &ToolCall, default: Approval) -> Approval {
-        self.host.authorize(call, default)
+    fn authorize(&self, call: &ToolCall, ctx: &AuthorizeContext<'_>) -> Approval {
+        self.host.authorize(call, ctx)
     }
 
     async fn execute(&self, call: &ToolCall, cancel: &CancellationToken) -> ToolExecution {
@@ -302,6 +302,30 @@ fn mcp_execution(result: aether_mcp_client::McpCallResult) -> ToolExecution {
     }
 }
 
+/// Adds the MCP tools and session when the host wants them for `req`; otherwise `open` is
+/// never called, so no server is contacted or started (docs/15 §3.1).
+#[cfg(feature = "mcp-client")]
+pub(crate) async fn with_mcp<F, Fut>(
+    executor: HostTools,
+    tools: &mut Vec<crate::ToolSpec>,
+    req: &crate::RunRequest,
+    open: F,
+) -> HostTools
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = (Vec<crate::ToolSpec>, aether_mcp_client::McpSession)>,
+{
+    if !executor.host.mcp_tools(req) {
+        return executor;
+    }
+    let (specs, session) = open().await;
+    tools.extend(specs);
+    HostTools {
+        mcp: Some(tokio::sync::Mutex::new(session)),
+        ..executor
+    }
+}
+
 /// docs/15 §4 step 5: MCP tools of enabled, trusted servers as `ToolSource::Mcp` specs, and
 /// the session that runs them. This process's own MCP Server is skipped while it runs
 /// (docs/13 §9.2).
@@ -330,6 +354,8 @@ pub(crate) async fn mcp_tools<R: tauri::Runtime>(
             description: tool.description,
             parameters: tool.schema,
             approval: tool.approval,
+            // Read-only hints of a server are not trusted (docs/12 §5.1).
+            effect: crate::ToolEffect::Other,
             source: crate::ToolSource::Mcp {
                 server: tool.server,
             },

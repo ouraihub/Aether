@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-pub use aether_support::Approval;
+pub use aether_support::{Approval, PermissionMode, ToolEffect};
 use aether_support::{Connection, KitError, ReasoningBlock, ReasoningEffort};
 
 /// Images per user input (docs/19 §2).
@@ -43,6 +43,10 @@ pub struct ImageRef {
 pub struct RunInput {
     /// Run id reported to the UI.
     pub run_id: String,
+    /// App-defined label of the run (`RunRequest.purpose`); passed to `authorize` as is.
+    pub purpose: String,
+    /// Fixed for the whole run; decides the catalogue and the proposed approvals (§5.1).
+    pub permission_mode: PermissionMode,
     /// Resolved connection snapshot (from providers).
     pub connection: Connection,
     /// System prompt parts, concatenated in order.
@@ -142,6 +146,8 @@ pub struct ToolSpec {
     pub parameters: Value,
     /// Catalogue default; the host still decides before execution.
     pub approval: Approval,
+    /// What the tool does; MCP tools are always [`ToolEffect::Other`].
+    pub effect: ToolEffect,
     /// Where the tool runs; used for display and external-content wrapping.
     pub source: ToolSource,
 }

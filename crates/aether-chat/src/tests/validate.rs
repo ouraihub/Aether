@@ -1,7 +1,7 @@
 //! Run validation and system assembly (docs/12 §2.1, §2.2).
 
 use super::*;
-use crate::{Approval, ToolSource, ToolSpec};
+use crate::{Approval, ToolEffect, ToolSource, ToolSpec};
 use aether_support::{ReasoningConfig, ReasoningDialect, ReasoningEffort};
 use serde_json::{Value, json};
 
@@ -11,6 +11,7 @@ fn tool(name: &str) -> ToolSpec {
         description: String::new(),
         parameters: json!({ "type": "object" }),
         approval: Approval::Auto,
+        effect: ToolEffect::Read,
         source: ToolSource::Host,
     }
 }

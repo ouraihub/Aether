@@ -10,7 +10,10 @@
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
-use aether_chat::{Approver, EndStatus, RunEvent, Runner, ToolOutcome, ToolSource, ToolSpec};
+use aether_chat::{
+    Approver, EndStatus, PermissionMode, RunEvent, Runner, ToolEffect, ToolOutcome, ToolSource,
+    ToolSpec,
+};
 use aether_observability::{LogConfig, LogHandle};
 use aether_support::KitErrorCode;
 use aether_support::net::AddressPolicy;
@@ -20,8 +23,8 @@ use tokio::net::TcpListener;
 
 use crate::tools::{Approvals, HostTools};
 use crate::{
-    Approval, Builder, CancellationToken, ChatConfig, HostTool, KitHost, RunRequest, ToolCall,
-    ToolError, ToolOutput,
+    Approval, AuthorizeContext, Builder, CancellationToken, ChatConfig, HostTool, KitHost,
+    RunRequest, ToolCall, ToolError, ToolOutput,
 };
 
 struct Host;
@@ -176,18 +179,22 @@ struct Notes {
 
 #[async_trait::async_trait]
 impl KitHost for Notes {
-    fn tools(&self, _req: &RunRequest) -> Vec<HostTool> {
-        [("read_note", Approval::Auto), ("write_note", Approval::Ask)]
-            .map(|(name, approval)| HostTool {
-                spec: ToolSpec {
-                    name: name.to_owned(),
-                    description: format!("{name} tool"),
-                    parameters: json!({ "type": "object", "properties": {} }),
-                    approval,
-                    source: ToolSource::Host,
-                },
-            })
-            .into()
+    fn tools(&self, _req: &RunRequest, _run_id: &str) -> Vec<HostTool> {
+        [
+            ("read_note", Approval::Auto, ToolEffect::Read),
+            ("write_note", Approval::Ask, ToolEffect::Edit),
+        ]
+        .map(|(name, approval, effect)| HostTool {
+            spec: ToolSpec {
+                name: name.to_owned(),
+                description: format!("{name} tool"),
+                parameters: json!({ "type": "object", "properties": {} }),
+                approval,
+                effect,
+                source: ToolSource::Host,
+            },
+        })
+        .into()
     }
     async fn call_tool(
         &self,
@@ -200,11 +207,11 @@ impl KitHost for Notes {
             payload: None,
         })
     }
-    fn authorize(&self, call: &ToolCall, default: Approval) -> Approval {
+    fn authorize(&self, call: &ToolCall, ctx: &AuthorizeContext<'_>) -> Approval {
         if self.deny && call.name == "write_note" {
             Approval::Deny
         } else {
-            default
+            ctx.proposed
         }
     }
 }
@@ -394,6 +401,228 @@ fn actions_validate_shape_language_and_store_requirements() {
     assert!(super::chat::check_request(&action, true).is_err());
     action.target_language = Some("x".repeat(81));
     assert!(super::chat::check_request(&action, true).is_err());
+}
+
+/// Offers every mode, and MCP tools only outside `writing`.
+struct AllModes;
+impl KitHost for AllModes {
+    fn permission_modes(&self, _req: &RunRequest) -> Vec<PermissionMode> {
+        vec![
+            PermissionMode::Default,
+            PermissionMode::Plan,
+            PermissionMode::AcceptEdits,
+            PermissionMode::Auto,
+            PermissionMode::FullAccess,
+        ]
+    }
+    fn mcp_tools(&self, req: &RunRequest) -> bool {
+        req.purpose != "writing"
+    }
+}
+
+#[test]
+fn permission_mode_must_be_offered_by_the_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let (providers, request) = local_model(dir.path(), "http://localhost/v1", "hi");
+    let assemble = |host: &dyn KitHost, mode: Option<PermissionMode>| {
+        let request = RunRequest {
+            permission_mode: mode,
+            ..request.clone()
+        };
+        let budget = ChatConfig::default().budget;
+        super::chat::assemble(
+            host,
+            &providers,
+            None,
+            Vec::new(),
+            budget,
+            &request,
+            "r1".into(),
+        )
+        .map(|(input, _)| input.permission_mode)
+    };
+    // Omitted is `Default`; the baseline needs no host code.
+    assert_eq!(assemble(&Host, None).unwrap(), PermissionMode::Default);
+    for mode in PermissionMode::BASELINE {
+        assert_eq!(assemble(&Host, Some(mode)).unwrap(), mode);
+    }
+    for mode in [PermissionMode::Auto, PermissionMode::FullAccess] {
+        let error = assemble(&Host, Some(mode)).unwrap_err();
+        assert_eq!(error.code(), KitErrorCode::BadRequest);
+        assert_eq!(error.details().field(), Some("permission_mode"));
+        assert_eq!(error.details().reason(), Some("not_allowed"));
+        assert_eq!(assemble(&AllModes, Some(mode)).unwrap(), mode);
+    }
+    // The wire name is snake_case.
+    let parsed: RunRequest = serde_json::from_value(json!({
+        "purpose": "chat", "skills": [], "input": "hi", "regenerate": false, "language": "en",
+        "permissionMode": "accept_edits"
+    }))
+    .unwrap();
+    assert_eq!(parsed.permission_mode, Some(PermissionMode::AcceptEdits));
+}
+
+#[derive(Default)]
+struct RunBoundTools {
+    snapshots: Mutex<std::collections::HashMap<String, String>>,
+    finished: Mutex<Vec<String>>,
+}
+
+impl KitHost for RunBoundTools {
+    fn tools(&self, req: &RunRequest, run_id: &str) -> Vec<HostTool> {
+        self.snapshots
+            .lock()
+            .unwrap()
+            .insert(run_id.to_owned(), req.input.clone());
+        vec![HostTool {
+            spec: ToolSpec {
+                name: "pinned".into(),
+                description: "Pinned run snapshot".into(),
+                parameters: json!({ "type": "object", "properties": {} }),
+                approval: Approval::Ask,
+                effect: ToolEffect::Exec,
+                source: ToolSource::Host,
+            },
+        }]
+    }
+
+    fn authorize(&self, call: &ToolCall, ctx: &AuthorizeContext<'_>) -> Approval {
+        if self
+            .snapshots
+            .lock()
+            .unwrap()
+            .get(ctx.run_id)
+            .is_some_and(|snapshot| {
+                call.args
+                    .get("snapshot")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(snapshot.as_str())
+            })
+        {
+            ctx.proposed
+        } else {
+            Approval::Deny
+        }
+    }
+
+    fn run_finished(&self, run_id: &str) {
+        self.snapshots.lock().unwrap().remove(run_id);
+        self.finished.lock().unwrap().push(run_id.to_owned());
+    }
+}
+
+#[test]
+fn host_tool_snapshots_are_run_bound_and_released_independently() {
+    let host = Arc::new(RunBoundTools::default());
+    let dir = tempfile::tempdir().unwrap();
+    let (providers, mut request) = local_model(dir.path(), "http://localhost/v1", "revision-one");
+    let assemble = |request: &RunRequest, id: &str| {
+        super::chat::assemble(
+            host.as_ref(),
+            &providers,
+            None,
+            Vec::new(),
+            ChatConfig::default().budget,
+            request,
+            id.into(),
+        )
+        .unwrap()
+        .0
+    };
+    let first = super::chat::HostRun {
+        host: host.clone(),
+        run_id: "first".into(),
+    };
+    let one = assemble(&request, "first");
+    request.input = "revision-two".into();
+    let second = super::chat::HostRun {
+        host: host.clone(),
+        run_id: "second".into(),
+    };
+    let two = assemble(&request, "second");
+    let authorize = |input: &aether_chat::RunInput, snapshot: &str| {
+        let call = ToolCall {
+            id: "call".into(),
+            name: "pinned".into(),
+            args: json!({ "snapshot": snapshot }),
+        };
+        host.authorize(
+            &call,
+            &AuthorizeContext {
+                mode: input.permission_mode,
+                purpose: &input.purpose,
+                run_id: &input.run_id,
+                effect: ToolEffect::Exec,
+                source: &ToolSource::Host,
+                proposed: Approval::Ask,
+            },
+        )
+    };
+    assert_eq!(authorize(&one, "revision-one"), Approval::Ask);
+    assert_eq!(authorize(&two, "revision-two"), Approval::Ask);
+    assert_eq!(authorize(&two, "revision-one"), Approval::Deny);
+    drop(first);
+    assert_eq!(authorize(&one, "revision-one"), Approval::Deny);
+    assert_eq!(authorize(&two, "revision-two"), Approval::Ask);
+    drop(second);
+    assert!(host.snapshots.lock().unwrap().is_empty());
+    assert_eq!(*host.finished.lock().unwrap(), ["first", "second"]);
+}
+
+#[test]
+fn host_cleanup_covers_rejected_assembly() {
+    let host = Arc::new(RunBoundTools::default());
+    let dir = tempfile::tempdir().unwrap();
+    let (providers, mut request) = local_model(dir.path(), "http://localhost/v1", "revision-one");
+    request.permission_mode = Some(PermissionMode::FullAccess);
+    let rejected = || {
+        let _guard = super::chat::HostRun {
+            host: host.clone(),
+            run_id: "rejected".into(),
+        };
+        super::chat::assemble(
+            host.as_ref(),
+            &providers,
+            None,
+            Vec::new(),
+            ChatConfig::default().budget,
+            &request,
+            "rejected".into(),
+        )
+    };
+    assert!(rejected().is_err());
+    assert!(host.snapshots.lock().unwrap().is_empty());
+    assert_eq!(*host.finished.lock().unwrap(), ["rejected"]);
+}
+
+#[cfg(feature = "mcp-client")]
+#[tokio::test]
+async fn mcp_tools_false_opens_no_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, request) = local_model(dir.path(), "http://localhost/v1", "hi");
+    let writing = RunRequest {
+        purpose: "writing".to_owned(),
+        ..request.clone()
+    };
+    let store = aether_mcp_client::Store::open(dir.path()).unwrap();
+    let cancel = CancellationToken::new();
+    let opened = std::sync::atomic::AtomicU8::new(0);
+    let (store, cancel, opened) = (&store, &cancel, &opened);
+    let open = move || async move {
+        opened.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        (Vec::new(), store.session(cancel, None).await)
+    };
+    let host = || HostTools::new(Arc::new(AllModes));
+
+    let mut tools = Vec::new();
+    let executor = super::tools::with_mcp(host(), &mut tools, &writing, open).await;
+    assert_eq!(opened.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(executor.mcp.is_none());
+    assert!(tools.is_empty());
+
+    let executor = super::tools::with_mcp(host(), &mut tools, &request, open).await;
+    assert_eq!(opened.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(executor.mcp.is_some());
 }
 
 #[tokio::test]

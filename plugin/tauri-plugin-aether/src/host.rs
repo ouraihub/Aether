@@ -31,10 +31,28 @@ pub trait KitHost: Send + Sync + 'static {
     fn context(&self, _req: &RunRequest) -> Result<Option<ContextBlock>, KitError> {
         Ok(None)
     }
-    /// Host tools allowed for this run.
+    /// Host tools allowed for this run, each with its declared [`ToolEffect`]. `run_id` is
+    /// server-assigned; bind approval capabilities and pinned revisions to this exact run.
     #[cfg(feature = "chat")]
-    fn tools(&self, _req: &RunRequest) -> Vec<HostTool> {
+    fn tools(&self, _req: &RunRequest, _run_id: &str) -> Vec<HostTool> {
         Vec::new()
+    }
+    /// Releases in-memory snapshots for this server-assigned run, even if assembly failed.
+    /// Called once when its lifecycle ends; must be synchronous and non-blocking.
+    #[cfg(feature = "chat")]
+    fn run_finished(&self, _run_id: &str) {}
+    /// Modes this run may use (docs/15 §3.1); a requested mode outside the list is
+    /// `bad_request{field:"permission_mode", reason:"not_allowed"}`. `Auto` and `FullAccess`
+    /// are only available when the host lists them.
+    #[cfg(feature = "chat")]
+    fn permission_modes(&self, _req: &RunRequest) -> Vec<PermissionMode> {
+        PermissionMode::BASELINE.to_vec()
+    }
+    /// Whether this run offers MCP tools; `false` opens no MCP session at all. Without the
+    /// `mcp-client` feature a run has no MCP tools either way.
+    #[cfg(feature = "chat")]
+    fn mcp_tools(&self, _req: &RunRequest) -> bool {
+        true
     }
     /// Image model for `generate_image` (docs/20 §2); `None` keeps the tool off.
     #[cfg(feature = "chat")]
@@ -53,10 +71,12 @@ pub trait KitHost: Send + Sync + 'static {
     ) -> Result<ToolOutput, ToolError> {
         Err(ToolError::not_found())
     }
-    /// Final say before execution, for host and MCP tools alike.
+    /// Final say before execution, for host and MCP tools alike; `ctx.proposed` is the
+    /// approval after the run's mode (docs/12 §5.1). Called inline: synchronous, in-memory.
+    /// A catalogue `Deny` never reaches here.
     #[cfg(feature = "chat")]
-    fn authorize(&self, _call: &ToolCall, default: Approval) -> Approval {
-        default
+    fn authorize(&self, _call: &ToolCall, ctx: &AuthorizeContext<'_>) -> Approval {
+        ctx.proposed
     }
 }
 
@@ -66,7 +86,9 @@ mod chat_contract {
     use serde_json::Value;
     use ts_rs::TS;
 
-    pub use aether_chat::{Approval, ToolCall, ToolSource, ToolSpec};
+    pub use aether_chat::{
+        Approval, AuthorizeContext, PermissionMode, ToolCall, ToolEffect, ToolSource, ToolSpec,
+    };
     use aether_providers::KitError;
     pub use aether_providers::ModelRef;
     pub use aether_support::{ContextUsage, ReasoningEffort, TokenUsage};
@@ -139,6 +161,10 @@ mod chat_contract {
         #[serde(default)]
         #[ts(optional)]
         pub generate_image: Option<bool>,
+        /// Permission mode of this run; omitted = `default`. Fixed once the run is accepted.
+        #[serde(default)]
+        #[ts(optional)]
+        pub permission_mode: Option<PermissionMode>,
     }
 
     /// Reference to host data; `kind` and `id` are defined by the app.

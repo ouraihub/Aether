@@ -19,6 +19,8 @@
   import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical'
   import Settings2Icon from '@lucide/svelte/icons/settings-2'
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
+  import ShieldIcon from '@lucide/svelte/icons/shield'
+  import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js'
   import { Switch } from '#lib/components/ui/switch/index.js'
   import { Popover } from 'bits-ui'
   import { Button } from '#lib/components/ui/button/index.js'
@@ -39,6 +41,7 @@
     type ImagePart,
     type ImageRef,
     type ReasoningEffort,
+    type PermissionMode,
   } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
   import { providersRevision, settingsTarget } from '../providers/revision.svelte'
@@ -68,6 +71,8 @@
     onToolbarChange,
     reasoningEffort: reasoningEffortProp,
     onReasoningEffortChange,
+    permissionModes = ['default', 'plan', 'accept_edits'],
+    permissionMode = $bindable('default'),
   }: {
     purpose?: string
     model?: ModelRef | null
@@ -93,6 +98,10 @@
     /** Saved effort choice (host preference); omitted means `default`. Applied per model as its nearest allowed effort. */
     reasoningEffort?: ReasoningEffort
     onReasoningEffortChange?: (effort: ReasoningEffort) => void
+    /** Modes the host allows for this panel's runs (same list as `KitHost::permission_modes`). */
+    permissionModes?: PermissionMode[]
+    /** Bindable non-dangerous preference; full access stays private and is consumed once. */
+    permissionMode?: PermissionMode
   } = $props()
 
   const { ports, i18n, notify } = getKitContext()
@@ -116,6 +125,33 @@
     if (session?.running || effort === chosenEffort) return
     chosenEffort = effort
     onReasoningEffortChange?.(effort)
+  }
+  const MODES: PermissionMode[] = ['default', 'plan', 'accept_edits', 'auto', 'full_access']
+  const allowedModes = $derived(MODES.filter((mode) => permissionModes.includes(mode)))
+  let fullAccess = $state(false)
+  const mode: PermissionMode = $derived(
+    fullAccess && allowedModes.includes('full_access')
+      ? 'full_access'
+      : permissionMode !== 'full_access' && allowedModes.includes(permissionMode)
+        ? permissionMode
+        : (allowedModes.find((option) => option !== 'full_access') ?? 'default'),
+  )
+  async function chooseMode(next: PermissionMode) {
+    if (session?.running || next === mode || !allowedModes.includes(next)) return
+    if (next === 'full_access') {
+      if (
+        !(await notify.confirm({
+          title: t('chat.mode.fullAccessTitle'),
+          body: t('chat.mode.fullAccessBody'),
+          danger: true,
+        }))
+      )
+        return
+      if (!session?.running && allowedModes.includes(next)) fullAccess = true
+    } else {
+      fullAccess = false
+      permissionMode = next
+    }
   }
   let reasoningOpen = $state(false)
   const reasoningId = $props.id()
@@ -184,9 +220,16 @@
     model: picked,
     skills: selected,
     reasoningEffort,
+    permissionMode: mode,
     generateImage: purpose === 'chat' && generateImage && paintingModel,
     context: activeContext ? { kind: activeContext.kind, id: activeContext.id } : null,
   })
+  // Consume before awaiting run acceptance, including retries and translations. Never persist full access.
+  function consumeBase() {
+    const request = { ...base }
+    fullAccess = false
+    return request
+  }
   const currentContext = $derived(
     session?.contextUsage &&
       session.contextUsage.endpointId === picked?.endpointId &&
@@ -438,12 +481,12 @@
       }
     }
     follow = true
-    await session.retry(base, turn.id)
+    await session.retry(consumeBase(), turn.id)
   }
   async function switchModel(turn: ChatTurn, model: ModelRef) {
     if (!session || actionBusy) return
     follow = true
-    if (!(await session.retry(base, turn.id, model)))
+    if (!(await session.retry(consumeBase(), turn.id, model)))
       notify.toast('error', t(`errors.${session.actionError ?? 'internal'}`))
   }
   async function submitReply() {
@@ -465,7 +508,7 @@
     } else {
       if (!validReplyModel || !replyModel) return
       if (!targetLanguage.trim() || targetLanguage.trim().length > 80) return
-      const accepted = await session.translate({ ...base, model: replyModel }, turn.id, targetLanguage.trim())
+      const accepted = await session.translate({ ...consumeBase(), model: replyModel }, turn.id, targetLanguage.trim())
       if (accepted) replyOpen = false
       else replyError = session.actionError ? t(`errors.${session.actionError}`) : t('errors.internal')
     }
@@ -626,7 +669,7 @@
     discardRecovery()
     follow = true
     const accepted = await session.send(
-      base,
+      consumeBase(),
       original.trim(),
       webSearch,
       attached.map(({ mime, data }) => ({ mime, data })),
@@ -1125,6 +1168,38 @@
             </div>{/if}
         </div>
         <div class="tool-group send-tools">
+          {#if mode === 'plan'}<span class="plan-badge" role="status">{t('chat.mode.planBadge')}</span>{/if}
+          {#if allowedModes.length > 1 || allowedModes.includes('full_access')}
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger disabled={session.running}>
+                {#snippet child({ props })}<Button
+                    {...props}
+                    variant="ghost"
+                    size="sm"
+                    class={mode === 'full_access' ? 'mode-danger' : undefined}
+                    aria-label={`${t('chat.mode.label')}: ${t(`chat.mode.${mode}`)}`}
+                    ><ShieldIcon data-icon="inline-start" />{t(`chat.mode.${mode}`)}<ChevronDownIcon
+                      data-icon="inline-end"
+                    /></Button
+                  >{/snippet}
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content side="top" align="end" class="mode-menu">
+                <DropdownMenu.Label>{t('chat.mode.label')}</DropdownMenu.Label>
+                {#each allowedModes as option (option)}
+                  <DropdownMenu.Item
+                    class={option === 'full_access' ? 'mode-option mode-danger' : 'mode-option'}
+                    aria-current={option === mode ? 'true' : undefined}
+                    onSelect={() => void chooseMode(option)}
+                    ><span class="mode-text"
+                      ><span class="mode-name">{t(`chat.mode.${option}`)}</span><small
+                        >{t(`chat.mode.${option}Hint`)}</small
+                      ></span
+                    >{#if option === mode}<CheckIcon />{/if}</DropdownMenu.Item
+                  >
+                {/each}
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+          {/if}
           {#if picked}
             <Popover.Root bind:open={reasoningOpen}>
               <Popover.Trigger disabled={session.running}>
@@ -1676,6 +1751,36 @@
   :global(.tools-grip svg) {
     width: 0.875rem;
     height: 0.875rem;
+  }
+  .plan-badge {
+    padding: 0.125rem 0.5rem;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    color: var(--color-muted-foreground);
+    font-size: var(--kit-font-size-sm, 0.8125rem);
+    white-space: nowrap;
+  }
+  :global(.mode-menu) {
+    width: min(18rem, calc(100vw - 1rem));
+  }
+  :global(.mode-option) {
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .mode-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    min-width: 0;
+  }
+  .mode-text small {
+    color: var(--color-muted-foreground);
+    font-size: var(--kit-font-size-xs, 0.75rem);
+    white-space: normal;
+  }
+  :global(.mode-danger),
+  :global(.mode-danger) .mode-name {
+    color: var(--color-destructive);
   }
   :global(.reasoning-popover) {
     box-sizing: border-box;
