@@ -238,12 +238,14 @@ fn exited() -> KitError {
     KitError::new(KitErrorCode::Network, "MCP server exited").with_reason("server_exited")
 }
 
-/// The parent environment without credential-looking names, then the configured variables.
+/// Effective child environment: filter inherited credentials and apply configured values.
+/// Windows names are case-insensitive, including PATH used by program resolution.
 pub(crate) fn child_env(
     parent: impl IntoIterator<Item = (OsString, OsString)>,
     configured: &BTreeMap<String, String>,
 ) -> Vec<(OsString, OsString)> {
-    parent
+    let mut env: Vec<(OsString, OsString)> = Vec::new();
+    for (name, value) in parent
         .into_iter()
         .filter(|(name, _)| !is_secret_name(&name.to_string_lossy()))
         .chain(
@@ -251,7 +253,22 @@ pub(crate) fn child_env(
                 .iter()
                 .map(|(name, value)| (name.into(), value.into())),
         )
-        .collect()
+    {
+        env.retain(|(existing, _)| !same_env_name(existing, &name));
+        env.push((name, value));
+    }
+    env
+}
+
+fn same_env_name(left: &std::ffi::OsStr, right: &std::ffi::OsStr) -> bool {
+    #[cfg(windows)]
+    {
+        left.eq_ignore_ascii_case(right)
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
 }
 
 /// `*_KEY`, `*_TOKEN`, `*_SECRET`, `*PASSWORD*`, case-insensitive like Windows names.

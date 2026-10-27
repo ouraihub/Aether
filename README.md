@@ -9,13 +9,13 @@ A Rust + Tauri 2 framework for AI desktop apps with model providers, streaming c
 
 ## 目录
 
-| 路径 | 内容 |
-| --- | --- |
-| `crates/aether-*` | 核心 crate，不依赖 Tauri |
-| `plugin/tauri-plugin-aether` | Tauri 接入层，按 feature 启用能力 |
-| `packages/ui` | `@ouraihub/aether-ui`，子路径导出各能力组件 |
-| `examples/` | `assistant`、`providers-only`、`mcp-server-only`（Tauri 窗口）与 `cli`（无 Tauri） |
-| `scripts/` | Windows 本地构建用的便携 MSVC 环境脚本 |
+| 路径                         | 内容                                                                               |
+| ---------------------------- | ---------------------------------------------------------------------------------- |
+| `crates/aether-*`            | 核心 crate，不依赖 Tauri                                                           |
+| `plugin/tauri-plugin-aether` | Tauri 接入层，按 feature 启用能力                                                  |
+| `packages/ui`                | `@ouraihub/aether-ui`，子路径导出各能力组件                                        |
+| `examples/`                  | `assistant`、`providers-only`、`mcp-server-only`（Tauri 窗口）与 `cli`（无 Tauri） |
+| `scripts/`                   | Windows 本地构建用的便携 MSVC 环境脚本                                             |
 
 ## 本地检查（Windows）
 
@@ -26,6 +26,8 @@ pnpm run check
 ```
 
 本地构建固定使用便携 MSVC（由 [desktop-kit](https://github.com/ouraihub/desktop-kit) 提供；默认 `D:\Applications\msvc-portable\msvc`，可用 `PORTABLE_MSVC_ROOT` 覆盖；首次运行 `node_modules\@ouraihub\desktop-kit\msvc\setup-msvc.bat` 安装）。
+
+合并到 `main` 必须通过 `windows`、`macos-core`、`linux-core` 和 `AI review`，四项检查均由 GitHub Actions 提供。分支必须包含最新 `main`，管理员也受同样约束；不使用管理员绕过合并。历史失败运行保留用于追溯，验收以 PR 最新提交的全部检查为准。
 
 ## macOS / Linux 凭据与完整检查
 

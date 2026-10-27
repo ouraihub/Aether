@@ -537,6 +537,42 @@ fn bare_names_resolve_through_pathext_on_windows() {
     assert_eq!(resolve_program(r".\tool", &env), OsString::from(r".\tool"));
 }
 
+#[cfg(windows)]
+#[test]
+fn configured_path_and_pathext_select_the_launched_program() {
+    use crate::stdio::resolve_program;
+    let inherited = tempfile::tempdir().unwrap();
+    let configured = tempfile::tempdir().unwrap();
+    std::fs::write(inherited.path().join("tool.cmd"), "@echo inherited\r\n").unwrap();
+    std::fs::write(configured.path().join("tool.cmd"), "@echo configured\r\n").unwrap();
+    std::fs::write(configured.path().join("tool.exe"), "not an executable").unwrap();
+    let parent = [
+        (
+            OsString::from("Path"),
+            inherited.path().as_os_str().to_owned(),
+        ),
+        (OsString::from("PATHEXT"), OsString::from(".EXE")),
+    ];
+    let override_env = BTreeMap::from([
+        (
+            "PATH".to_owned(),
+            configured.path().to_str().unwrap().to_owned(),
+        ),
+        ("pathext".to_owned(), ".CMD".to_owned()),
+    ]);
+    let env = child_env(std::env::vars_os().chain(parent), &override_env);
+    let output = std::process::Command::new(resolve_program("tool", &env))
+        .env_clear()
+        .envs(env)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap().trim(),
+        "configured"
+    );
+}
+
 fn with_transport(command: &str, args: Vec<String>, cwd: Option<String>) -> ServerSave {
     let mut input = stdio("v", "normal");
     input.transport = McpTransport::Stdio {
