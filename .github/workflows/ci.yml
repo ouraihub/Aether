@@ -14,7 +14,39 @@ permissions:
   contents: read
 
 jobs:
+  scope:
+    runs-on: ubuntu-24.04
+    outputs:
+      scope: ${{ steps.classify.outputs.scope }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - id: classify
+        run: node scripts/ci-scope.mjs
+
+  light:
+    needs: scope
+    if: needs.scope.outputs.scope == 'docs' || needs.scope.outputs.scope == 'frontend'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/ci.mjs --scope "$CI_SCOPE"
+        env:
+          CI_SCOPE: ${{ needs.scope.outputs.scope }}
+
   windows:
+    needs: scope
+    if: needs.scope.outputs.scope == 'full'
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -40,6 +72,8 @@ jobs:
 
   # Native stores and the full quality gate run on both shipping Unix targets.
   macos-core:
+    needs: scope
+    if: needs.scope.outputs.scope == 'full'
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -81,6 +115,8 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/aether-ci.keychain-db"
 
   linux-core:
+    needs: scope
+    if: needs.scope.outputs.scope == 'full'
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -91,11 +127,22 @@ jobs:
           node-version: 24
           cache: pnpm
       - name: Install native desktop and Secret Service dependencies
+        timeout-minutes: 8
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential curl wget file libxdo-dev libssl-dev \
+          # The regional Azure mirror can sustain only tens of KB/s for WebKit.
+          sudo "$(command -v node)" --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+          const files = ['/etc/apt/sources.list', ...readdirSync('/etc/apt/sources.list.d').filter(name => /\.(list|sources)$/.test(name)).map(name => `/etc/apt/sources.list.d/${name}`)];
+          for (const file of files) {
+            const source = readFileSync(file, 'utf8');
+            const updated = source.replaceAll('azure.archive.ubuntu.com', 'archive.ubuntu.com');
+            if (updated !== source) writeFileSync(file, updated);
+          }
+          NODE
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update --error-on=any
+          sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends build-essential curl wget file libxdo-dev libssl-dev \
             librsvg2-dev libayatana-appindicator3-dev libwebkit2gtk-4.1-dev patchelf \
-            libdbus-1-dev gnome-keyring dbus-x11 xvfb
+            libdbus-1-dev gnome-keyring dbus-x11 xvfb xauth
       - name: Install the pinned Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -108,3 +155,18 @@ jobs:
             eval "$(printf "%s" aether-ci | gnome-keyring-daemon --unlock --components=secrets)"
             pnpm run ci
           '
+
+  ci:
+    name: CI gate
+    needs: [scope, light, windows, macos-core, linux-core]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Verify every selected check succeeded
+        run: node scripts/ci-gate.mjs
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}

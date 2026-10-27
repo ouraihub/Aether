@@ -21,19 +21,22 @@ A Rust + Tauri 2 framework for AI desktop apps with model providers, streaming c
 
 ```bat
 pnpm install
-node_modules\@ouraihub\desktop-kit\msvc\cargo-msvc.bat check --workspace --all-features
-pnpm run check
+pnpm run ci
 ```
 
 本地构建固定使用便携 MSVC（由 [desktop-kit](https://github.com/ouraihub/desktop-kit) 提供；默认 `D:\Applications\msvc-portable\msvc`，可用 `PORTABLE_MSVC_ROOT` 覆盖；首次运行 `node_modules\@ouraihub\desktop-kit\msvc\setup-msvc.bat` 安装）。
 
-合并到 `main` 必须通过 `windows`、`macos-core`、`linux-core` 和 `AI review`，四项检查均由 GitHub Actions 提供。分支必须包含最新 `main`，管理员也受同样约束；不使用管理员绕过合并。历史失败运行保留用于追溯，验收以 PR 最新提交的全部检查为准。
+合并到 `main` 必须通过确定性 `CI gate`，分支须包含最新 `main`，管理员也受约束。普通文档仅运行策略／提交检查；纯 `packages/ui/src` 手写 TS/Svelte/CSS 运行前端 lint、格式、类型、测试、示例构建及 i18n；Rust、依赖、生成 DTO、CI／构建／代理规则和未知路径完整运行三平台。混合改动取最高风险，无法确定范围完整执行；最终门禁要求所有适用任务真实成功，不把意外 skipped 算通过。
+
+本地 `pnpm run ci` 默认完整执行；显式 `node scripts/ci.mjs --scope docs|frontend` 与远端轻检查复用相同步骤。手动触发始终完整检查。同 PR 新提交取消旧运行；不实现历史凭据复用，不新增 `actions: read`。AI review 保留辅助意见，但不作为必需检查或自动合并裁判；维护者或获授权助手须处理实质问题后通过正常 PR 合并，不使用管理员绕过。历史失败记录保留，验收看最新提交适用检查。
 
 ## macOS / Linux 凭据与完整检查
 
 Windows DPAPI 格式保持不变。macOS 使用用户 Keychain，Linux 使用已解锁的持久 Secret Service（例如 GNOME Keyring）；没有服务或服务锁定就拒绝保存凭据，不影响不需要凭据的离线功能，不回落普通文件主密钥或明文。宿主可复用 `aether_providers::secrets::{protect, unprotect}` 的字节接口，具体格式和错误见 [基础设计 §2](docs/10-详细设计-基础与可观测性.md#2-secret决策-d3windows--macos--linux-原生存储)。
 
 Linux 原生编译需 `libdbus-1-dev`，完整 Tauri workspace 另需 GTK/WebKitGTK 4.1、AppIndicator、OpenSSL 和打包工具（依赖清单见 `.github/workflows/ci.yml`，Ubuntu 22.04 基线）。在桌面已解锁的 Secret Service 会话中直接运行 `pnpm install --frozen-lockfile && pnpm run ci`；headless runner 用真实服务：
+
+Linux CI 的 apt 使用 Ubuntu 官方归档源而非 Azure 区域镜像，禁用推荐包并显式安装 `xauth`；安装步骤限时 8 分钟，HTTP(S) 无响应限时 30 秒。下载异常会失败而非消耗整个任务时限，不能当作平台检查已通过。
 
 ```sh
 dbus-run-session -- xvfb-run -a bash -euc '
