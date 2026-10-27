@@ -12,9 +12,37 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  reuse:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      reuse: ${{ steps.resolve.outputs.reuse }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Resolve successful checks for the exact tested tree
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci-reuse.mjs resolve
+
+  reused-ci:
+    needs: reuse
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.reuse.outputs.reuse == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "The exact merged tree already passed all three native jobs; see the reuse job summary for provenance."
+
   windows:
+    needs: reuse
+    if: ${{ !cancelled() && (github.event_name != 'push' || github.ref != 'refs/heads/main' || needs.reuse.outputs.reuse != 'true') }}
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -37,9 +65,19 @@ jobs:
         run: call node_modules\@ouraihub\desktop-kit\msvc\msvc-env.bat
       # Every check lives in scripts/ci.mjs; locally run the same `pnpm run ci` before pushing.
       - run: pnpm run ci
+      - name: Record tested tree
+        run: node scripts/ci-reuse.mjs record windows
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ci-receipt-windows-${{ github.run_attempt }}
+          path: .ci-receipt/windows.json
+          if-no-files-found: error
+          retention-days: 14
 
   # Native stores and the full quality gate run on both shipping Unix targets.
   macos-core:
+    needs: reuse
+    if: ${{ !cancelled() && (github.event_name != 'push' || github.ref != 'refs/heads/main' || needs.reuse.outputs.reuse != 'true') }}
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -79,8 +117,18 @@ jobs:
             security list-keychains -d user -s "$original"
           fi
           security delete-keychain "$RUNNER_TEMP/aether-ci.keychain-db"
+      - name: Record tested tree
+        run: node scripts/ci-reuse.mjs record macos-core
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ci-receipt-macos-core-${{ github.run_attempt }}
+          path: .ci-receipt/macos-core.json
+          if-no-files-found: error
+          retention-days: 14
 
   linux-core:
+    needs: reuse
+    if: ${{ !cancelled() && (github.event_name != 'push' || github.ref != 'refs/heads/main' || needs.reuse.outputs.reuse != 'true') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -108,3 +156,11 @@ jobs:
             eval "$(printf "%s" aether-ci | gnome-keyring-daemon --unlock --components=secrets)"
             pnpm run ci
           '
+      - name: Record tested tree
+        run: node scripts/ci-reuse.mjs record linux-core
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ci-receipt-linux-core-${{ github.run_attempt }}
+          path: .ci-receipt/linux-core.json
+          if-no-files-found: error
+          retention-days: 14

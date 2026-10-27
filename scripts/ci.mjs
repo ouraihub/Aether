@@ -9,6 +9,7 @@ const cargo = (args) =>
   process.platform === 'win32' ? `node_modules\\@ouraihub\\desktop-kit\\msvc\\cargo-msvc.bat ${args}` : `cargo ${args}`
 
 const steps = [
+  'node --test scripts/ci-reuse.test.mjs',
   'pnpm exec release-kit check',
   'pnpm run check',
   // tauri::generate_context! in the examples needs each `frontendDist` to exist.
