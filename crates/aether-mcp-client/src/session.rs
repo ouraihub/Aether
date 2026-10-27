@@ -1,14 +1,12 @@
 //! The per-run tool catalogue and calls (docs/13 §3, §4).
 
-use std::time::Duration;
-
 use aether_support::KitError;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::Approval;
 use crate::protocol::{Connection, RpcError};
-use crate::store::Target;
+use crate::store::{Target, Timeouts};
 
 /// One MCP tool in the run catalogue.
 #[derive(Debug, Clone, PartialEq)]
@@ -58,15 +56,16 @@ pub(crate) struct SessionServer {
     pub(crate) tools: Vec<McpTool>,
 }
 
-/// Connections reused for one run, one per server, opened on demand.
+/// Connections reused for one run, one per server, opened on demand. A stdio server
+/// process lives as long as its connection: dropping the session ends it.
 pub struct McpSession {
     servers: Vec<SessionServer>,
-    timeout: Duration,
+    timeouts: Timeouts,
 }
 
 impl McpSession {
-    pub(crate) const fn new(servers: Vec<SessionServer>, timeout: Duration) -> Self {
-        Self { servers, timeout }
+    pub(crate) const fn new(servers: Vec<SessionServer>, timeouts: Timeouts) -> Self {
+        Self { servers, timeouts }
     }
 
     /// The catalogue fixed at the start of the run.
@@ -85,7 +84,7 @@ impl McpSession {
         args: Value,
         cancel: &CancellationToken,
     ) -> McpCallResult {
-        let timeout = self.timeout;
+        let timeouts = self.timeouts;
         let found = self.servers.iter_mut().find_map(|server| {
             let name = server
                 .tools
@@ -101,10 +100,11 @@ impl McpSession {
                 message: format!("unknown tool {prefixed}"),
             };
         };
-        let mut connection = match server.connection.take() {
+        // A stdio process that exited or was ended after a lost answer is restarted.
+        let mut connection = match server.connection.take().filter(Connection::is_alive) {
             Some(connection) => connection,
             // Nothing was called yet, so a failed handshake is a plain error.
-            None => match server.target.connect(timeout, cancel).await {
+            None => match server.target.connect(timeouts, cancel).await {
                 Ok(connection) => connection,
                 Err(error) => return failed(&error),
             },

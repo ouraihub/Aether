@@ -1,6 +1,7 @@
-//! Reading a skill package from a `SKILL.md`, a directory or a ZIP (docs/14 §2.2).
+//! Reading a skill package from a `SKILL.md`, a directory or a ZIP (docs/14 §2).
 //! Everything stays in memory; sizes are counted on the bytes actually read, never
-//! taken from ZIP headers (docs/14 §7.3).
+//! taken from ZIP headers (docs/14 §7.3). Packaged files are data: nothing here runs
+//! them or writes them to disk.
 
 use std::fs::{self, File};
 use std::io::{self, Cursor, Read};
@@ -8,19 +9,26 @@ use std::path::{Path, PathBuf};
 
 use aether_support::{KitError, mask};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use ts_rs::TS;
 use zip::ZipArchive;
 use zip::result::ZipError;
 
+use crate::dto::SkillFileKind;
 use crate::frontmatter::{self, SkillFile};
+use crate::store::hex;
 
-const MAX_ZIP: usize = 512 * 1024;
-const MAX_ENTRIES: usize = 8;
+const MAX_ZIP: usize = 5 * 1024 * 1024;
+/// ZIP entries, or files and directories visited when importing a directory.
+const MAX_ENTRIES: usize = 200;
+/// Bytes read across every file of one package.
+const MAX_TOTAL: usize = 16 * 1024 * 1024;
+const MAX_FILE: usize = 1024 * 1024;
 const MAX_SKILL: usize = 64 * 1024;
 const MAX_LICENSE: usize = 32 * 1024;
-// The 256 KiB cumulative cap of docs/14 §2.2 holds by construction: only SKILL.md
-// (64 KiB) and license files (32 KiB each) are decompressed, and a second license is
-// rejected as `duplicate` right after it is read, so at most ~128 KiB is ever inflated.
+/// Directory levels of a packaged file, its top-level directory included
+/// (`scripts/a/b/c/x.py` is the deepest allowed).
+const MAX_DEPTH: usize = 4;
 
 /// Where a skill package comes from. JSON: `{ "path": "C:\\…" }` or
 /// `{ "bytes": { "fileName": "x.zip", "bytes": [80, 75, …] } }`.
@@ -45,6 +53,19 @@ pub enum Source {
 pub(crate) struct Package {
     pub(crate) skill: SkillFile,
     pub(crate) license: Option<String>,
+    /// `scripts/`, `references/` and `assets/` files, sorted by path.
+    pub(crate) files: Vec<PackageFile>,
+}
+
+/// One file under `scripts/`, `references/` or `assets/`.
+#[derive(Debug)]
+pub(crate) struct PackageFile {
+    /// Package-relative, `/`-separated.
+    pub(crate) path: String,
+    pub(crate) kind: SkillFileKind,
+    /// Lowercase hex `sha256` of `content`.
+    pub(crate) sha256: String,
+    pub(crate) content: Vec<u8>,
 }
 
 /// Reads and fully validates a package.
@@ -54,7 +75,11 @@ pub(crate) fn read(source: &Source) -> Result<Package, KitError> {
         Source::Bytes { file_name, bytes } if is_zip(Path::new(file_name)) => read_zip(bytes),
         Source::Bytes { bytes, .. } => {
             let mut files = Files::default();
-            files.put("SKILL.md", bytes, MAX_SKILL)?;
+            files.put(
+                "SKILL.md",
+                Slot::Skill,
+                read_capped(bytes.as_slice(), MAX_SKILL)?,
+            )?;
             files.finish()
         }
     }
@@ -69,7 +94,9 @@ fn read_path(path: &Path) -> Result<Package, KitError> {
         return Err(KitError::bad_request("path", "link"));
     }
     if meta.is_dir() {
-        return read_dir(path);
+        let mut files = Files::default();
+        walk(path, "", &mut files)?;
+        return files.finish();
     }
     if is_zip(path) {
         let bytes = read_capped(File::open(path)?, MAX_ZIP)?;
@@ -78,34 +105,47 @@ fn read_path(path: &Path) -> Result<Package, KitError> {
     let mut files = Files::default();
     files.put(
         "SKILL.md",
-        &read_capped(File::open(path)?, MAX_SKILL)?,
-        MAX_SKILL,
+        Slot::Skill,
+        read_capped(File::open(path)?, MAX_SKILL)?,
     )?;
     files.finish()
 }
 
-/// Top level only; links (including Windows junctions) are refused, not followed.
-fn read_dir(dir: &Path) -> Result<Package, KitError> {
-    let mut files = Files::default();
+/// Reads `dir` as the package directory at `prefix` (`""` = root). Only `scripts/`,
+/// `references/` and `assets/` are descended into; links (including Windows junctions)
+/// are refused, not followed.
+fn walk(dir: &Path, prefix: &str, files: &mut Files) -> Result<(), KitError> {
     for entry in fs::read_dir(dir)? {
         let path = entry?.path();
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
+        let rel = if prefix.is_empty() {
+            name
+        } else {
+            format!("{prefix}/{name}")
+        };
+        files.count()?;
         let meta = fs::symlink_metadata(&path)?;
         if is_link(&meta) {
-            return Err(KitError::bad_request(&name, "link"));
+            return Err(KitError::bad_request(&rel, "link"));
         }
-        match limit_for(&name) {
-            Some(limit) if meta.is_file() => {
-                files.put(&name, &read_capped(File::open(&path)?, limit)?, limit)?;
+        if meta.is_dir() {
+            if prefix.is_empty() && file_kind(&rel).is_none() {
+                files.unsupported.push(format!("{rel}/"));
+            } else {
+                check_path(&rel, rel.matches('/').count() + 1)?;
+                walk(&path, &rel, files)?;
             }
-            _ if meta.is_dir() => files.unsupported.push(format!("{name}/")),
-            _ => files.unsupported.push(name),
+        } else if let Some(slot) = classify(&rel)?.filter(|_| meta.is_file()) {
+            let data = read_capped(File::open(&path)?, files.cap(slot))?;
+            files.put(&rel, slot, data)?;
+        } else {
+            files.unsupported.push(rel);
         }
     }
-    files.finish()
+    Ok(())
 }
 
 fn read_zip(bytes: &[u8]) -> Result<Package, KitError> {
@@ -148,11 +188,12 @@ fn read_zip(bytes: &[u8]) -> Result<Package, KitError> {
     let mut files = Files::default();
     for (index, path) in &entries {
         let name = &path[strip..];
-        match limit_for(name) {
-            Some(limit) => {
+        match classify(name)? {
+            Some(slot) => {
                 let entry = archive.by_index(*index).map_err(invalid_zip)?;
-                let data = read_capped(entry, limit).map_err(|e| invalid_zip(e.into()))?;
-                files.put(name, &data, limit)?;
+                let data =
+                    read_capped(entry, files.cap(slot)).map_err(|e| invalid_zip(e.into()))?;
+                files.put(name, slot, data)?;
             }
             None => files.unsupported.push(name.to_owned()),
         }
@@ -178,36 +219,139 @@ fn normalize(name: &str) -> Result<String, KitError> {
     Ok(parts.join("/"))
 }
 
+/// What a package path holds.
+#[derive(Debug, Clone, Copy)]
+enum Slot {
+    Skill,
+    License,
+    File(SkillFileKind),
+}
+
+impl Slot {
+    fn limit(self) -> usize {
+        match self {
+            Self::Skill => MAX_SKILL,
+            Self::License => MAX_LICENSE,
+            Self::File(_) => MAX_FILE,
+        }
+    }
+}
+
+/// `None` = not part of the package format (reported as `unsupported_files`). Paths
+/// under the three file directories must have valid names and depth.
+fn classify(path: &str) -> Result<Option<Slot>, KitError> {
+    match path {
+        "SKILL.md" => return Ok(Some(Slot::Skill)),
+        "LICENSE" | "LICENSE.md" | "LICENSE.txt" => return Ok(Some(Slot::License)),
+        _ => {}
+    }
+    match file_kind(path) {
+        Some(kind) if path.contains('/') => {
+            check_path(path, path.matches('/').count())?;
+            Ok(Some(Slot::File(kind)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// The kind given by the first path segment.
+fn file_kind(path: &str) -> Option<SkillFileKind> {
+    match path.split('/').next() {
+        Some("scripts") => Some(SkillFileKind::Script),
+        Some("references") => Some(SkillFileKind::Reference),
+        Some("assets") => Some(SkillFileKind::Asset),
+        _ => None,
+    }
+}
+
+/// Every segment matches `[A-Za-z0-9._-]+` without a leading `.`; at most
+/// [`MAX_DEPTH`] directory levels.
+fn check_path(path: &str, levels: usize) -> Result<(), KitError> {
+    let valid = |segment: &str| {
+        !segment.is_empty()
+            && !segment.starts_with('.')
+            && segment
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    };
+    if !path.split('/').all(valid) {
+        return Err(KitError::bad_request(path, "invalid_name"));
+    }
+    if levels > MAX_DEPTH {
+        return Err(KitError::bad_request(path, "too_deep").with_limit(MAX_DEPTH as u64));
+    }
+    Ok(())
+}
+
 #[derive(Default)]
 struct Files {
     skill: Option<String>,
     license: Option<String>,
+    files: Vec<PackageFile>,
     unsupported: Vec<String>,
+    /// Bytes read so far, for [`MAX_TOTAL`].
+    total: usize,
+    /// Directory entries visited, for [`MAX_ENTRIES`].
+    entries: usize,
 }
 
 impl Files {
-    fn put(&mut self, name: &str, bytes: &[u8], limit: usize) -> Result<(), KitError> {
+    /// Counts one directory entry against [`MAX_ENTRIES`].
+    fn count(&mut self) -> Result<(), KitError> {
+        self.entries += 1;
+        if self.entries > MAX_ENTRIES {
+            return Err(too_large("entries", MAX_ENTRIES));
+        }
+        Ok(())
+    }
+
+    /// How many bytes to read for `slot`: one past whichever limit is closer, so
+    /// [`Files::put`] can tell an oversize file from an exhausted package budget.
+    fn cap(&self, slot: Slot) -> usize {
+        slot.limit().min(MAX_TOTAL.saturating_sub(self.total))
+    }
+
+    fn put(&mut self, name: &str, slot: Slot, bytes: Vec<u8>) -> Result<(), KitError> {
+        let limit = slot.limit();
         if bytes.len() > limit {
             return Err(too_large(name, limit));
         }
-        let text = std::str::from_utf8(bytes)
-            .map_err(|_| KitError::bad_request(name, "not_utf8"))?
-            .to_owned();
-        // Report the line only; the matched text never reaches errors or logs (docs/14 §2.2).
-        if let Some((line, _)) = mask::find_secret(&text) {
-            return Err(KitError::bad_request(
-                &format!("{name}:{line}"),
-                "secret_detected",
-            ));
+        self.total += bytes.len();
+        if self.total > MAX_TOTAL {
+            return Err(too_large("total", MAX_TOTAL));
         }
-        let slot = if name == "SKILL.md" {
-            &mut self.skill
-        } else {
-            &mut self.license
+        let kind = match slot {
+            Slot::Skill | Slot::License => {
+                let text = text(name, bytes)?;
+                let target = if matches!(slot, Slot::Skill) {
+                    &mut self.skill
+                } else {
+                    &mut self.license
+                };
+                if target.replace(text).is_some() {
+                    return Err(KitError::bad_request(name, "duplicate"));
+                }
+                return Ok(());
+            }
+            Slot::File(kind) => kind,
         };
-        if slot.replace(text).is_some() {
-            return Err(KitError::bad_request(name, "duplicate"));
-        }
+        let content = match kind {
+            SkillFileKind::Script | SkillFileKind::Reference => text(name, bytes)?.into_bytes(),
+            // Assets may be binary; text assets are still checked for credentials.
+            SkillFileKind::Asset => match String::from_utf8(bytes) {
+                Ok(text) => {
+                    check_secret(name, &text)?;
+                    text.into_bytes()
+                }
+                Err(error) => error.into_bytes(),
+            },
+        };
+        self.files.push(PackageFile {
+            path: name.to_owned(),
+            kind,
+            sha256: hex(&Sha256::digest(&content)),
+            content,
+        });
         Ok(())
     }
 
@@ -222,18 +366,30 @@ impl Files {
         let skill = self
             .skill
             .ok_or_else(|| KitError::bad_request("SKILL.md", "missing"))?;
+        self.files.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(Package {
             skill: frontmatter::parse(&skill)?,
             license: self.license,
+            files: self.files,
         })
     }
 }
 
-fn limit_for(name: &str) -> Option<usize> {
-    match name {
-        "SKILL.md" => Some(MAX_SKILL),
-        "LICENSE" | "LICENSE.md" | "LICENSE.txt" => Some(MAX_LICENSE),
-        _ => None,
+/// UTF-8 text without anything that looks like a credential.
+fn text(name: &str, bytes: Vec<u8>) -> Result<String, KitError> {
+    let text = String::from_utf8(bytes).map_err(|_| KitError::bad_request(name, "not_utf8"))?;
+    check_secret(name, &text)?;
+    Ok(text)
+}
+
+/// Reports the line only; the matched text never reaches errors or logs (docs/14 §2.2).
+fn check_secret(name: &str, text: &str) -> Result<(), KitError> {
+    match mask::find_secret(text) {
+        Some((line, _)) => Err(KitError::bad_request(
+            &format!("{name}:{line}"),
+            "secret_detected",
+        )),
+        None => Ok(()),
     }
 }
 

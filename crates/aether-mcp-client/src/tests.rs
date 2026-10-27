@@ -11,7 +11,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
-use crate::{Approval, CancellationToken, McpCallResult, ServerSave, ServerSecret, Store};
+use crate::{
+    Approval, CancellationToken, McpCallResult, McpTransport, ServerSave, ServerSecret, Store,
+};
+
+mod stdio;
 
 /// What the fake server saw.
 #[derive(Clone, Debug)]
@@ -142,7 +146,9 @@ fn save(slug: &str, url: &str) -> ServerSave {
         id: None,
         slug: slug.to_owned(),
         name: slug.to_owned(),
-        url: url.to_owned(),
+        transport: McpTransport::Http {
+            url: url.to_owned(),
+        },
         secret: None,
         enabled: true,
         trusted: true,
@@ -313,7 +319,7 @@ async fn timeout_after_send_is_unknown() {
     })
     .await;
     let (_dir, mut store) = store();
-    store.timeout = Duration::from_millis(300);
+    store.timeouts.request = Duration::from_millis(300);
     store.save(save("slow", &fake.url)).unwrap();
     let cancel = CancellationToken::new();
     let mut session = store.session(&cancel, None).await;
@@ -416,9 +422,10 @@ async fn credential_query_is_sent_but_never_stored_in_url() {
             "Bearer hdr-123".to_owned(),
         )])),
         query: Some(BTreeMap::from([("ak".to_owned(), "qry-456".to_owned())])),
+        env: None,
     });
     let listed = store.save(input).unwrap();
-    assert_eq!(listed[0].url, url);
+    assert_eq!(listed[0].transport, McpTransport::Http { url: url.clone() });
     assert_eq!(listed[0].secret_keys, ["Authorization", "ak"]);
     let id = listed[0].id.clone();
 
@@ -453,6 +460,7 @@ async fn credential_query_is_sent_but_never_stored_in_url() {
     clear.secret = Some(ServerSecret {
         headers: None,
         query: None,
+        env: None,
     });
     assert!(store.save(clear).unwrap()[0].secret_keys.is_empty());
 }

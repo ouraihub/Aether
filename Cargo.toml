@@ -38,6 +38,7 @@ tauri-build = "=2.7.1"
 tauri-plugin = { version = "=2.7.1", features = ["build"] }
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 tokio-util = "=0.7.19"
+process-wrap = { version = "=10.0.1", default-features = false, features = ["tokio1", "job-object", "process-group", "kill-on-drop", "creation-flags"] }
 reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls", "json", "stream"] }
 rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 tracing = "0.1"

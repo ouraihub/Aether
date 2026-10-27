@@ -36,4 +36,12 @@ bodyChars: number,
 /**
  * Unix milliseconds.
  */
-updatedAt: number, };
+updatedAt: number, 
+/**
+ * At least one `scripts/**` file is packaged.
+ */
+hasScripts: boolean, 
+/**
+ * Number of packaged files (scripts, references, assets).
+ */
+fileCount: number, };

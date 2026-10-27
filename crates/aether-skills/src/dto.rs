@@ -20,6 +20,33 @@ pub enum SkillOrigin {
     Builtin,
 }
 
+/// Which package directory a file came from (docs/14 §2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SkillFileKind {
+    /// `scripts/**`: UTF-8 text; never executed by this crate.
+    Script,
+    /// `references/**`: UTF-8 text.
+    Reference,
+    /// `assets/**`: any bytes.
+    Asset,
+}
+
+/// A packaged file without its content; read it with `Store::file`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SkillFileMeta {
+    /// Package-relative path with `/` separators, e.g. `scripts/run.py`.
+    pub path: String,
+    /// Directory kind.
+    pub kind: SkillFileKind,
+    /// Size in bytes.
+    #[ts(type = "number")]
+    pub size: u64,
+}
+
 /// List entry: metadata only, never the body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +70,10 @@ pub struct SkillMeta {
     /// Unix milliseconds.
     #[ts(type = "number")]
     pub updated_at: i64,
+    /// At least one `scripts/**` file is packaged.
+    pub has_scripts: bool,
+    /// Number of packaged files (scripts, references, assets).
+    pub file_count: u32,
 }
 
 /// A skill with its full text.
@@ -60,6 +91,8 @@ pub struct SkillDto {
     pub license: Option<String>,
     /// Uninterpreted frontmatter keys, shown as-is.
     pub extra: BTreeMap<String, String>,
+    /// Packaged files, sorted by path; empty for hand-written and built-in skills.
+    pub files: Vec<SkillFileMeta>,
 }
 
 /// Whether confirming a preview installs a new skill or replaces one with the same name.
@@ -89,7 +122,8 @@ pub struct PreviewCurrent {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct Preview {
-    /// `sha256(name|description|version|body)`.
+    /// `sha256` over the name, description, version, body, license and every packaged
+    /// file (sorted by path).
     pub digest: String,
     /// Frontmatter `name`.
     pub name: String,
@@ -103,6 +137,8 @@ pub struct Preview {
     pub license: Option<String>,
     /// Uninterpreted frontmatter keys.
     pub extra: BTreeMap<String, String>,
+    /// Packaged files, sorted by path.
+    pub files: Vec<SkillFileMeta>,
     /// Install or replace.
     pub action: PreviewAction,
     /// Present when `action` is `replace`.

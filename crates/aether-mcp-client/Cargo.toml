@@ -10,12 +10,20 @@ reqwest.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+# stdio transport: child process with piped, line-delimited JSON-RPC (docs/13 §3).
+tokio = { workspace = true, features = ["process", "io-util"] }
+# The server's whole tree lives in a kill-on-close Job Object (Windows) or a process
+# group (Unix), so descendants end with the session even after the root has exited.
+process-wrap.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 ts-rs.workspace = true
 url.workspace = true
 zeroize.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# `CREATE_NO_WINDOW` for process-wrap's `CreationFlags`.
+windows = { workspace = true, features = ["Win32_System_Threading"] }
 
 [dev-dependencies]
 tempfile.workspace = true

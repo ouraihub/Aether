@@ -1,101 +1,25 @@
-//! Streamable HTTP JSON-RPC client (docs/13 §3). Hand-written on `aether_support::net`
-//! so every request goes through the address policy and the no-redirect client.
+//! Transport-independent JSON-RPC session (docs/13 §3): handshake, paged discovery, calls,
+//! deadlines and cancellation. `http` and `stdio` only move messages.
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
-use aether_support::net::{self, AddressPolicy, HostPort};
-use aether_support::sse::{SseEvent, SseParser};
 use aether_support::{KitError, KitErrorCode};
-use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
-use reqwest::{Response, StatusCode};
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
-use url::{Host, Url};
+
+use crate::http::HttpLink;
+use crate::stdio::StdioLink;
 
 const PROTOCOL_VERSION: &str = "2025-03-26";
 const ACCEPTED_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26"];
-const SESSION_HEADER: &str = "mcp-session-id";
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// Per request, from connecting until the body is read.
+/// Per request, from sending until the answer is read.
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+/// A JSON body, SSE stream or stdio line.
+pub(crate) const MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_PAGES: usize = 10;
 const MAX_TOOLS: usize = 200;
 const MAX_DESCRIPTION_CHARS: usize = 1024;
 const MAX_SCHEMA_BYTES: usize = 32 * 1024;
-
-/// Credentials of one server, sealed at rest as this JSON (docs/13 §2).
-// ponytail: the parsed maps are plain Strings, not zeroized; only the sealed JSON is.
-#[derive(Default, Serialize, Deserialize)]
-pub(crate) struct Secret {
-    #[serde(default)]
-    pub(crate) headers: BTreeMap<String, String>,
-    #[serde(default)]
-    pub(crate) query: BTreeMap<String, String>,
-}
-
-impl Secret {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.headers.is_empty() && self.query.is_empty()
-    }
-
-    /// Names only, for display.
-    pub(crate) fn keys(&self) -> Vec<String> {
-        self.headers
-            .keys()
-            .chain(self.query.keys())
-            .cloned()
-            .collect()
-    }
-
-    /// Validates header names/values and query names.
-    pub(crate) fn header_map(&self) -> Result<HeaderMap, KitError> {
-        if self.query.keys().any(String::is_empty) {
-            return Err(KitError::bad_request("secret", "query"));
-        }
-        let mut map = HeaderMap::new();
-        for (name, value) in &self.headers {
-            let name = HeaderName::from_bytes(name.as_bytes())
-                .map_err(|_| KitError::bad_request("secret", "header"))?;
-            let mut value = HeaderValue::from_str(value)
-                .map_err(|_| KitError::bad_request("secret", "header"))?;
-            value.set_sensitive(true);
-            map.insert(name, value);
-        }
-        Ok(map)
-    }
-
-    fn values(&self) -> Vec<String> {
-        self.headers
-            .values()
-            .chain(self.query.values())
-            .cloned()
-            .collect()
-    }
-}
-
-/// The policy for one server: its own `host:port` is allowed when the user granted it.
-pub(crate) fn policy(url: &str, allow_private: bool) -> AddressPolicy {
-    let target = Url::parse(url)
-        .ok()
-        .filter(|_| allow_private)
-        .and_then(|url| {
-            let host = match url.host()? {
-                Host::Domain(domain) => domain.to_owned(),
-                Host::Ipv4(ip) => ip.to_string(),
-                Host::Ipv6(ip) => ip.to_string(),
-            };
-            Some(HostPort {
-                host,
-                port: url.port_or_known_default()?,
-            })
-        });
-    AddressPolicy {
-        allow_private: target.into_iter().collect(),
-    }
-}
 
 /// A tool as discovered, already within the limits of docs/13 §3.
 pub(crate) struct Tool {
@@ -135,9 +59,9 @@ pub(crate) enum RpcError {
     /// The request never reached the server, or the server answered with an error.
     Failed(KitError),
     /// The request was sent but the answer never arrived (timeout, broken connection,
-    /// cancel, oversized body): it may have been executed (docs/13 §3).
+    /// cancel, oversized message): it may have been executed (docs/13 §3).
     Unknown(KitError),
-    /// 404 to a request carrying a session id: the session expired.
+    /// The server forgot the session (http 404 with a session id).
     Expired,
 }
 
@@ -150,47 +74,104 @@ impl RpcError {
     }
 }
 
-/// One server connection: credentials applied, session id remembered.
+/// Moves JSON-RPC messages to one server. Deadlines and cancellation are applied by
+/// [`Connection`] around these futures, so they must tolerate being dropped mid-flight.
+pub(crate) trait Transport {
+    /// Sends a request and returns the response message whose `id` matches.
+    async fn request(&mut self, message: &Value, id: u64) -> Result<Value, RpcError>;
+    /// Sends a notification; no response is expected.
+    async fn notify(&mut self, message: &Value) -> Result<(), RpcError>;
+    /// Forgets server-side session state before a new handshake.
+    fn reset(&mut self);
+    /// A request was dropped without an answer; the link decides whether it stays usable.
+    fn abandon(&mut self);
+    /// Whether later requests may still succeed.
+    fn is_alive(&self) -> bool;
+    /// Plaintext credentials, replaced in error excerpts.
+    fn known(&self) -> &[String];
+}
+
+/// The transports of docs/13 §2.
+pub(crate) enum Link {
+    Http(Box<HttpLink>),
+    Stdio(Box<StdioLink>),
+}
+
+impl Transport for Link {
+    async fn request(&mut self, message: &Value, id: u64) -> Result<Value, RpcError> {
+        match self {
+            Self::Http(link) => link.request(message, id).await,
+            Self::Stdio(link) => link.request(message, id).await,
+        }
+    }
+
+    async fn notify(&mut self, message: &Value) -> Result<(), RpcError> {
+        match self {
+            Self::Http(link) => link.notify(message).await,
+            Self::Stdio(link) => link.notify(message).await,
+        }
+    }
+
+    fn reset(&mut self) {
+        match self {
+            Self::Http(link) => link.reset(),
+            Self::Stdio(link) => link.reset(),
+        }
+    }
+
+    fn abandon(&mut self) {
+        match self {
+            Self::Http(link) => link.abandon(),
+            Self::Stdio(link) => link.abandon(),
+        }
+    }
+
+    fn is_alive(&self) -> bool {
+        match self {
+            Self::Http(link) => link.is_alive(),
+            Self::Stdio(link) => link.is_alive(),
+        }
+    }
+
+    fn known(&self) -> &[String] {
+        match self {
+            Self::Http(link) => link.known(),
+            Self::Stdio(link) => link.known(),
+        }
+    }
+}
+
+/// One server connection after a successful handshake.
 pub(crate) struct Connection {
-    http: reqwest::Client,
-    /// The stored url plus the secret query parameters; never logged.
-    url: Url,
-    headers: HeaderMap,
-    /// Plaintext credentials, replaced in upstream error excerpts.
-    known: Vec<String>,
-    session: Option<HeaderValue>,
+    link: Link,
     timeout: Duration,
     next_id: u64,
 }
 
 impl Connection {
-    /// Validates the url against the policy and performs the handshake.
+    /// Performs the handshake within `startup`, then uses `timeout` per request.
     pub(crate) async fn open(
-        url: &str,
-        secret: &Secret,
-        allow_private: bool,
+        link: Link,
         timeout: Duration,
+        startup: Duration,
         cancel: &CancellationToken,
     ) -> Result<Self, KitError> {
-        let policy = policy(url, allow_private);
-        let mut full = net::check_url(url, &policy)?;
-        if !secret.query.is_empty() {
-            full.query_pairs_mut().extend_pairs(&secret.query);
-        }
         let mut connection = Self {
-            http: net::client(policy, CONNECT_TIMEOUT)?,
-            url: full,
-            headers: secret.header_map()?,
-            known: secret.values(),
-            session: None,
+            link,
             timeout,
             next_id: 0,
         };
-        connection
-            .handshake(cancel)
+        // One deadline over the whole handshake: a server that never answers `initialize`
+        // is given up on after `startup`, not after each step.
+        bounded(startup, cancel, connection.handshake())
             .await
             .map_err(RpcError::into_error)?;
         Ok(connection)
+    }
+
+    /// Whether the connection can be reused for the next call.
+    pub(crate) fn is_alive(&self) -> bool {
+        self.link.is_alive()
     }
 
     /// All pages of `tools/list`, within the limits of docs/13 §3.
@@ -224,31 +205,37 @@ impl Connection {
         Ok(tools)
     }
 
-    /// A JSON-RPC request; a 404 means the session expired and triggers one re-handshake.
+    /// A JSON-RPC request; an expired session triggers one re-handshake.
     pub(crate) async fn call(
         &mut self,
         method: &str,
         params: Value,
         cancel: &CancellationToken,
     ) -> Result<Value, RpcError> {
-        match self.request(method, &params, cancel).await {
+        let timeout = self.timeout;
+        match bounded(timeout, cancel, self.request(method, &params)).await {
             Err(RpcError::Expired) => {
                 tracing::debug!("mcp.client.session_expired");
-                self.session = None;
-                self.handshake(cancel).await?;
-                self.request(method, &params, cancel).await
+                self.link.reset();
+                bounded(timeout, cancel, self.handshake()).await?;
+                bounded(timeout, cancel, self.request(method, &params)).await
             }
             other => other,
         }
+        .inspect_err(|error| {
+            if matches!(error, RpcError::Unknown(_)) {
+                self.link.abandon();
+            }
+        })
     }
 
-    async fn handshake(&mut self, cancel: &CancellationToken) -> Result<(), RpcError> {
+    async fn handshake(&mut self) -> Result<(), RpcError> {
         let params = json!({
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": { "name": "aether", "version": env!("CARGO_PKG_VERSION") },
         });
-        let result = self.request("initialize", &params, cancel).await?;
+        let result = self.request("initialize", &params).await?;
         let Some(version) = result["protocolVersion"].as_str() else {
             return Err(RpcError::Failed(
                 KitError::new(
@@ -261,146 +248,29 @@ impl Connection {
         if !ACCEPTED_VERSIONS.contains(&version) {
             return Err(RpcError::Failed(KitError::unsupported("protocol_version")));
         }
-        let body = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
-        let timeout = self.timeout;
-        bounded(timeout, cancel, async {
-            let response = self.post(&body).await?;
-            if response.status().is_success() {
-                Ok(())
-            } else {
-                Err(RpcError::Failed(self.upstream(response).await))
-            }
-        })
-        .await
+        self.link
+            .notify(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))
+            .await
     }
 
-    async fn request(
-        &mut self,
-        method: &str,
-        params: &Value,
-        cancel: &CancellationToken,
-    ) -> Result<Value, RpcError> {
+    async fn request(&mut self, method: &str, params: &Value) -> Result<Value, RpcError> {
         self.next_id += 1;
         let id = self.next_id;
-        let body = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        let timeout = self.timeout;
-        bounded(timeout, cancel, async {
-            let had_session = self.session.is_some();
-            let response = self.post(&body).await?;
-            let status = response.status();
-            if status == StatusCode::NOT_FOUND && had_session {
-                return Err(RpcError::Expired);
-            }
-            if !status.is_success() {
-                return Err(RpcError::Failed(self.upstream(response).await));
-            }
-            if let Some(session) = response.headers().get(SESSION_HEADER) {
-                self.session = Some(session.clone());
-            }
-            self.read_response(response, id).await
-        })
-        .await
-    }
-
-    async fn post(&self, body: &Value) -> Result<Response, RpcError> {
-        let mut request = self
-            .http
-            .post(self.url.clone())
-            .headers(self.headers.clone())
-            .header(ACCEPT, "application/json, text/event-stream")
-            .header(CONTENT_TYPE, "application/json")
-            .body(body.to_string());
-        if let Some(session) = &self.session {
-            request = request.header(SESSION_HEADER, session);
-        }
-        request.send().await.map_err(|error| {
-            let error = error.without_url();
-            if net::is_blocked(&error) {
-                RpcError::Failed(KitError::bad_request("url", "blocked_address").with_cause(error))
-            } else if error.is_connect() {
-                RpcError::Failed(transport(error))
-            } else {
-                RpcError::Unknown(transport(error))
-            }
-        })
-    }
-
-    /// JSON body or SSE stream; SSE yields the first event whose message has our `id`.
-    async fn read_response(&self, mut response: Response, id: u64) -> Result<Value, RpcError> {
-        let sse = response
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("text/event-stream"));
-        let mut parser = SseParser::new();
-        let mut body = Vec::new();
-        let mut total = 0_usize;
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|error| RpcError::Unknown(transport(error.without_url())))?
-        {
-            total += chunk.len();
-            if total > MAX_RESPONSE_BYTES {
-                return Err(RpcError::Unknown(too_large()));
-            }
-            if sse {
-                if let Some(message) = find_in_events(parser.feed(&chunk), id) {
-                    return self.rpc_result(message);
-                }
-            } else {
-                body.extend_from_slice(&chunk);
-            }
-        }
-        let message = if sse {
-            find_in_events(parser.finish(), id).ok_or_else(|| {
-                RpcError::Unknown(KitError::new(
-                    KitErrorCode::Network,
-                    "event stream ended without a response",
-                ))
-            })?
-        } else {
-            serde_json::from_slice(&body)
-                .ok()
-                .and_then(|message| find(message, id))
-                .ok_or_else(|| {
-                    RpcError::Failed(
-                        KitError::new(KitErrorCode::Upstream, "invalid JSON-RPC response")
-                            .with_reason("invalid_response"),
-                    )
-                })?
-        };
-        self.rpc_result(message)
-    }
-
-    fn rpc_result(&self, mut message: Value) -> Result<Value, RpcError> {
-        if let Some(error) = message.get("error") {
+        let message = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        let mut reply = self.link.request(&message, id).await?;
+        if let Some(error) = reply.get("error") {
             let text = error["message"].as_str().unwrap_or_default();
-            let known: Vec<&str> = self.known.iter().map(String::as_str).collect();
+            let known: Vec<&str> = self.link.known().iter().map(String::as_str).collect();
             return Err(RpcError::Failed(
                 KitError::upstream(200, text, &known).with_reason("rpc_error"),
             ));
         }
-        Ok(message["result"].take())
-    }
-
-    async fn upstream(&self, mut response: Response) -> KitError {
-        let status = response.status().as_u16();
-        let mut body = Vec::new();
-        // The excerpt is best effort: a broken error body still yields the status.
-        while let Ok(Some(chunk)) = response.chunk().await {
-            body.extend_from_slice(&chunk);
-            if body.len() > MAX_RESPONSE_BYTES {
-                break;
-            }
-        }
-        let known: Vec<&str> = self.known.iter().map(String::as_str).collect();
-        KitError::upstream(status, &String::from_utf8_lossy(&body), &known)
+        Ok(reply["result"].take())
     }
 }
 
-/// Applies the per-request deadline and the cancel token. Both drop the request
-/// mid-flight, so its outcome is unknown.
+/// Applies a deadline and the cancel token. Both drop the request mid-flight, so its
+/// outcome is unknown.
 async fn bounded<T>(
     timeout: Duration,
     cancel: &CancellationToken,
@@ -414,30 +284,18 @@ async fn bounded<T>(
     }
 }
 
-fn transport(error: reqwest::Error) -> KitError {
-    let code = if error.is_timeout() {
-        KitErrorCode::Timeout
-    } else {
-        KitErrorCode::Network
-    };
-    KitError::new(code, "MCP server unreachable").with_cause(error)
-}
-
-fn too_large() -> KitError {
+pub(crate) fn too_large() -> KitError {
     KitError::new(KitErrorCode::BudgetExceeded, "response too large")
-        .with_limit(MAX_RESPONSE_BYTES as u64)
+        .with_limit(MAX_MESSAGE_BYTES as u64)
 }
 
-fn find_in_events(events: Vec<SseEvent>, id: u64) -> Option<Value> {
-    events.into_iter().find_map(|event| {
-        serde_json::from_str(&event.data)
-            .ok()
-            .and_then(|message| find(message, id))
-    })
+pub(crate) fn invalid_response() -> KitError {
+    KitError::new(KitErrorCode::Upstream, "invalid JSON-RPC response")
+        .with_reason("invalid_response")
 }
 
 /// The response with `id` in a single message or a batch.
-fn find(message: Value, id: u64) -> Option<Value> {
+pub(crate) fn find(message: Value, id: u64) -> Option<Value> {
     let matches = |item: &Value| item["id"].as_u64() == Some(id);
     if let Value::Array(items) = message {
         items.into_iter().find(matches)
