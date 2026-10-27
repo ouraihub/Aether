@@ -1,0 +1,10 @@
+{
+  "permissionExceptions": [
+    {
+      "workflow": ".github/workflows/ci.yml",
+      "job": "reuse",
+      "permission": "actions",
+      "level": "read"
+    }
+  ]
+}

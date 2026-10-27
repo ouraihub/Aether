@@ -29,6 +29,8 @@ pnpm run check
 
 合并到 `main` 必须通过 `windows`、`macos-core`、`linux-core` 和 `AI review`，四项检查均由 GitHub Actions 提供。分支必须包含最新 `main`，管理员也受同样约束；不使用管理员绕过合并。历史失败运行保留用于追溯，验收以 PR 最新提交的全部检查为准。
 
+`release-kit-review.json` 仅预先批准 `.github/workflows/ci.yml` 的 `reuse` 任务读取 Actions 历史运行及凭据（`actions: read`），不批准工作流级提权、其他任务提权或任何写权限。审查器只信任已合入主干的配置，功能 PR 不能自行授权；所有必需检查与 AI review 保持有效，本配置不跳过检查、不直接启用去重。
+
 ## macOS / Linux 凭据与完整检查
 
 Windows DPAPI 格式保持不变。macOS 使用用户 Keychain，Linux 使用已解锁的持久 Secret Service（例如 GNOME Keyring）；没有服务或服务锁定就拒绝保存凭据，不影响不需要凭据的离线功能，不回落普通文件主密钥或明文。宿主可复用 `aether_providers::secrets::{protect, unprotect}` 的字节接口，具体格式和错误见 [基础设计 §2](docs/10-详细设计-基础与可观测性.md#2-secret决策-d3windows--macos--linux-原生存储)。
