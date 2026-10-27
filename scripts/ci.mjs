@@ -6,7 +6,8 @@ import { join, resolve } from 'node:path'
 
 const scope =
   process.argv.length === 2 ? 'full' : process.argv[2] === '--scope' && process.argv.length === 4 ? process.argv[3] : ''
-if (!['docs', 'frontend', 'full'].includes(scope)) throw new Error('Usage: ci.mjs [--scope docs|frontend|full]')
+if (!['docs', 'automation', 'frontend', 'full'].includes(scope))
+  throw new Error('Usage: ci.mjs [--scope docs|automation|frontend|full]')
 
 // Git for Windows ships a link.exe that shadows the MSVC linker; cargo goes through desktop-kit.
 const cargo = (args) =>
@@ -15,7 +16,7 @@ const cargo = (args) =>
 const common = ['node --test scripts/ci-scope.test.mjs scripts/ci-gate.test.mjs', 'pnpm exec release-kit check']
 const frontend = ['pnpm run check', 'pnpm -r --filter "./examples/*/ui" run build', 'pnpm run kit:i18n']
 const steps =
-  scope === 'docs'
+  scope === 'docs' || scope === 'automation'
     ? common
     : scope === 'frontend'
       ? [...common, ...frontend]
@@ -32,6 +33,37 @@ const steps =
             cargo(`check -p tauri-plugin-aether --no-default-features --features ${feature}`),
           ),
         ]
+
+if (scope !== 'docs') {
+  const directory = mkdtempSync(join(tmpdir(), 'aether-actionlint-'))
+  try {
+    const platform = { win32: 'windows', darwin: 'darwin', linux: 'linux' }[process.platform]
+    const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch]
+    if (!platform || !arch) throw new Error('Unsupported actionlint platform')
+    const archive = `actionlint_1.7.12_${platform}_${arch}.${platform === 'windows' ? 'zip' : 'tar.gz'}`
+    execFileSync(
+      'curl',
+      [
+        '--fail',
+        '--location',
+        '--max-time',
+        '60',
+        '--output',
+        join(directory, archive),
+        `https://github.com/rhysd/actionlint/releases/download/v1.7.12/${archive}`,
+      ],
+      { stdio: 'inherit' },
+    )
+    execFileSync('tar', ['-xf', join(directory, archive), '-C', directory], { stdio: 'inherit' })
+    execFileSync(
+      join(directory, platform === 'windows' ? 'actionlint.exe' : 'actionlint'),
+      ['-shellcheck=', '-pyflakes='],
+      { stdio: 'inherit' },
+    )
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+}
 
 for (const step of steps) {
   console.log(`\n=== ${step}`)

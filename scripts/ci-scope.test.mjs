@@ -19,12 +19,11 @@ test('classifies ordinary documentation and frontend mixtures conservatively', (
   assert.equal(classifyPaths([]), 'full')
   assert.equal(classifyPaths(null), 'full')
   assert.equal(classifyPaths(['docs/guide.md', 'Cargo.toml']), 'full')
-  assert.equal(classifyPaths(['packages/ui/src/main.ts', '.github/workflows/ci.yml']), 'full')
+  assert.equal(classifyPaths(['packages/ui/src/main.ts', '.github/workflows/ci.yml']), 'frontend')
 })
 
 test('rejects rule and instruction documents at every depth and capitalization', () => {
   for (const path of [
-    'AGENTS.md',
     'docs/AGENTS.md',
     'docs/nested/CLAUDE.md',
     'docs/SKILL.md',
@@ -64,7 +63,6 @@ test('rejects generated DTOs, build inputs and anything outside the allowlist', 
     'LICENSE.md',
     'package.json',
     'pnpm-lock.yaml',
-    'scripts/ci-scope.mjs',
     '.cargo/config.toml',
     'src/lib.rs',
     'docs/../src/main.md',
@@ -77,6 +75,20 @@ test('rejects generated DTOs, build inputs and anything outside the allowlist', 
     null,
   ])
     assert.equal(classifyPaths([path]), 'full', String(path))
+})
+
+test('automation changes run configuration checks without product builds', () => {
+  for (const path of [
+    'AGENTS.md',
+    '.github/workflows/ci.yml',
+    '.github/workflows/unix.yml',
+    'scripts/ci-gate.mjs',
+    'scripts/ci-scope.test.mjs',
+  ])
+    assert.equal(classifyPaths([path]), 'automation')
+  assert.equal(classifyPaths(['README.md', '.github/workflows/unix.yml']), 'automation')
+  assert.equal(classifyPaths(['.github/workflows/unix.yml', 'Cargo.toml']), 'full')
+  assert.equal(classifyPaths(['scripts/ci.mjs']), 'automation')
 })
 
 function repository(t, objectFormat) {

@@ -2,9 +2,9 @@ import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 
 export function checkGate(scope, results) {
-  if (!['docs', 'frontend', 'full'].includes(scope) || results.scope !== 'success') return false
-  const required = scope === 'full' ? ['windows', 'macos-core', 'linux-core'] : ['light']
-  const unused = scope === 'full' ? ['light'] : ['windows', 'macos-core', 'linux-core']
+  if (!['docs', 'automation', 'frontend', 'full'].includes(scope) || results.scope !== 'success') return false
+  const required = scope === 'full' ? ['windows'] : ['light']
+  const unused = scope === 'full' ? ['light'] : ['windows']
   return required.every((job) => results[job] === 'success') && unused.every((job) => results[job] === 'skipped')
 }
 
