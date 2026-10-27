@@ -135,28 +135,7 @@ impl Store {
     pub fn get(&self, id: &str) -> Result<SkillDto, KitError> {
         let mut db = self.lock()?;
         let db = db.transaction()?;
-        let (meta, body, license, extra) = db
-            .query_row(
-                &format!("SELECT {META_COLUMNS}, body, license, extra FROM skills WHERE id = ?1"),
-                [id],
-                |row| {
-                    Ok((
-                        meta(row)?,
-                        row.get(10)?,
-                        row.get(11)?,
-                        row.get::<_, String>(12)?,
-                    ))
-                },
-            )
-            .optional()?
-            .ok_or_else(|| KitError::not_found("skill"))?;
-        Ok(SkillDto {
-            meta,
-            body,
-            license,
-            extra: serde_json::from_str(&extra).map_err(KitError::internal)?,
-            files: file_list(&db, id)?,
-        })
+        get(&db, id)
     }
 
     /// The file list of revision `revision` of a skill. The revision check and the
@@ -325,15 +304,17 @@ impl Store {
     /// `bad_request{field:"name"}`; `not_found{entity:"skill"}`;
     /// `conflict{reason:"exists"|"builtin_name"}`; `internal`.
     pub fn duplicate(&self, id: &str, new_name: &str) -> Result<Vec<SkillMeta>, KitError> {
-        let skill = self.get(id)?;
+        let mut db = self.lock()?;
+        // Reserve the writer before reading so another connection cannot replace the
+        // source between its instructions and the packaged-file copy.
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let skill = get(&tx, id)?;
         frontmatter::validate(
             new_name,
             &skill.meta.description,
             skill.meta.version.as_deref(),
             &skill.body,
         )?;
-        let mut db = self.lock()?;
-        let tx = db.transaction()?;
         ensure_free(&tx, new_name, None)?;
         let content = Content {
             name: new_name,
@@ -682,6 +663,32 @@ fn write_files(tx: &Transaction<'_>, id: &str, files: &[PackageFile]) -> Result<
         ])?;
     }
     Ok(())
+}
+
+/// The caller owns the snapshot so instructions and files always share a revision.
+fn get(db: &Db, id: &str) -> Result<SkillDto, KitError> {
+    let (meta, body, license, extra) = db
+        .query_row(
+            &format!("SELECT {META_COLUMNS}, body, license, extra FROM skills WHERE id = ?1"),
+            [id],
+            |row| {
+                Ok((
+                    meta(row)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                    row.get::<_, String>(12)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| KitError::not_found("skill"))?;
+    Ok(SkillDto {
+        meta,
+        body,
+        license,
+        extra: serde_json::from_str(&extra).map_err(KitError::internal)?,
+        files: file_list(db, id)?,
+    })
 }
 
 fn file_list(db: &Db, id: &str) -> Result<Vec<SkillFileMeta>, KitError> {

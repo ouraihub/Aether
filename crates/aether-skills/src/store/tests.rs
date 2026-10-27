@@ -360,6 +360,59 @@ fn reads_by_revision_never_mix_in_a_concurrent_replace() {
 }
 
 #[test]
+fn concurrent_duplicate_keeps_instructions_and_script_from_one_revision() {
+    use rusqlite::{Connection, TransactionBehavior, params};
+    use std::sync::Barrier;
+    let dir = TempDir::new().unwrap();
+    let reader = Store::open(dir.path(), &[]).unwrap();
+    let source = zip_skill("tool", &[("scripts/run.py", b"run the script\n")]);
+    let id = install(&reader, &source, false)[0].id.clone();
+    let mut writer = Connection::open(dir.path().join("skills.db")).unwrap();
+    writer
+        .busy_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    let start = Barrier::new(2);
+    std::thread::scope(|scope| {
+        let replacing = scope.spawn(|| {
+            start.wait();
+            for round in 0..100 {
+                let tx = writer
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .unwrap();
+                let body = if round % 2 == 0 {
+                    "first revision"
+                } else {
+                    "second revision"
+                };
+                tx.execute(
+                    "UPDATE skills SET body = ?1, revision = revision + 1 WHERE id = ?2",
+                    params![body, id],
+                )
+                .unwrap();
+                tx.execute(
+                    "UPDATE skill_files SET content = ?1, size = ?2 WHERE skill_id = ?3",
+                    params![body.as_bytes(), i64::try_from(body.len()).unwrap(), id],
+                )
+                .unwrap();
+                tx.commit().unwrap();
+            }
+        });
+        start.wait();
+        for round in 0..100 {
+            let name = format!("copy-{round}");
+            let list = reader.duplicate(&id, &name).unwrap();
+            let copy = list.iter().find(|skill| skill.name == name).unwrap();
+            let body = reader.get(&copy.id).unwrap().body;
+            let script = reader
+                .file(&copy.id, copy.revision, "scripts/run.py")
+                .unwrap();
+            assert_eq!(body.as_bytes(), script, "mixed source revisions in {name}");
+        }
+        replacing.join().unwrap();
+    });
+}
+
+#[test]
 fn a_changed_file_alone_bumps_the_revision() {
     let dir = TempDir::new().unwrap();
     let store = Store::open(dir.path(), &[]).unwrap();
