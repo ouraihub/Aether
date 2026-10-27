@@ -20,6 +20,12 @@
   import Settings2Icon from '@lucide/svelte/icons/settings-2'
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
   import ShieldIcon from '@lucide/svelte/icons/shield'
+  import HandIcon from '@lucide/svelte/icons/hand'
+  import RouteIcon from '@lucide/svelte/icons/route'
+  import FilePenIcon from '@lucide/svelte/icons/file-pen'
+  import ShieldCheckIcon from '@lucide/svelte/icons/shield-check'
+  import ShieldAlertIcon from '@lucide/svelte/icons/shield-alert'
+  import InfoIcon from '@lucide/svelte/icons/info'
   import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js'
   import { Switch } from '#lib/components/ui/switch/index.js'
   import { Popover } from 'bits-ui'
@@ -1184,19 +1190,40 @@
                   >{/snippet}
               </DropdownMenu.Trigger>
               <DropdownMenu.Content side="top" align="end" class="mode-menu">
-                <DropdownMenu.Label>{t('chat.mode.label')}</DropdownMenu.Label>
-                {#each allowedModes as option (option)}
-                  <DropdownMenu.Item
-                    class={option === 'full_access' ? 'mode-option mode-danger' : 'mode-option'}
-                    aria-current={option === mode ? 'true' : undefined}
-                    onSelect={() => void chooseMode(option)}
-                    ><span class="mode-text"
-                      ><span class="mode-name">{t(`chat.mode.${option}`)}</span><small
-                        >{t(`chat.mode.${option}Hint`)}</small
-                      ></span
-                    >{#if option === mode}<CheckIcon />{/if}</DropdownMenu.Item
+                <DropdownMenu.Group aria-label={t('chat.mode.label')}>
+                  {#each allowedModes as option (option)}
+                    <DropdownMenu.Item
+                      class={option === 'full_access' ? 'mode-option mode-danger' : 'mode-option'}
+                      aria-current={option === mode ? 'true' : undefined}
+                      onSelect={() => void chooseMode(option)}
+                      >{#if option === 'default'}<HandIcon />
+                      {:else if option === 'plan'}<RouteIcon />
+                      {:else if option === 'accept_edits'}<FilePenIcon />
+                      {:else if option === 'auto'}<ShieldCheckIcon />
+                      {:else}<ShieldAlertIcon />{/if}
+                      <span class="mode-name">{t(`chat.mode.${option}`)}</span>
+                      <span class="mode-description">{t(`chat.mode.${option}Hint`)}</span>
+                      <span class="mode-notice">
+                        {#if option === 'auto' || option === 'full_access'}
+                          <span title={t(option === 'auto' ? 'chat.mode.ruleNotice' : 'chat.mode.fullAccessBody')}>
+                            <InfoIcon />
+                          </span>
+                        {/if}
+                      </span>
+                      <span class="mode-check"
+                        >{#if option === mode}<CheckIcon />{/if}</span
+                      ></DropdownMenu.Item
+                    >
+                  {/each}
+                </DropdownMenu.Group>
+                <div class="mode-footer">
+                  <span>{t('chat.mode.label')}</span>
+                  <span class="mode-keys"
+                    ><kbd>↑↓</kbd>{t('chat.mode.navigate')}<kbd>↵</kbd>{t('chat.mode.confirm')}<kbd>Esc</kbd>{t(
+                      'chat.mode.close',
+                    )}</span
                   >
-                {/each}
+                </div>
               </DropdownMenu.Content>
             </DropdownMenu.Root>
           {/if}
@@ -1761,26 +1788,99 @@
     white-space: nowrap;
   }
   :global(.mode-menu) {
-    width: min(18rem, calc(100vw - 1rem));
+    width: min(35rem, calc(100vw - 1rem));
+    padding: 0.375rem;
+    border-radius: 0.75rem;
   }
   :global(.mode-option) {
-    justify-content: space-between;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: 1rem 7.5rem minmax(0, 1fr) 1rem 0.875rem;
+    align-items: center;
+    column-gap: 0.5rem;
+    min-height: 2.125rem;
+    padding: 0.375rem 0.5rem;
+    border-radius: 0.5rem;
+    font-size: var(--kit-font-size-sm, 0.8125rem);
   }
-  .mode-text {
-    display: flex;
-    flex-direction: column;
-    gap: 0.125rem;
-    min-width: 0;
+  :global(.mode-option[aria-current='true']) {
+    background: var(--color-muted);
   }
-  .mode-text small {
+  :global(.mode-option > svg) {
+    color: var(--color-muted-foreground);
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+  .mode-name {
+    white-space: nowrap;
+  }
+  .mode-description {
     color: var(--color-muted-foreground);
     font-size: var(--kit-font-size-xs, 0.75rem);
-    white-space: normal;
+    text-align: right;
+    line-height: 1.5;
+  }
+  .mode-notice,
+  .mode-check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-muted-foreground);
+  }
+  .mode-notice {
+    color: var(--color-warning, var(--color-muted-foreground));
+  }
+  .mode-notice :global(svg),
+  .mode-check :global(svg) {
+    display: block;
+    width: 0.8125rem;
+    height: 0.8125rem;
   }
   :global(.mode-danger),
-  :global(.mode-danger) .mode-name {
+  :global(.mode-danger) :is(.mode-name, .mode-description, .mode-notice),
+  :global(.mode-option.mode-danger > svg) {
     color: var(--color-destructive);
+  }
+  .mode-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.625rem 0.375rem 0.125rem;
+    color: var(--color-muted-foreground);
+    font-size: var(--kit-font-size-xs, 0.75rem);
+  }
+  .mode-keys {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .mode-keys kbd {
+    padding: 0 0.25rem;
+    border-radius: 0.25rem;
+    background: var(--color-muted);
+    font: inherit;
+  }
+  .mode-keys kbd:not(:first-child) {
+    margin-left: 0.375rem;
+  }
+  @media (max-width: 480px) {
+    :global(.mode-option) {
+      grid-template-columns: 1rem minmax(0, 1fr) 1rem 0.875rem;
+      row-gap: 0.125rem;
+    }
+    .mode-description {
+      grid-column: 2;
+      grid-row: 2;
+      text-align: left;
+    }
+    .mode-notice {
+      grid-column: 3;
+      grid-row: 1;
+    }
+    .mode-check {
+      grid-column: 4;
+      grid-row: 1;
+    }
   }
   :global(.reasoning-popover) {
     box-sizing: border-box;
