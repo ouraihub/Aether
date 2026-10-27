@@ -190,3 +190,4 @@ interface ManualSave { id?: string; expectedRevision?: number; name: string; des
 3. 解压限制按实际读出的字节计数，不读 ZIP 头里声明的大小。
 4. Windows 目录 junction 也算链接，必须拒绝（`symlink_metadata` + `FILE_ATTRIBUTE_REPARSE_POINT`）。
 5. 名称是唯一键：重命名手写技能时检查冲突；内置技能的名称保留给内置。
+6. 并发复制一致性回归每轮同时竞争一次替换与一次复制，再等待双方完成；保留 100 轮正文／脚本同修订断言。不能让独立复制循环持续抢占写锁，使 Windows 慢 runner 的替换线程超过 SQLite busy timeout；不增加超时、不忽略锁错误。
