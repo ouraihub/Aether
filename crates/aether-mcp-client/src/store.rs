@@ -10,13 +10,17 @@ use rusqlite::{OptionalExtension, Row, params};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-use crate::protocol::{self, Connection, REQUEST_TIMEOUT, Secret};
+use crate::credentials::Secret;
+use crate::http::{self, HttpLink};
+use crate::protocol::{Connection, Link, REQUEST_TIMEOUT};
 use crate::session::{McpSession, McpTool, SessionServer};
-use crate::{Approval, ServerDto, ServerSave, ServerSecret, ToolDto};
+use crate::stdio::{Launch, StdioLink};
+use crate::{Approval, McpTransport, ServerDto, ServerSave, ServerSecret, ToolDto};
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: "CREATE TABLE servers (
+pub(crate) const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: "CREATE TABLE servers (
   id TEXT PRIMARY KEY,
   slug TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL, url TEXT NOT NULL,
@@ -34,20 +38,43 @@ CREATE TABLE tools (
   fetched_at INTEGER NOT NULL,
   PRIMARY KEY (server_id, name)
 );",
-}];
+    },
+    Migration {
+        version: 2,
+        sql: "ALTER TABLE servers ADD COLUMN transport TEXT NOT NULL DEFAULT 'http'
+  CHECK (transport IN ('http','stdio'));
+ALTER TABLE servers ADD COLUMN command TEXT;
+ALTER TABLE servers ADD COLUMN args TEXT;
+ALTER TABLE servers ADD COLUMN cwd TEXT;",
+    },
+];
 
 /// Cached tools older than this are refreshed in the background (docs/13 §2).
 const REFRESH_AFTER_MS: i64 = 10 * 60 * 1000;
+/// From starting a stdio process until `initialize` completed (docs/13 §3).
+const STDIO_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_COMMAND_CHARS: usize = 1024;
+const MAX_ARGS: usize = 64;
+const MAX_ARG_CHARS: usize = 4096;
 
-const SERVER_COLUMNS: &str =
-    "id, slug, name, url, secret_ciphertext, enabled, trusted, allow_private";
+const SERVER_COLUMNS: &str = "id, slug, name, url, secret_ciphertext, enabled, trusted, \
+     allow_private, transport, command, args, cwd";
 
 type Db = Arc<Mutex<rusqlite::Connection>>;
+
+/// Deadlines for one connection.
+#[derive(Clone, Copy)]
+pub(crate) struct Timeouts {
+    /// Per request.
+    pub(crate) request: Duration,
+    /// stdio: from spawning until the handshake completed.
+    pub(crate) startup: Duration,
+}
 
 /// MCP server configurations, credentials and discovered tools.
 pub struct Store {
     db: Db,
-    pub(crate) timeout: Duration,
+    pub(crate) timeouts: Timeouts,
 }
 
 impl Store {
@@ -59,7 +86,10 @@ impl Store {
         let conn = db::open(&root.join("mcp-client.db"), MIGRATIONS)?;
         Ok(Self {
             db: Arc::new(Mutex::new(conn)),
-            timeout: REQUEST_TIMEOUT,
+            timeouts: Timeouts {
+                request: REQUEST_TIMEOUT,
+                startup: STDIO_STARTUP_TIMEOUT,
+            },
         })
     }
 
@@ -75,15 +105,17 @@ impl Store {
     ///
     /// # Errors
     /// `bad_request` for an invalid slug, name, url (including credentials in the url:
-    /// `userinfo`, `credential_query`) or secret header; `conflict{duplicate_slug}`;
-    /// `not_found` for an unknown id; `unsupported`/`internal` when sealing fails, in
-    /// which case nothing is changed.
+    /// `userinfo`, `credential_query`), command, args, cwd or secret (a header, an env
+    /// key, or credentials of the other transport); `bad_request(secret,
+    /// transport_changed)` when the transport kind changes while the old credentials
+    /// would be kept; `conflict{duplicate_slug}`; `not_found` for an unknown id;
+    /// `unsupported`/`internal` when sealing fails, in which case nothing is changed.
     pub fn save(&self, input: ServerSave) -> Result<Vec<ServerDto>, KitError> {
         let ServerSave {
             id,
             slug,
             name,
-            url,
+            transport,
             secret: change,
             enabled,
             trusted,
@@ -94,9 +126,12 @@ impl Store {
         if name.is_empty() {
             return Err(KitError::bad_request("name", "empty"));
         }
-        check_server_url(&url, allow_private)?;
+        let stdio = matches!(transport, McpTransport::Stdio { .. });
+        // Only http reaches the network; stdio stores 0 (docs/13 §2).
+        let allow_private = allow_private && !stdio;
+        let columns = Columns::new(&transport, allow_private)?;
         // None = keep, Some(None) = clear, Some(Some) = replace.
-        let sealed = change.map(seal).transpose()?;
+        let sealed = change.map(|change| seal(change, stdio)).transpose()?;
 
         let mut conn = lock(&self.db)?;
         let tx = conn.transaction()?;
@@ -110,11 +145,28 @@ impl Store {
         }
         let now = now_ms();
         if let Some(id) = id {
-            let old = stored_secret(&tx, &id)?;
+            let (old, old_kind) = stored_secret(&tx, &id)?;
+            if old.is_some() && sealed.is_none() && old_kind != columns.kind {
+                return Err(KitError::bad_request("secret", "transport_changed"));
+            }
             tx.execute(
                 "UPDATE servers SET slug = ?2, name = ?3, url = ?4, enabled = ?5, trusted = ?6,
-                 allow_private = ?7, updated_at = ?8 WHERE id = ?1",
-                params![id, slug, name, url, enabled, trusted, allow_private, now],
+                 allow_private = ?7, updated_at = ?8, transport = ?9, command = ?10, args = ?11,
+                 cwd = ?12 WHERE id = ?1",
+                params![
+                    id,
+                    slug,
+                    name,
+                    columns.url,
+                    enabled,
+                    trusted,
+                    allow_private,
+                    now,
+                    columns.kind,
+                    columns.command,
+                    columns.args,
+                    columns.cwd
+                ],
             )?;
             if let Some(sealed) = sealed {
                 if let Some(old) = old {
@@ -128,19 +180,23 @@ impl Store {
         } else {
             tx.execute(
                 "INSERT INTO servers (id, slug, name, url, secret_ciphertext, enabled, trusted,
-                 allow_private, position, created_at, updated_at)
+                 allow_private, position, created_at, updated_at, transport, command, args, cwd)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                 (SELECT COALESCE(MAX(position), -1) + 1 FROM servers), ?9, ?9)",
+                 (SELECT COALESCE(MAX(position), -1) + 1 FROM servers), ?9, ?9, ?10, ?11, ?12, ?13)",
                 params![
                     id::new_id()?,
                     slug,
                     name,
-                    url,
+                    columns.url,
                     sealed.flatten(),
                     enabled,
                     trusted,
                     allow_private,
-                    now
+                    now,
+                    columns.kind,
+                    columns.command,
+                    columns.args,
+                    columns.cwd
                 ],
             )?;
         }
@@ -156,7 +212,7 @@ impl Store {
         let mut conn = lock(&self.db)?;
         let tx = conn.transaction()?;
         // Cascade deletion would skip `forget` (docs/10 §2).
-        if let Some(old) = stored_secret(&tx, id)? {
+        if let (Some(old), _) = stored_secret(&tx, id)? {
             secret::forget(&old)?;
         }
         tx.execute("DELETE FROM servers WHERE id = ?1", [id])?;
@@ -189,15 +245,16 @@ impl Store {
     ///
     /// # Errors
     /// `not_found`; `needs_config{key_unreadable}`; `bad_request(url)` for a url the
-    /// policy rejects; `network`/`timeout`/`upstream`/`unauthorized`/`unsupported` from
-    /// the server; `cancelled`.
+    /// policy rejects; `bad_request(command|cwd)` when a stdio command cannot be started;
+    /// `network`/`timeout`/`upstream`/`unauthorized`/`unsupported` from the server
+    /// (`network{server_exited}` when a stdio server ends); `cancelled`.
     pub async fn refresh(
         &self,
         server_id: &str,
         cancel: &CancellationToken,
     ) -> Result<Vec<ToolDto>, KitError> {
         let target = load_target(&self.db, server_id)?;
-        refresh_target(&self.db, &target, self.timeout, cancel)
+        refresh_target(&self.db, &target, self.timeouts, cancel)
             .await
             .map(|(_, tools)| tools)
     }
@@ -205,14 +262,15 @@ impl Store {
     /// The catalogue of enabled and trusted servers for one run. Cached tools are used
     /// when present; a missing cache is fetched now, a stale one is refreshed in the
     /// background. A server that cannot be read or reached is left out with a `warn`.
-    /// `own_port` is this process's running MCP Server: a server pointing at it is
-    /// skipped to avoid calling ourselves (docs/13 §9.2).
+    /// `own_port` is this process's running MCP Server: an http server pointing at it is
+    /// skipped to avoid calling ourselves (docs/13 §9.2). stdio servers start on demand
+    /// and end with the session.
     pub async fn session(&self, cancel: &CancellationToken, own_port: Option<u16>) -> McpSession {
         let targets = match active_targets(&self.db) {
             Ok(targets) => targets,
             Err(error) => {
                 tracing::warn!(code = ?error.code(), "mcp.client.session_failed");
-                return McpSession::new(Vec::new(), self.timeout);
+                return McpSession::new(Vec::new(), self.timeouts);
             }
         };
         let mut servers = Vec::new();
@@ -228,7 +286,7 @@ impl Store {
                 }
             }
         }
-        McpSession::new(servers, self.timeout)
+        McpSession::new(servers, self.timeouts)
     }
 
     async fn session_server(
@@ -245,7 +303,7 @@ impl Store {
                 (None, tools)
             }
             None => {
-                let (connection, _) = refresh_target(&self.db, &target, self.timeout, cancel)
+                let (connection, _) = refresh_target(&self.db, &target, self.timeouts, cancel)
                     .await
                     .map_err(|e| (target.id.clone(), e))?;
                 let tools = cached_tools(&self.db, &target.id)
@@ -266,11 +324,11 @@ impl Store {
     // request timeout. Owner-managed cancellation if hosts need clean shutdown here.
     fn refresh_in_background(&self, server_id: String) {
         let db = Arc::clone(&self.db);
-        let timeout = self.timeout;
+        let timeouts = self.timeouts;
         tokio::spawn(async move {
             let cancel = CancellationToken::new();
             let result = match load_target(&db, &server_id) {
-                Ok(target) => refresh_target(&db, &target, timeout, &cancel)
+                Ok(target) => refresh_target(&db, &target, timeouts, &cancel)
                     .await
                     .map(drop),
                 Err(error) => Err(error),
@@ -287,7 +345,8 @@ pub(crate) struct Target {
     pub(crate) id: String,
     pub(crate) slug: String,
     pub(crate) name: String,
-    url: String,
+    /// Unmasked.
+    transport: McpTransport,
     sealed: Option<Vec<u8>>,
     allow_private: bool,
 }
@@ -298,15 +357,18 @@ impl Target {
             id: row.get(0)?,
             slug: row.get(1)?,
             name: row.get(2)?,
-            url: row.get(3)?,
+            transport: transport_from_row(row)?,
             sealed: row.get(4)?,
             allow_private: row.get(7)?,
         })
     }
 
-    /// A loopback url on `port`: this process's own MCP Server when that runs there.
+    /// A loopback http url on `port`: this process's own MCP Server when that runs there.
     fn is_local_port(&self, port: u16) -> bool {
-        Url::parse(&self.url).is_ok_and(|url| {
+        let McpTransport::Http { url } = &self.transport else {
+            return false;
+        };
+        Url::parse(url).is_ok_and(|url| {
             url.port_or_known_default() == Some(port)
                 && match url.host() {
                     Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
@@ -317,10 +379,10 @@ impl Target {
         })
     }
 
-    /// Opens the secret and performs the handshake.
+    /// Opens the secret, connects (a stdio server is started) and performs the handshake.
     pub(crate) async fn connect(
         &self,
-        timeout: Duration,
+        timeouts: Timeouts,
         cancel: &CancellationToken,
     ) -> Result<Connection, KitError> {
         let secret = match &self.sealed {
@@ -331,7 +393,96 @@ impl Target {
             }
             None => Secret::default(),
         };
-        Connection::open(&self.url, &secret, self.allow_private, timeout, cancel).await
+        match &self.transport {
+            McpTransport::Http { url } => {
+                let link = HttpLink::new(url, &secret, self.allow_private)?;
+                let link = Link::Http(Box::new(link));
+                Connection::open(link, timeouts.request, timeouts.request, cancel).await
+            }
+            McpTransport::Stdio { command, args, cwd } => {
+                // The directory may have gone since it was saved.
+                if let Some(cwd) = cwd {
+                    check_cwd(cwd)?;
+                }
+                let launch = Launch {
+                    server_id: &self.id,
+                    command,
+                    args,
+                    cwd: cwd.as_deref(),
+                    env: &secret.env,
+                };
+                let link = StdioLink::spawn(&launch, secret.values())?;
+                Connection::open(
+                    Link::Stdio(Box::new(link)),
+                    timeouts.request,
+                    timeouts.startup,
+                    cancel,
+                )
+                .await
+            }
+        }
+    }
+}
+
+/// The transport columns of a server row; an invalid combination is a corrupt row.
+fn transport_from_row(row: &Row<'_>) -> rusqlite::Result<McpTransport> {
+    let kind: String = row.get(8)?;
+    let url: String = row.get(3)?;
+    let command: Option<String> = row.get(9)?;
+    let args: Option<String> = row.get(10)?;
+    let cwd: Option<String> = row.get(11)?;
+    let corrupt = |what: &str| {
+        rusqlite::Error::FromSqlConversionFailure(
+            8,
+            rusqlite::types::Type::Text,
+            format!("server row: {what}").into(),
+        )
+    };
+    match (kind.as_str(), command, args) {
+        ("http", None, None) if cwd.is_none() && !url.is_empty() => Ok(McpTransport::Http { url }),
+        ("stdio", Some(command), Some(args)) if url.is_empty() => {
+            let args = serde_json::from_str(&args).map_err(|_| corrupt("args"))?;
+            Ok(McpTransport::Stdio { command, args, cwd })
+        }
+        _ => Err(corrupt("transport")),
+    }
+}
+
+/// The columns `save` writes for a transport, after validating it (docs/13 §4).
+struct Columns {
+    kind: &'static str,
+    /// Empty for stdio.
+    url: String,
+    command: Option<String>,
+    /// JSON array.
+    args: Option<String>,
+    cwd: Option<String>,
+}
+
+impl Columns {
+    fn new(transport: &McpTransport, allow_private: bool) -> Result<Self, KitError> {
+        match transport {
+            McpTransport::Http { url } => {
+                check_server_url(url, allow_private)?;
+                Ok(Self {
+                    kind: "http",
+                    url: url.clone(),
+                    command: None,
+                    args: None,
+                    cwd: None,
+                })
+            }
+            McpTransport::Stdio { command, args, cwd } => {
+                check_stdio(command, args, cwd.as_deref())?;
+                Ok(Self {
+                    kind: "stdio",
+                    url: String::new(),
+                    command: Some(command.clone()),
+                    args: Some(serde_json::to_string(args).map_err(KitError::internal)?),
+                    cwd: cwd.clone(),
+                })
+            }
+        }
     }
 }
 
@@ -367,9 +518,15 @@ fn list(conn: &rusqlite::Connection) -> Result<Vec<ServerDto>, KitError> {
                 })
             })?
             .collect::<rusqlite::Result<_>>()?;
+        let transport = match target.transport {
+            McpTransport::Http { url } => McpTransport::Http {
+                url: mask::mask_url(&url),
+            },
+            stdio @ McpTransport::Stdio { .. } => stdio,
+        };
         out.push(ServerDto {
             secret_keys: secret_keys(target.sealed.as_deref()),
-            url: mask::mask_url(&target.url),
+            transport,
             id: target.id,
             slug: target.slug,
             name: target.name,
@@ -391,12 +548,15 @@ fn secret_keys(sealed: Option<&[u8]>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The stored ciphertext of an existing server.
-fn stored_secret(conn: &rusqlite::Connection, id: &str) -> Result<Option<Vec<u8>>, KitError> {
+/// The stored ciphertext and transport kind of an existing server.
+fn stored_secret(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> Result<(Option<Vec<u8>>, String), KitError> {
     conn.query_row(
-        "SELECT secret_ciphertext FROM servers WHERE id = ?1",
+        "SELECT secret_ciphertext, transport FROM servers WHERE id = ?1",
         [id],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )
     .optional()?
     .ok_or_else(|| KitError::not_found("server"))
@@ -456,10 +616,10 @@ fn cached_tools(db: &Db, server_id: &str) -> Result<Option<(i64, Vec<McpTool>)>,
 async fn refresh_target(
     db: &Db,
     target: &Target,
-    timeout: Duration,
+    timeouts: Timeouts,
     cancel: &CancellationToken,
 ) -> Result<(Connection, Vec<ToolDto>), KitError> {
-    let mut connection = target.connect(timeout, cancel).await?;
+    let mut connection = target.connect(timeouts, cancel).await?;
     let tools = connection.list_tools(cancel).await?;
     let mut conn = lock(db)?;
     let tx = conn.transaction()?;
@@ -503,16 +663,27 @@ async fn refresh_target(
     Ok((connection, dtos))
 }
 
-/// Seals the new secret; `None` = cleared. Fails before anything is written.
-fn seal(input: ServerSecret) -> Result<Option<Vec<u8>>, KitError> {
+/// Seals the new secret; `None` = cleared. Fails before anything is written. http takes
+/// headers/query, stdio takes env; the other kind is rejected.
+fn seal(input: ServerSecret, stdio: bool) -> Result<Option<Vec<u8>>, KitError> {
     let secret = Secret {
         headers: input.headers.unwrap_or_default(),
         query: input.query.unwrap_or_default(),
+        env: input.env.unwrap_or_default(),
     };
+    let foreign = if stdio {
+        !secret.headers.is_empty() || !secret.query.is_empty()
+    } else {
+        !secret.env.is_empty()
+    };
+    if foreign {
+        return Err(KitError::bad_request("secret", "transport_mismatch"));
+    }
     if secret.is_empty() {
         return Ok(None);
     }
     secret.header_map()?;
+    secret.check_env()?;
     let plain =
         zeroize::Zeroizing::new(serde_json::to_string(&secret).map_err(KitError::internal)?);
     secret::seal(&plain).map(Some)
@@ -520,12 +691,56 @@ fn seal(input: ServerSecret) -> Result<Option<Vec<u8>>, KitError> {
 
 /// The url must pass the address policy and carry no credentials (docs/13 §4).
 fn check_server_url(url: &str, allow_private: bool) -> Result<(), KitError> {
-    let parsed = net::check_url(url, &protocol::policy(url, allow_private))?;
+    let parsed = net::check_url(url, &http::policy(url, allow_private))?;
     // mask_url is the single definition of a credential-looking query: if it would
     // mask anything, the value belongs in `secret.query`.
     let masked = Url::parse(&mask::mask_url(url)).map_err(KitError::internal)?;
     if !parsed.query_pairs().eq(masked.query_pairs()) {
         return Err(KitError::bad_request("url", "credential_query"));
+    }
+    Ok(())
+}
+
+/// docs/13 §4: command non-empty, ≤ 1024 characters, single line; ≤ 64 args of ≤ 4096
+/// characters; `cwd` an existing absolute directory. Args are listed unmasked, so a
+/// credential-looking one is rejected: it belongs in `secret.env`.
+fn check_stdio(command: &str, args: &[String], cwd: Option<&str>) -> Result<(), KitError> {
+    if command.trim().is_empty() {
+        return Err(KitError::bad_request("command", "empty"));
+    }
+    if command.chars().count() > MAX_COMMAND_CHARS {
+        return Err(KitError::bad_request("command", "too_long"));
+    }
+    if command.contains(['\n', '\r', '\0']) {
+        return Err(KitError::bad_request("command", "invalid"));
+    }
+    if args.len() > MAX_ARGS {
+        return Err(KitError::bad_request("args", "too_many"));
+    }
+    if args.iter().any(|arg| arg.chars().count() > MAX_ARG_CHARS) {
+        return Err(KitError::bad_request("args", "too_long"));
+    }
+    if args.iter().any(|arg| arg.contains('\0')) {
+        return Err(KitError::bad_request("args", "invalid"));
+    }
+    // `--flag=value` is one token to the heuristic, so the parts are checked too.
+    let secret_arg = |arg: &String| arg.split('=').any(mask::looks_like_secret);
+    if args.iter().any(secret_arg) {
+        return Err(KitError::bad_request("args", "credential_arg"));
+    }
+    if let Some(cwd) = cwd {
+        check_cwd(cwd)?;
+    }
+    Ok(())
+}
+
+fn check_cwd(cwd: &str) -> Result<(), KitError> {
+    let path = Path::new(cwd);
+    if !path.is_absolute() {
+        return Err(KitError::bad_request("cwd", "not_absolute"));
+    }
+    if !path.is_dir() {
+        return Err(KitError::bad_request("cwd", "not_found"));
     }
     Ok(())
 }

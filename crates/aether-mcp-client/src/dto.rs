@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use ts_rs::TS;
 
 pub use aether_support::Approval;
@@ -22,6 +22,52 @@ pub struct ToolDto {
     pub approval: Approval,
 }
 
+/// How the server is reached (docs/13 §2). Requests reject unknown fields.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum McpTransport {
+    /// Streamable HTTP.
+    Http {
+        /// URL without credentials; masked when listed.
+        url: String,
+    },
+    /// A local command speaking newline-delimited JSON-RPC on stdin/stdout.
+    Stdio {
+        /// Program to start (a path or a name looked up in `PATH`).
+        command: String,
+        /// Arguments, passed as is (no shell).
+        args: Vec<String>,
+        /// Absolute working directory; absent = inherited.
+        #[serde(default)]
+        #[ts(optional)]
+        cwd: Option<String>,
+    },
+}
+
+impl<'de> Deserialize<'de> for McpTransport {
+    /// Through a mirror enum: ts-rs rejects `deny_unknown_fields` on enums it exports.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+        enum Strict {
+            Http {
+                url: String,
+            },
+            Stdio {
+                command: String,
+                args: Vec<String>,
+                #[serde(default)]
+                cwd: Option<String>,
+            },
+        }
+        Ok(match Strict::deserialize(deserializer)? {
+            Strict::Http { url } => Self::Http { url },
+            Strict::Stdio { command, args, cwd } => Self::Stdio { command, args, cwd },
+        })
+    }
+}
+
 /// A configured server as shown to the UI: credentials only as key names.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -33,21 +79,22 @@ pub struct ServerDto {
     pub slug: String,
     /// Display name.
     pub name: String,
-    /// Masked URL.
-    pub url: String,
-    /// Names of stored header/query credentials, never values.
+    /// Transport; an http URL is masked.
+    pub transport: McpTransport,
+    /// Names of stored header/query/env credentials, never values.
     pub secret_keys: Vec<String>,
     /// Enabled by the user.
     pub enabled: bool,
     /// Trusted by the user.
     pub trusted: bool,
-    /// The user explicitly allowed a private-network address.
+    /// The user explicitly allowed a private-network address (http only; always false for stdio).
     pub allow_private: bool,
     /// Last successfully discovered tools.
     pub tools: Vec<ToolDto>,
 }
 
-/// Credentials sent with every request; write-only, so no `Debug`/`Serialize`.
+/// Credentials, write-only, so no `Debug`/`Serialize`. `headers`/`query` belong to
+/// http servers, `env` to stdio servers; the other kind is rejected.
 #[derive(Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(export)]
@@ -60,6 +107,10 @@ pub struct ServerSecret {
     #[serde(default)]
     #[ts(optional)]
     pub query: Option<BTreeMap<String, String>>,
+    /// Environment variables for a stdio server, such as `GITHUB_TOKEN`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub env: Option<BTreeMap<String, String>>,
 }
 
 /// Create (no `id`) or update a server.
@@ -75,8 +126,8 @@ pub struct ServerSave {
     pub slug: String,
     /// Display name.
     pub name: String,
-    /// URL without credentials.
-    pub url: String,
+    /// Transport; an http URL must carry no credentials.
+    pub transport: McpTransport,
     /// Absent = keep; `{}` = clear.
     #[serde(default)]
     #[ts(optional)]
@@ -85,6 +136,6 @@ pub struct ServerSave {
     pub enabled: bool,
     /// Trusted.
     pub trusted: bool,
-    /// Allow a private-network address.
+    /// Allow a private-network address; ignored (stored as false) for stdio.
     pub allow_private: bool,
 }

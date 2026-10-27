@@ -1,17 +1,17 @@
 # 13 详细设计：aether-mcp-client 与 aether-mcp-server
 
-> 两个 crate 互不依赖，方向相反：Client 让本程序的 AI **调用外部** MCP 工具；Server 把本程序的能力**开放给外部** AI 客户端。两者都依赖 aether-support，都不依赖 Chat、Skills、Providers。Server 用 `rmcp`；Client 的 Streamable HTTP 直接写在 `aether_support::net`（地址策略、禁止重定向）与 `aether_support::sse` 上，不依赖 `rmcp`（其传输自带 HTTP 客户端，绕过 §3 的地址策略）。
+> 两个 crate 互不依赖，方向相反：Client 让本程序的 AI **调用外部** MCP 工具；Server 把本程序的能力**开放给外部** AI 客户端。两者都依赖 aether-support，都不依赖 Chat、Skills、Providers。Server 用 `rmcp`；Client 的 Streamable HTTP 直接写在 `aether_support::net`（地址策略、禁止重定向）与 `aether_support::sse` 上，stdio 用 tokio 子进程，均不依赖 `rmcp`（其传输自带 HTTP 客户端，绕过 §3 的地址策略）。握手、分页、调用与结果映射与传输无关，两种传输共用。
 > 蓝本：Client 参考 AutoBee `shell/src/llm/{mcp,mcp_url,mcp_external}.rs`；Server 参考 AutoNote `desktop/src-tauri/mcp/src/*`。
 
 # 第一部分：aether-mcp-client
 
 ## 1. 边界
 
-- 管：服务配置、凭据、信任、启用；地址策略；Streamable HTTP 连接；握手；工具发现与调用；**每个工具的审批默认值**；输出与描述限制。
-- 不管：聊天循环（Chat）、技能（Skills 不登记 MCP）、业务授权的最终裁决（`KitHost::authorize`）。
-- 一期不做 stdio 传输、OAuth、resources/prompts/sampling。
+- 管：服务配置、凭据、信任、启用；地址策略；Streamable HTTP 与 stdio 两种传输；stdio 子进程的启动、环境与结束；握手；工具发现与调用；**每个工具的审批默认值**；输出与描述限制。
+- 不管：聊天循环（Chat）、技能（Skills 不登记 MCP）、业务授权的最终裁决（`KitHost::authorize`）；工作目录是否属于某个工作区（宿主在保存前自行限制）。
+- 一期不做 OAuth、resources/prompts/sampling。
 
-## 2. 数据模型（`mcp-client.db`，migration 1）
+## 2. 数据模型（`mcp-client.db`，migration 1–2）
 
 ```sql
 CREATE TABLE servers (
@@ -34,6 +34,17 @@ CREATE TABLE tools (
 );
 ```
 
+migration 2（stdio）：
+
+```sql
+ALTER TABLE servers ADD COLUMN transport TEXT NOT NULL DEFAULT 'http' CHECK (transport IN ('http','stdio'));
+ALTER TABLE servers ADD COLUMN command TEXT;  -- stdio：程序路径或 PATH 中的名字
+ALTER TABLE servers ADD COLUMN args TEXT;     -- stdio：JSON 字符串数组
+ALTER TABLE servers ADD COLUMN cwd TEXT;      -- stdio：绝对目录，NULL = 继承
+```
+
+- 已有行保持 `http`。stdio 行 `url` 存空串、`allow_private` 恒为 0；读写都校验列组合，不合法的行按损坏报错。
+- stdio 凭据只有 `env`（`{ env?: {..} }`，同样加密、只回显键名）；http 只有 `headers`/`query`。带了另一种传输的凭据 → `bad_request{field:"secret", reason:"transport_mismatch"}`；编辑时改了传输却不替换已存凭据 → `reason:"transport_changed"`。
 - 新建服务默认 `enabled=0, trusted=0`。只有 `enabled && trusted` 的服务的工具进入运行目录。
 - **信任 ≠ 授权**：每个工具还有 `approval`，默认 `ask`；用户可把只读工具改为 `auto`。外部描述的 `readOnlyHint` 不可信，只用来在 UI 上建议，不自动改为 `auto`。
 - 凭据按服务隔离：请求头（如 `Authorization`）和 query 参数（如某些地图 MCP 的 `ak`）都放在加密的 `secret` 中，发请求时拼上，**不落进 `url` 列、不进日志**。这覆盖了"密钥在 URL 里"的服务，不需要宿主改写地址的回调。
@@ -48,6 +59,16 @@ CREATE TABLE tools (
 - 调用：结果 `content[]` 只取 `text` 拼接，其他类型以 `[unsupported content: <type>]` 占位；`isError=true` → `ToolExecution::Error`。
 - 超时：连接 10s、单次 60s；响应 ≤ 2 MiB；超时或连接中断发生在请求已发出之后 → `ToolExecution::Unknown`（可能已执行）。
 - 地址：`aether_support::net`；`allow_private=1` 时把该服务的 `host:port` 加入策略。禁止重定向。
+
+### 3.1 stdio
+
+- 一次 `McpSession` 内按需启动一个进程，会话结束（drop/取消）即结束；不常驻、不复用到下一次运行。进程意外退出 → 该服务本次报 `server_exited`，下次会话重新启动。
+- 启动：tokio `Command`，参数原样传入、**不经过 shell**；`kill_on_drop`。Windows 下裸命令名（无路径分隔符、无扩展名）按子进程环境的 `PATH` 与 `PATHEXT` 查找，使 `npx`、`uvx` 这类 `.cmd` 启动器可用（std 对 `.cmd`/`.bat` 参数做安全转义）；用 `CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`，结束时 `taskkill /T /F` 结束整棵进程树。Unix 子进程自成进程组，结束时 `kill -KILL -<pgid>`。
+- 环境：清空后复制父进程环境，去掉名字（不区分大小写）以 `_KEY`、`_TOKEN`、`_SECRET` 结尾或含 `PASSWORD` 的变量，再叠加配置的 `env`。
+- 线路：stdout 每行一条 JSON-RPC，单行 ≤ 2 MiB，超过即断开并报错；非 JSON 行忽略（记 `debug`）。stdin 每行一条。stderr 持续读完，防止子进程阻塞；只把前 64 KiB 打码后的摘要记 `info`，**不进错误消息**。
+- 超时：启动到 `initialize` 完成 10s；调用与发现沿用上面的限制。
+- 找不到程序 → `bad_request{field:"command", reason:"not_found"}`；无执行权限 → `reason:"not_executable"`；其他启动失败 → `spawn_failed`。
+- 自调用防护（`own_port`）只对 http 生效。
 
 ## 4. API
 
@@ -75,15 +96,19 @@ impl McpSession {
 - 单个服务连接失败只影响该服务的工具（不进本次目录），记 `warn`，不让整次运行失败。
 
 ```ts
-interface ServerDto { id: string; slug: string; name: string; url: string /* 打码 */; secretKeys: string[] /* 只给键名 */;
+type McpTransport =
+  | { kind: 'http'; url: string /* 不含凭据；列表中打码 */ }
+  | { kind: 'stdio'; command: string; args: string[]; cwd?: string /* 绝对目录；缺省=继承 */ }
+interface ServerDto { id: string; slug: string; name: string; transport: McpTransport; secretKeys: string[] /* 只给键名 */;
   enabled: boolean; trusted: boolean; allowPrivate: boolean; tools: ToolDto[] }
 interface ToolDto { name: string; description: string; readOnly: boolean; approval: 'auto' | 'ask' | 'deny' }
-interface ServerSave { id?: string; slug: string; name: string; url: string;
-  secret?: { headers?: Record<string, string>; query?: Record<string, string> } /* 缺省=保持；{}=清空 */;
-  enabled: boolean; trusted: boolean; allowPrivate: boolean }
+interface ServerSave { id?: string; slug: string; name: string; transport: McpTransport;
+  secret?: { headers?: Record<string, string>; query?: Record<string, string>; env?: Record<string, string> } /* 缺省=保持；{}=清空 */;
+  enabled: boolean; trusted: boolean; allowPrivate: boolean /* 仅 http 有意义 */ }
 ```
 
 - `url` 中若带了疑似凭据的 query（`looks_like_secret` 或参数名在打码名单），保存时拒绝并提示移到 `secret.query`。
+- stdio：`command` 非空、≤ 1024 字符、单行；`args` ≤ 64 项、每项 ≤ 4096 字符；`args` 在列表中明文展示，看起来像凭据的参数（含 `--flag=value` 的各段）→ `bad_request{field:"args", reason:"credential_arg"}`，应改放 `secret.env`；`cwd` 必须是已存在的绝对目录（`not_absolute`/`not_found`）；`env` 键匹配 `^[A-Za-z_][A-Za-z0-9_]{0,127}$`。
 
 # 第二部分：aether-mcp-server
 
