@@ -34,6 +34,29 @@ const steps =
           ),
         ]
 
+if (scope !== 'docs') {
+  const directory = mkdtempSync(join(tmpdir(), 'aether-actionlint-'))
+  try {
+    const platform = { win32: 'windows', darwin: 'darwin', linux: 'linux' }[process.platform]
+    const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch]
+    if (!platform || !arch) throw new Error('Unsupported actionlint platform')
+    const archive = `actionlint_1.7.12_${platform}_${arch}.${platform === 'windows' ? 'zip' : 'tar.gz'}`
+    execFileSync(
+      'gh',
+      ['release', 'download', 'v1.7.12', '--repo', 'rhysd/actionlint', '--pattern', archive, '--dir', directory],
+      { stdio: 'inherit' },
+    )
+    execFileSync('tar', ['-xf', join(directory, archive), '-C', directory], { stdio: 'inherit' })
+    execFileSync(
+      join(directory, platform === 'windows' ? 'actionlint.exe' : 'actionlint'),
+      ['-shellcheck=', '-pyflakes='],
+      { stdio: 'inherit' },
+    )
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+}
+
 for (const step of steps) {
   console.log(`\n=== ${step}`)
   execSync(step, { stdio: 'inherit' })
