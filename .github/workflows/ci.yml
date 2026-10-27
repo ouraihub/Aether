@@ -12,12 +12,14 @@ concurrency:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   reuse:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       reuse: ${{ steps.resolve.outputs.reuse }}
     steps:
@@ -38,7 +40,18 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.reuse.outputs.reuse == 'true'
     runs-on: ubuntu-24.04
     steps:
-      - run: echo "The exact merged tree already passed all three native jobs; see the reuse job summary for provenance."
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check the actual merged commit and repository rules
+        run: pnpm exec release-kit check
+      - run: echo "The exact merged tree already passed all three native jobs; commit-dependent checks ran here. See the reuse job summary for provenance."
 
   windows:
     needs: reuse

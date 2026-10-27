@@ -31,6 +31,8 @@ pnpm run check
 
 PR 和手动 CI 始终执行完整三平台质量门；每个成功的平台任务保存该次实际被测代码树与工作流的凭据。普通双亲合并推送到 `main` 后，只有同仓库 PR 最新 CI 运行全部成功、三张凭据属于同一次运行及尝试，且代码树和工作流与合并结果一致时才复用，并在 `reuse` 任务摘要列出来源。工作流自身有变更、直接推送、squash/rebase、结果失败／缺失／过期或 API 异常都回退完整三平台。本地 `pnpm run ci` 不复用，始终完整执行。
 
+复用只省去相同代码树的重复平台构建与测试；`reused-ci` 仍对实际 main 合并提交执行 `release-kit check`，不复用依赖提交历史的检查。`actions: read` 只授予凭据判定任务，原有三平台任务仍仅有 `contents: read`。
+
 ## macOS / Linux 凭据与完整检查
 
 Windows DPAPI 格式保持不变。macOS 使用用户 Keychain，Linux 使用已解锁的持久 Secret Service（例如 GNOME Keyring）；没有服务或服务锁定就拒绝保存凭据，不影响不需要凭据的离线功能，不回落普通文件主密钥或明文。宿主可复用 `aether_providers::secrets::{protect, unprotect}` 的字节接口，具体格式和错误见 [基础设计 §2](docs/10-详细设计-基础与可观测性.md#2-secret决策-d3windows--macos--linux-原生存储)。
