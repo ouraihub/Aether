@@ -138,10 +138,16 @@
         {#each skills as skill, index (skill.id)}
           <li class="flex items-center gap-3 rounded-md border p-3">
             <div class="flex min-w-0 flex-1 flex-col">
-              <span class="truncate font-mono text-sm">{skill.name}</span>
+              <span class="flex min-w-0 items-center gap-2">
+                <span class="truncate font-mono text-sm">{skill.name}</span>
+                {#if skill.hasScripts}
+                  <span class="shrink-0 rounded border px-1.5 text-xs">{t('skills.has_scripts')}</span>
+                {/if}
+              </span>
               <span class="text-muted-foreground truncate text-xs">
                 {skill.version ?? t('skills.unversioned')} · {t(`skills.origin.${skill.origin}`)} ·
                 {t('skills.revision', { revision: skill.revision })} · {t('skills.chars', { count: skill.bodyChars })}
+                {#if skill.fileCount > 0}· {t('skills.file_count', { count: skill.fileCount })}{/if}
               </span>
             </div>
             <Button

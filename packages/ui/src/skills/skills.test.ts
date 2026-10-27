@@ -12,7 +12,10 @@ import {
 } from '../ports'
 import Harness from './Harness.test.svelte'
 
-const meta = (revision: number): SkillMeta => ({
+const meta = (
+  revision: number,
+  files: Pick<SkillMeta, 'hasScripts' | 'fileCount'> = { hasScripts: false, fileCount: 0 },
+): SkillMeta => ({
   id: 's1',
   name: 'writer',
   description: 'Writes',
@@ -21,6 +24,7 @@ const meta = (revision: number): SkillMeta => ({
   revision,
   bodyChars: 4,
   updatedAt: 0,
+  ...files,
 })
 
 const preview = (body: string): Preview => ({
@@ -31,6 +35,7 @@ const preview = (body: string): Preview => ({
   body,
   license: null,
   extra: {},
+  files: [],
   action: 'install',
   current: null,
 })
@@ -88,6 +93,38 @@ describe('SkillsSettings', () => {
     await screen.findByText('writer')
     expect(install).toHaveBeenNthCalledWith(2, source, 'd-new body', false)
   })
+
+  it('lists packaged files and warns about scripts before install; the list marks skills with scripts', async () => {
+    const scripted: Preview = {
+      ...preview('run it'),
+      files: [
+        { path: 'references/guide.md', kind: 'reference', size: 12 },
+        { path: 'scripts/run.py', kind: 'script', size: 9 },
+      ],
+    }
+    const install = vi.fn(() => Promise.resolve([meta(1, { hasScripts: true, fileCount: 2 })]))
+    mount({ skills: { preview: () => Promise.resolve(scripted), install } })
+
+    const file = new File(['zip'], 'tool.zip')
+    await fireEvent.change(screen.getByLabelText('Import SKILL.md or .zip'), { target: { files: [file] } })
+    await screen.findByText('scripts/run.py')
+    expect(screen.getByText('references/guide.md')).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain('never runs them automatically')
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+    await screen.findByText('Has scripts')
+    expect(screen.getByText(/2 files/)).toBeTruthy()
+  })
+
+  it('shows no script notice for a skill with only references', async () => {
+    const plain: Preview = { ...preview('read it'), files: [{ path: 'references/a.md', kind: 'reference', size: 1 }] }
+    mount({ skills: { preview: () => Promise.resolve(plain) } })
+    await fireEvent.change(screen.getByLabelText('Import SKILL.md or .zip'), {
+      target: { files: [new File(['zip'], 'a.zip')] },
+    })
+    await screen.findByText('references/a.md')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
 })
 
 describe('SkillPicker in ChatPanel', () => {
@@ -106,7 +143,7 @@ describe('SkillPicker in ChatPanel', () => {
       }
       return Promise.resolve({ runId: 'r2', conversationId: null, turnId: null })
     })
-    const get = vi.fn(() => Promise.resolve({ ...meta(2), body: 'edited body', license: null, extra: {} }))
+    const get = vi.fn(() => Promise.resolve({ ...meta(2), body: 'edited body', license: null, extra: {}, files: [] }))
     mount({ chat: { run }, skills: { list: () => Promise.resolve([meta(2)]), get } }, [{ id: 's1', revision: 1 }])
 
     const send = async (text: string) => {

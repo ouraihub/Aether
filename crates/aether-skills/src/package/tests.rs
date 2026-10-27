@@ -9,7 +9,10 @@ use aether_support::{KitError, KitErrorCode};
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
-use super::{MAX_SKILL, MAX_ZIP, Package, Source, read};
+use super::{
+    MAX_DEPTH, MAX_ENTRIES, MAX_FILE, MAX_SKILL, MAX_TOTAL, MAX_ZIP, Package, Source, read,
+};
+use crate::dto::SkillFileKind;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -187,7 +190,7 @@ fn zip_with_script_lists_unsupported_files() {
 
 #[test]
 fn zip_entry_count_and_archive_size_are_capped() {
-    let names: Vec<String> = (0..9).map(|i| format!("f{i}")).collect();
+    let names: Vec<String> = (0..=MAX_ENTRIES).map(|i| format!("f{i}")).collect();
     let entries: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b""[..])).collect();
     assert_bad(
         &err(&zip_source(zip_bytes(&entries))),
@@ -268,5 +271,165 @@ fn relative_path_is_refused() {
         &err(&Source::Path(PathBuf::from("SKILL.md"))),
         "path",
         "not_absolute",
+    );
+}
+
+fn paths(package: &Package) -> Vec<(&str, SkillFileKind)> {
+    package
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f.kind))
+        .collect()
+}
+
+#[test]
+fn directory_with_scripts_references_and_assets_is_read_recursively() {
+    let package = ok(&Source::Path(fixture("with-files")));
+    assert_eq!(package.skill.name, "with-files");
+    assert_eq!(
+        paths(&package),
+        [
+            ("assets/data.json", SkillFileKind::Asset),
+            ("references/guide.md", SkillFileKind::Reference),
+            ("scripts/lib/util.sh", SkillFileKind::Script),
+            ("scripts/run.py", SkillFileKind::Script),
+        ]
+    );
+    let run = &package.files[3];
+    assert_eq!(run.content, b"print(\"hi\")\n");
+    // Lowercase hex sha256 of the bytes as read.
+    assert_eq!(run.sha256.len(), 64);
+    assert_ne!(run.sha256, package.files[2].sha256);
+}
+
+#[test]
+fn zip_keeps_binary_assets_byte_for_byte() {
+    let png: &[u8] = &[0x89, b'P', b'N', b'G', 0xff, 0x00, 0xfe];
+    let bytes = zip_bytes(&[
+        ("pkg/SKILL.md", SKILL),
+        ("pkg/scripts/run.py", b"print(1)\n"),
+        ("pkg/references/a/b/c/deep.md", b"deep\n"),
+        ("pkg/assets/logo.png", png),
+    ]);
+    let package = ok(&zip_source(bytes));
+    assert_eq!(
+        paths(&package),
+        [
+            ("assets/logo.png", SkillFileKind::Asset),
+            ("references/a/b/c/deep.md", SkillFileKind::Reference),
+            ("scripts/run.py", SkillFileKind::Script),
+        ]
+    );
+    assert_eq!(package.files[0].content, png);
+}
+
+#[test]
+fn package_paths_must_be_plain_names_within_four_levels() {
+    for (name, reason) in [
+        ("scripts/.hidden.sh", "invalid_name"),
+        ("scripts/.git/config", "invalid_name"),
+        ("scripts/my script.sh", "invalid_name"),
+        ("references/指南.md", "invalid_name"),
+        ("assets/a/b/c/d/deep.bin", "too_deep"),
+    ] {
+        let bytes = zip_bytes(&[("SKILL.md", SKILL), (name, b"x")]);
+        let error = err(&zip_source(bytes));
+        assert_bad(&error, name, reason);
+        if reason == "too_deep" {
+            assert_eq!(error.details().limit(), Some(MAX_DEPTH as u64));
+        }
+    }
+    // Outside the three directories nothing changed: still `unsupported_files`.
+    let bytes = zip_bytes(&[
+        ("SKILL.md", SKILL),
+        ("resources/x.md", b"x"),
+        ("scripts", b"x"),
+    ]);
+    assert_bad(
+        &err(&zip_source(bytes)),
+        "resources/x.md, scripts",
+        "unsupported_files",
+    );
+}
+
+#[test]
+fn directory_depth_and_names_are_checked_while_walking() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("SKILL.md"), SKILL).unwrap();
+    let deep = dir.path().join("scripts/a/b/c/d");
+    std::fs::create_dir_all(&deep).unwrap();
+    std::fs::write(deep.join("x.sh"), "echo").unwrap();
+    let source = Source::Path(dir.path().to_owned());
+    let error = err(&source);
+    assert_bad(&error, "scripts/a/b/c/d", "too_deep");
+
+    std::fs::remove_dir_all(dir.path().join("scripts/a")).unwrap();
+    std::fs::create_dir_all(dir.path().join("references/.cache")).unwrap();
+    assert_bad(&err(&source), "references/.cache", "invalid_name");
+}
+
+#[test]
+fn scripts_and_references_must_be_utf8_but_assets_may_be_binary() {
+    let latin1: &[u8] = b"caf\xe9\n";
+    for name in ["scripts/run.py", "references/notes.md"] {
+        let bytes = zip_bytes(&[("SKILL.md", SKILL), (name, latin1)]);
+        assert_bad(&err(&zip_source(bytes)), name, "not_utf8");
+    }
+    let bytes = zip_bytes(&[("SKILL.md", SKILL), ("assets/notes.txt", latin1)]);
+    assert_eq!(ok(&zip_source(bytes)).files[0].content, latin1);
+}
+
+#[test]
+fn credentials_in_packaged_text_files_are_located() {
+    let key = format!("x = 1\n-----BEGIN RSA {} KEY-----\n", "PRIVATE");
+    for name in ["scripts/run.py", "references/notes.md", "assets/config.ini"] {
+        let bytes = zip_bytes(&[("SKILL.md", SKILL), (name, key.as_bytes())]);
+        let error = err(&zip_source(bytes));
+        assert_bad(&error, &format!("{name}:2"), "secret_detected");
+        assert!(!format!("{error} {error:?}").contains("BEGIN"), "{error}");
+    }
+}
+
+#[test]
+fn oversize_packaged_file_is_rejected_at_one_mib() {
+    // Highly compressible, so the archive stays far below the ZIP cap.
+    let mut data = vec![b'a'; MAX_FILE];
+    let bytes = zip_bytes(&[("SKILL.md", SKILL), ("assets/big.txt", &data)]);
+    assert_eq!(ok(&zip_source(bytes)).files[0].content.len(), MAX_FILE);
+    data.push(b'a');
+    let bytes = zip_bytes(&[("SKILL.md", SKILL), ("assets/big.txt", &data)]);
+    let error = err(&zip_source(bytes));
+    assert_bad(&error, "assets/big.txt", "too_large");
+    assert_eq!(error.details().limit(), Some(MAX_FILE as u64));
+}
+
+#[test]
+fn cumulative_inflated_size_is_capped() {
+    let data = vec![b'a'; MAX_FILE];
+    let names: Vec<String> = (0..=MAX_TOTAL / MAX_FILE)
+        .map(|i| format!("assets/f{i}.txt"))
+        .collect();
+    let mut entries: Vec<(&str, &[u8])> = vec![("SKILL.md", SKILL)];
+    entries.extend(names.iter().map(|n| (n.as_str(), data.as_slice())));
+    let bytes = zip_bytes(&entries);
+    assert!(bytes.len() < MAX_ZIP);
+    let error = err(&zip_source(bytes));
+    assert_bad(&error, "total", "too_large");
+    assert_eq!(error.details().limit(), Some(MAX_TOTAL as u64));
+}
+
+#[test]
+fn directory_entry_count_is_capped() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("SKILL.md"), SKILL).unwrap();
+    let assets = dir.path().join("assets");
+    std::fs::create_dir(&assets).unwrap();
+    for i in 0..MAX_ENTRIES {
+        std::fs::write(assets.join(format!("f{i}")), "x").unwrap();
+    }
+    assert_bad(
+        &err(&Source::Path(dir.path().to_owned())),
+        "entries",
+        "too_large",
     );
 }

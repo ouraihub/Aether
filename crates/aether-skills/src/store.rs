@@ -14,15 +14,16 @@ use rusqlite::{Connection as Db, OptionalExtension, Row, Transaction, params};
 use sha2::{Digest, Sha256};
 
 use crate::dto::{
-    ManualSave, Preview, PreviewAction, PreviewCurrent, SkillDto, SkillMeta, SkillOrigin, SkillRef,
-    SkillSnapshot,
+    ManualSave, Preview, PreviewAction, PreviewCurrent, SkillDto, SkillFileKind, SkillFileMeta,
+    SkillMeta, SkillOrigin, SkillRef, SkillSnapshot,
 };
 use crate::frontmatter;
-use crate::package::{self, Source};
+use crate::package::{self, PackageFile, Source};
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: "
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: "
 CREATE TABLE skills (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
@@ -37,10 +38,27 @@ CREATE TABLE skills (
   position INTEGER NOT NULL,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );",
-}];
+    },
+    Migration {
+        version: 2,
+        sql: "
+CREATE TABLE skill_files (
+  skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('script','reference','asset')),
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  content BLOB NOT NULL,
+  PRIMARY KEY (skill_id, path)
+);",
+    },
+];
 
+/// Leading columns mapped by [`meta`].
 const META_COLUMNS: &str =
-    "id, name, description, version, origin, revision, length(body), updated_at";
+    "id, name, description, version, origin, revision, length(body), updated_at,
+  EXISTS (SELECT 1 FROM skill_files f WHERE f.skill_id = skills.id AND f.kind = 'script'),
+  (SELECT COUNT(*) FROM skill_files f WHERE f.skill_id = skills.id)";
 
 /// A skill shipped with the host, synced into `skills.db` on every [`Store::open`].
 #[derive(Debug, Clone, Copy)]
@@ -60,7 +78,7 @@ pub struct Store {
     db: Mutex<Db>,
 }
 
-/// Fields that define a skill's content; `digest` covers the first four.
+/// Fields that define a skill's content; `extra` is stored but not in the digest.
 struct Content<'a> {
     name: &'a str,
     description: &'a str,
@@ -68,6 +86,23 @@ struct Content<'a> {
     body: &'a str,
     license: Option<&'a str>,
     extra: &'a BTreeMap<String, String>,
+    /// Packaged files; part of the digest.
+    files: FileSource<'a>,
+}
+
+/// Where a skill's packaged files come from on insert or update.
+#[derive(Clone, Copy)]
+enum FileSource<'a> {
+    /// Exactly these (empty for hand-written and built-in skills).
+    Package(&'a [PackageFile]),
+    /// The files currently stored for this skill id: kept on an edit, copied on a duplicate.
+    Stored(&'a str),
+}
+
+/// A file as the digest sees it.
+struct FileHash {
+    path: String,
+    sha256: String,
 }
 
 impl Store {
@@ -93,34 +128,63 @@ impl Store {
         list(&*self.lock()?)
     }
 
-    /// One skill with its body.
+    /// One skill with its body and file list.
     ///
     /// # Errors
     /// `not_found{entity:"skill"}`; `internal` when SQLite fails.
     pub fn get(&self, id: &str) -> Result<SkillDto, KitError> {
         let db = self.lock()?;
+        let (meta, body, license, extra) = db
+            .query_row(
+                &format!("SELECT {META_COLUMNS}, body, license, extra FROM skills WHERE id = ?1"),
+                [id],
+                |row| {
+                    Ok((
+                        meta(row)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                        row.get::<_, String>(12)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or_else(|| KitError::not_found("skill"))?;
+        Ok(SkillDto {
+            meta,
+            body,
+            license,
+            extra: serde_json::from_str(&extra).map_err(KitError::internal)?,
+            files: file_list(&db, id)?,
+        })
+    }
+
+    /// The file list of revision `revision` of a skill.
+    ///
+    /// # Errors
+    /// `conflict{reason:"skill_changed", entity:<id>}` when the revision differs or the
+    /// skill was deleted; `internal`.
+    pub fn files(&self, id: &str, revision: u32) -> Result<Vec<SkillFileMeta>, KitError> {
+        let db = self.lock()?;
+        ensure_revision(&db, id, revision)?;
+        file_list(&db, id)
+    }
+
+    /// Content of one packaged file of revision `revision`. Nothing is executed or
+    /// written to disk; running scripts is the host's decision.
+    ///
+    /// # Errors
+    /// `conflict{reason:"skill_changed", entity:<id>}` when the revision differs or the
+    /// skill was deleted; `not_found{entity:"skill_file"}` for an unknown path; `internal`.
+    pub fn file(&self, id: &str, revision: u32, path: &str) -> Result<Vec<u8>, KitError> {
+        let db = self.lock()?;
+        ensure_revision(&db, id, revision)?;
         db.query_row(
-            &format!("SELECT {META_COLUMNS}, body, license, extra FROM skills WHERE id = ?1"),
-            [id],
-            |row| {
-                Ok((
-                    meta(row)?,
-                    row.get(8)?,
-                    row.get(9)?,
-                    row.get::<_, String>(10)?,
-                ))
-            },
+            "SELECT content FROM skill_files WHERE skill_id = ?1 AND path = ?2",
+            [id, path],
+            |row| row.get(0),
         )
         .optional()?
-        .ok_or_else(|| KitError::not_found("skill"))
-        .and_then(|(meta, body, license, extra)| {
-            Ok(SkillDto {
-                meta,
-                body,
-                license,
-                extra: serde_json::from_str(&extra).map_err(KitError::internal)?,
-            })
-        })
+        .ok_or_else(|| KitError::not_found("skill_file"))
     }
 
     /// Reads and validates `source` for the user to review. Nothing is written.
@@ -129,20 +193,25 @@ impl Store {
     /// The package errors of docs/14 §2; `conflict{reason:"builtin_name"}`; `internal`.
     pub fn preview(&self, source: &Source) -> Result<Preview, KitError> {
         let package = package::read(source)?;
-        let skill = &package.skill;
-        let current = existing(&*self.lock()?, &skill.name)?
+        let db = self.lock()?;
+        let current = existing(&db, &package.skill.name)?
             .map(|(_, version, revision)| PreviewCurrent { version, revision });
-        let digest = digest(
-            &skill.name,
-            &skill.description,
-            skill.version.as_deref(),
-            &skill.body,
-        );
+        let digest = Content::package(&package).digest(&db)?;
+        drop(db);
         let action = if current.is_some() {
             PreviewAction::Replace
         } else {
             PreviewAction::Install
         };
+        let files = package
+            .files
+            .iter()
+            .map(|file| SkillFileMeta {
+                path: file.path.clone(),
+                kind: file.kind,
+                size: file.content.len() as u64,
+            })
+            .collect();
         Ok(Preview {
             digest,
             name: package.skill.name,
@@ -151,6 +220,7 @@ impl Store {
             body: package.skill.body,
             license: package.license,
             extra: package.skill.extra,
+            files,
             action,
             current,
         })
@@ -170,20 +240,12 @@ impl Store {
         replace: bool,
     ) -> Result<Vec<SkillMeta>, KitError> {
         let package = package::read(source)?;
-        let skill = &package.skill;
-        let content = Content {
-            name: &skill.name,
-            description: &skill.description,
-            version: skill.version.as_deref(),
-            body: &skill.body,
-            license: package.license.as_deref(),
-            extra: &skill.extra,
-        };
+        let content = Content::package(&package);
+        let mut db = self.lock()?;
         // Passing validation again is not approval: only the previewed bytes are (docs/14 §7.1).
-        if content.digest() != confirmed_digest {
+        if content.digest(&db)? != confirmed_digest {
             return Err(KitError::conflict("content_changed"));
         }
-        let mut db = self.lock()?;
         let tx = db.transaction()?;
         match existing(&tx, content.name)? {
             Some(_) if !replace => return Err(KitError::conflict("exists")),
@@ -213,7 +275,8 @@ impl Store {
         let Some(id) = input.id.as_deref() else {
             ensure_free(&tx, &input.name, None)?;
             let extra = BTreeMap::new();
-            insert(&tx, &input.content(&extra, None), SkillOrigin::Manual)?;
+            let content = input.content(&extra, None, FileSource::Package(&[]));
+            insert(&tx, &content, SkillOrigin::Manual)?;
             tx.commit()?;
             return list(&db);
         };
@@ -243,12 +306,14 @@ impl Store {
         }
         ensure_free(&tx, &input.name, Some(id))?;
         let extra = serde_json::from_str(&extra).map_err(KitError::internal)?;
-        update(&tx, id, &input.content(&extra, license.as_deref()), origin)?;
+        let content = input.content(&extra, license.as_deref(), FileSource::Stored(id));
+        update(&tx, id, &content, origin)?;
         tx.commit()?;
         list(&db)
     }
 
-    /// Copies any skill (typically a built-in) as a `manual` skill named `new_name`.
+    /// Copies any skill (typically a built-in) as a `manual` skill named `new_name`,
+    /// packaged files included.
     ///
     /// # Errors
     /// `bad_request{field:"name"}`; `not_found{entity:"skill"}`;
@@ -271,6 +336,7 @@ impl Store {
             body: &skill.body,
             license: skill.license.as_deref(),
             extra: &skill.extra,
+            files: FileSource::Stored(id),
         };
         insert(&tx, &content, SkillOrigin::Manual)?;
         tx.commit()?;
@@ -368,6 +434,7 @@ impl ManualSave {
         &'a self,
         extra: &'a BTreeMap<String, String>,
         license: Option<&'a str>,
+        files: FileSource<'a>,
     ) -> Content<'a> {
         Content {
             name: &self.name,
@@ -376,35 +443,82 @@ impl ManualSave {
             body: &self.body,
             license,
             extra,
+            files,
         }
     }
 }
 
-impl Content<'_> {
-    fn digest(&self) -> String {
-        digest(self.name, self.description, self.version, self.body)
+impl<'a> Content<'a> {
+    fn package(package: &'a package::Package) -> Self {
+        Self {
+            name: &package.skill.name,
+            description: &package.skill.description,
+            version: package.skill.version.as_deref(),
+            body: &package.skill.body,
+            license: package.license.as_deref(),
+            extra: &package.skill.extra,
+            files: FileSource::Package(&package.files),
+        }
+    }
+
+    fn digest(&self, db: &Db) -> Result<String, KitError> {
+        let files = match self.files {
+            FileSource::Package(files) => files
+                .iter()
+                .map(|file| FileHash {
+                    path: file.path.clone(),
+                    sha256: file.sha256.clone(),
+                })
+                .collect(),
+            FileSource::Stored(id) => db
+                .prepare_cached(
+                    "SELECT path, sha256 FROM skill_files WHERE skill_id = ?1 ORDER BY path",
+                )?
+                .query_map([id], |row| {
+                    Ok(FileHash {
+                        path: row.get(0)?,
+                        sha256: row.get(1)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+        Ok(digest(
+            [
+                Some(self.name),
+                Some(self.description),
+                self.version,
+                Some(self.body),
+            ],
+            self.license,
+            &files,
+        ))
     }
 }
 
-/// `sha256(name|description|version|body)` with each field length-prefixed, so moving
-/// text between fields changes the digest; `None` and `Some("")` differ.
-fn digest(name: &str, description: &str, version: Option<&str>, body: &str) -> String {
+/// `sha256` of the text fields, each length-prefixed so moving text between fields changes
+/// the digest (`None` and `Some("")` differ), then — only when the skill has a license or
+/// files — the license and every `(path, sha256)` in path order. Skills without either
+/// keep the migration 1 digest, so upgrading does not bump their revision.
+fn digest(text: [Option<&str>; 4], license: Option<&str>, files: &[FileHash]) -> String {
     let mut hasher = Sha256::new();
-    for field in [Some(name), Some(description), version, Some(body)] {
-        match field {
-            Some(text) => {
-                hasher.update([1]);
-                hasher.update((text.len() as u64).to_le_bytes());
-                hasher.update(text.as_bytes());
-            }
-            None => hasher.update([0]),
+    let mut field = |value: Option<&str>| match value {
+        Some(text) => {
+            hasher.update([1]);
+            hasher.update((text.len() as u64).to_le_bytes());
+            hasher.update(text.as_bytes());
+        }
+        None => hasher.update([0]),
+    };
+    text.into_iter().for_each(&mut field);
+    if license.is_some() || !files.is_empty() {
+        field(Some("package"));
+        field(license);
+        for file in files {
+            field(Some(&file.path));
+            field(Some(&file.sha256));
         }
     }
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex(&hasher.finalize())
 }
 
 fn sync_builtin(db: &mut Db, builtin: &[BuiltinSkill]) -> Result<(), KitError> {
@@ -419,6 +533,7 @@ fn sync_builtin(db: &mut Db, builtin: &[BuiltinSkill]) -> Result<(), KitError> {
             body: skill.body,
             license: None,
             extra: &extra,
+            files: FileSource::Package(&[]),
         };
         let row: Option<(String, SkillOrigin)> = tx
             .query_row(
@@ -477,13 +592,14 @@ fn insert(
     origin: SkillOrigin,
 ) -> Result<(), KitError> {
     let now = now_millis();
+    let id = new_id()?;
     tx.execute(
         "INSERT INTO skills (id, name, description, version, body, license, extra, origin,
            revision, digest, position, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9,
            (SELECT COALESCE(MAX(position) + 1, 0) FROM skills), ?10, ?10)",
         params![
-            new_id()?,
+            id,
             content.name,
             content.description,
             content.version,
@@ -491,11 +607,21 @@ fn insert(
             content.license,
             serde_json::to_string(content.extra).map_err(KitError::internal)?,
             origin_str(origin),
-            content.digest(),
+            content.digest(tx)?,
             now,
         ],
     )?;
-    Ok(())
+    match content.files {
+        FileSource::Package(files) => write_files(tx, &id, files),
+        FileSource::Stored(from) => {
+            tx.execute(
+                "INSERT INTO skill_files (skill_id, path, kind, size, sha256, content)
+                 SELECT ?1, path, kind, size, sha256, content FROM skill_files WHERE skill_id = ?2",
+                [&id, from],
+            )?;
+            Ok(())
+        }
+    }
 }
 
 /// Overwrites the content of `id`; the revision grows only when the digest changes.
@@ -520,11 +646,72 @@ fn update(
             content.license,
             serde_json::to_string(content.extra).map_err(KitError::internal)?,
             origin_str(origin),
-            content.digest(),
+            content.digest(tx)?,
             now_millis(),
         ],
     )?;
+    match content.files {
+        FileSource::Package(files) => {
+            tx.execute("DELETE FROM skill_files WHERE skill_id = ?1", [id])?;
+            write_files(tx, id, files)
+        }
+        // Kept as stored: an edit of the text never touches the files.
+        FileSource::Stored(_) => Ok(()),
+    }
+}
+
+fn write_files(tx: &Transaction<'_>, id: &str, files: &[PackageFile]) -> Result<(), KitError> {
+    let mut stmt = tx.prepare_cached(
+        "INSERT INTO skill_files (skill_id, path, kind, size, sha256, content)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
+    for file in files {
+        stmt.execute(params![
+            id,
+            file.path,
+            kind_str(file.kind),
+            i64::try_from(file.content.len()).map_err(KitError::internal)?,
+            file.sha256,
+            file.content,
+        ])?;
+    }
     Ok(())
+}
+
+fn file_list(db: &Db, id: &str) -> Result<Vec<SkillFileMeta>, KitError> {
+    let mut stmt = db.prepare_cached(
+        "SELECT path, kind, size FROM skill_files WHERE skill_id = ?1 ORDER BY path",
+    )?;
+    let rows = stmt
+        .query_map([id], |row| {
+            Ok(SkillFileMeta {
+                path: row.get(0)?,
+                kind: row.get(1)?,
+                // Files are capped at 1 MiB, so the size always fits u32.
+                size: row.get::<_, u32>(2)?.into(),
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(rows)
+}
+
+/// `conflict{reason:"skill_changed", entity:<id>}` unless `id` exists at `revision`.
+fn ensure_revision(db: &Db, id: &str, revision: u32) -> Result<(), KitError> {
+    let current: Option<u32> = db
+        .query_row("SELECT revision FROM skills WHERE id = ?1", [id], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    if current == Some(revision) {
+        Ok(())
+    } else {
+        Err(KitError::conflict("skill_changed").with_entity(id))
+    }
+}
+
+/// Lowercase hex of a hash.
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn list(db: &Db) -> Result<Vec<SkillMeta>, KitError> {
@@ -547,6 +734,8 @@ fn meta(row: &Row<'_>) -> rusqlite::Result<SkillMeta> {
         // Bodies are capped at 64 KiB, so the character count always fits u32.
         body_chars: row.get::<_, u32>(6)? as usize,
         updated_at: row.get(7)?,
+        has_scripts: row.get(8)?,
+        file_count: row.get(9)?,
     })
 }
 
@@ -555,6 +744,25 @@ fn origin_str(origin: SkillOrigin) -> &'static str {
         SkillOrigin::Imported => "imported",
         SkillOrigin::Manual => "manual",
         SkillOrigin::Builtin => "builtin",
+    }
+}
+
+fn kind_str(kind: SkillFileKind) -> &'static str {
+    match kind {
+        SkillFileKind::Script => "script",
+        SkillFileKind::Reference => "reference",
+        SkillFileKind::Asset => "asset",
+    }
+}
+
+impl FromSql for SkillFileKind {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value.as_str()? {
+            "script" => Ok(Self::Script),
+            "reference" => Ok(Self::Reference),
+            "asset" => Ok(Self::Asset),
+            _ => Err(FromSqlError::InvalidType),
+        }
     }
 }
 

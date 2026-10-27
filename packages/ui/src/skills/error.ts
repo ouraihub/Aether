@@ -20,6 +20,12 @@ export function errorText(t: KitI18n['t'], error: unknown): string {
       return t('skills.err.too_large', { field: field ?? '', limit: limit ?? '' })
     case 'frontmatter_unsupported':
       return t('skills.err.frontmatter', { field: field ?? '' })
+    case 'invalid_name':
+      return t('skills.err.invalid_name', { field: field ?? '' })
+    case 'too_deep':
+      return t('skills.err.too_deep', { field: field ?? '', limit: limit ?? '' })
+    case 'not_utf8':
+      return t('skills.err.not_utf8', { field: field ?? '' })
     default:
       return field ? `${t(`errors.${error.code}`)} (${field})` : t(`errors.${error.code}`)
   }

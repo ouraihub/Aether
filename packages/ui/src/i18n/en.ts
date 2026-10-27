@@ -537,4 +537,16 @@ export const en: Messages = {
   'skills.err.unsupported_files': 'Unsupported files in the package: {field}',
   'skills.err.too_large': '{field} is too large (limit {limit})',
   'skills.err.frontmatter': 'Unsupported frontmatter at line {field}',
+  'skills.err.invalid_name': 'Invalid file name in the package: {field} (letters, digits, ".", "_", "-" only)',
+  'skills.err.too_deep': '{field} is nested too deep (at most {limit} levels)',
+  'skills.err.not_utf8': '{field} is not UTF-8 text',
+  'skills.has_scripts': 'Has scripts',
+  'skills.file_count': '{count} files',
+  'skills.files': 'Packaged files ({count})',
+  'skills.file_kind.script': 'Script',
+  'skills.file_kind.reference': 'Reference',
+  'skills.file_kind.asset': 'Asset',
+  'skills.file_size': '{size} B',
+  'skills.scripts_notice':
+    'Contains scripts. This app never runs them automatically; the host may run them after you approve.',
 }
