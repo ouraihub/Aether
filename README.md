@@ -36,17 +36,19 @@ pnpm run ci
 
 本地构建固定使用便携 MSVC（由 [desktop-kit](https://github.com/ouraihub/desktop-kit) 提供；默认 `D:\Applications\msvc-portable\msvc`，可用 `PORTABLE_MSVC_ROOT` 覆盖；首次运行 `node_modules\@ouraihub\desktop-kit\msvc\setup-msvc.bat` 安装）。
 
-合并到 `main` 必须通过确定性 `CI gate`，分支须包含最新 `main`，管理员也受约束。普通文档仅运行策略／提交检查；纯 `packages/ui/src` 手写 TS/Svelte/CSS 运行前端 lint、格式、类型、测试、示例构建及 i18n；Rust、依赖、生成 DTO、CI／构建／代理规则和未知路径完整运行三平台。混合改动取最高风险，无法确定范围完整执行；最终门禁要求所有适用任务真实成功，不把意外 skipped 算通过。
+合并到 `main` 必须通过确定性 `CI gate`，分支须包含最新 `main`，管理员也受约束。普通文档仅运行策略／提交检查；工作流、根 `AGENTS.md` 和 CI 调度／门禁脚本进入自动化检查（工作流语法、分类／门禁行为、提交规则），不因配置变化编译产品；纯 `packages/ui/src` 手写 TS/Svelte/CSS 运行前端 lint、格式、类型、测试、示例构建及 i18n；Rust、依赖、生成 DTO、产品构建脚本和未知路径运行 Windows 完整检查。混合改动取最高风险，无法确定范围完整执行；最终门禁要求所有适用任务真实成功，不把意外 skipped 算通过。自动化检查不能证明新编译命令有效；修改工具链或实际编译参数时须另行手动运行受影响平台的完整检查。
 
-本地 `pnpm run ci` 默认完整执行；显式 `node scripts/ci.mjs --scope docs|frontend` 与远端轻检查复用相同步骤。手动触发始终完整检查。同 PR 新提交取消旧运行；不实现历史凭据复用，不新增 `actions: read`。AI review 保留辅助意见，但不作为必需检查或自动合并裁判；维护者或获授权助手须处理实质问题后通过正常 PR 合并，不使用管理员绕过。历史失败记录保留，验收看最新提交适用检查。
+本地 `pnpm run ci` 默认完整执行；显式 `node scripts/ci.mjs --scope docs|automation|frontend` 与远端轻检查复用相同步骤。日常 `CI` 手动触发运行 Windows 完整检查。同 PR 新提交取消旧运行；不实现历史凭据复用，不新增 `actions: read`。AI review 保留辅助意见，但不作为必需检查或自动合并裁判；维护者或获授权助手须处理实质问题后通过正常 PR 合并，不使用管理员绕过。历史失败记录保留，验收看最新提交适用检查。
 
 完整检查还包含纯support/chat/images、独立conversations和插件单feature编译门禁，以及`node scripts/contracts-check.mjs`：AJV共享样本、TypeScript绑定赋值和真实Rust序列化共同校验。Native宿主使用`aether-runtime`运行/会话服务，Tauri插件只做IPC/生命周期适配；外仓升级前阅读[破坏性迁移与验收](docs/24-详细设计-职责分层与实现契约.md)。
 
 ## macOS / Linux 凭据与完整检查
 
+macOS/Linux 已移至独立工作流 `macOS and Linux`（`.github/workflows/unix.yml`），仅支持手动触发和每天北京时间 **02:00**（UTC 前一天 18:00，cron `0 18 * * *`）定时运行主干，不在 PR／push 时启动，也不阻塞日常 `CI gate`。GitHub 定时任务可能延迟。手动执行：`gh workflow run unix.yml --ref <分支或tag>`；发版前确认待发布提交两端通过，夜间失败在 Actions 中处理，不当作成功。完整原生检查内容不变。
+
 Windows DPAPI 格式保持不变。macOS 使用用户 Keychain，Linux 使用已解锁的持久 Secret Service（例如 GNOME Keyring）；没有服务或服务锁定就拒绝保存凭据，不影响不需要凭据的离线功能，不回落普通文件主密钥或明文。宿主可复用 `aether_providers::secrets::{protect, unprotect}` 的字节接口，具体格式和错误见 [基础设计 §2](docs/10-详细设计-基础与可观测性.md#2-secret决策-d3windows--macos--linux-原生存储)。
 
-Linux 原生编译需 `libdbus-1-dev`，完整 Tauri workspace 另需 GTK/WebKitGTK 4.1、AppIndicator、OpenSSL 和打包工具（依赖清单见 `.github/workflows/ci.yml`，Ubuntu 22.04 基线）。在桌面已解锁的 Secret Service 会话中直接运行 `pnpm install --frozen-lockfile && pnpm run ci`；headless runner 用真实服务：
+Linux 原生编译需 `libdbus-1-dev`，完整 Tauri workspace 另需 GTK/WebKitGTK 4.1、AppIndicator、OpenSSL 和打包工具（依赖清单见 `.github/workflows/unix.yml`，Ubuntu 22.04 基线）。在桌面已解锁的 Secret Service 会话中直接运行 `pnpm install --frozen-lockfile && pnpm run ci`；headless runner 用真实服务：
 
 Linux CI 的 apt 使用 Ubuntu 官方归档源而非 Azure 区域镜像，禁用推荐包并显式安装 `xauth`；安装步骤限时 8 分钟，HTTP(S) 无响应限时 30 秒。下载异常会失败而非消耗整个任务时限，不能当作平台检查已通过。
 
