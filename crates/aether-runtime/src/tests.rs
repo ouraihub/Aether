@@ -28,6 +28,8 @@ mod actions;
 mod lifecycle;
 #[cfg(feature = "mcp-client")]
 mod mcp_session;
+#[cfg(feature = "skills")]
+mod skill_security;
 
 struct Host;
 impl KitHost for Host {}

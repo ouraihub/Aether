@@ -1660,6 +1660,8 @@ mod tests {
                 reason(&error),
                 (KitErrorCode::BadRequest, Some(field), Some(why))
             );
+            assert_eq!(store.reveal_key(&id).unwrap().as_str(), KEY);
+            assert_eq!(keys_of(&store, &ep), [KEY]);
         }
         // Re-saving a key's own value is not a duplicate of itself.
         save_key(&store, json!({ "endpointId": ep, "id": id, "key": KEY })).unwrap();

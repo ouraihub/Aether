@@ -131,6 +131,8 @@ impl McpServer {
 
 token 撤销和总开关变更对**下一请求**生效；已认证接纳的调用继续使用认证时快照，不在工具执行中再次验证 token，也不因撤销追加在途取消。Server stop、客户端取消/断连仍沿既有 CallContext.cancel，不改变授权快照语义。`CallContext.scopes` 由可信 Grant 提供，不从工具 arguments 读取。
 
+HTTP accept-loop以JoinSet持有每个连接任务并及时回收已完成项；Server stop取消后先停止接纳，再await全部连接任务结束才返回、记录connections_drained与stopped。连接/根任务join失败记录安全常量事件，不静默吞掉或输出panic payload；stop返回后空闲及在途连接均关闭，监听端口可重新绑定。
+
 ## 5. handler 的调用与结果合同
 
 1. `tools/list` 从注册工具按 Grant::allows 过滤，以注册描述、object schema 和 annotations 返回目录。

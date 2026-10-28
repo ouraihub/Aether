@@ -302,3 +302,100 @@ fn snapshot_clone_keeps_public_error_without_diagnostic_cause() {
     );
     assert!(!format!("{copied:?}").contains("private snapshot diagnostic"));
 }
+
+#[derive(Default)]
+struct BlockingTool {
+    started: Notify,
+    release: Notify,
+    finished: Mutex<Vec<String>>,
+}
+#[async_trait::async_trait]
+impl KitHost for BlockingTool {
+    fn tools(&self, _: &RunRequest, _: &str) -> Vec<HostTool> {
+        vec![HostTool {
+            spec: ToolSpec {
+                name: "read_note".into(),
+                description: "Wait for a dispatched host operation".into(),
+                parameters: json!({"type":"object","properties":{}}),
+                approval: Approval::Auto,
+                effect: ToolEffect::Read,
+                source: ToolSource::Host,
+            },
+        }]
+    }
+    async fn call_tool(
+        &self,
+        _: &ToolCall,
+        _: &CancellationToken,
+    ) -> Result<ToolOutput, ToolError> {
+        self.started.notify_one();
+        self.release.notified().await;
+        Ok(ToolOutput {
+            text: "finished".into(),
+            payload: None,
+        })
+    }
+    fn run_finished(&self, id: &str) {
+        self.finished.lock().unwrap().push(id.into());
+    }
+}
+
+#[tokio::test]
+async fn concurrent_and_repeated_shutdown_wait_for_dispatched_host_work() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(upstream(listener, vec![TWO_TOOLS]));
+    let dir = tempfile::tempdir().unwrap();
+    let (providers, request) = local_model(dir.path(), &url, "wait");
+    let host = Arc::new(BlockingTool::default());
+    let service = service(host.clone(), providers, None);
+    let owner = RunOwner::new();
+    let (sink, mut receiver) = events();
+    let accepted = service
+        .start(context(&owner), request.clone(), sink)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), host.started.notified())
+        .await
+        .unwrap();
+
+    let first = service.shutdown(Duration::from_millis(30));
+    let second = service.shutdown(Duration::from_secs(2));
+    tokio::pin!(first, second);
+    std::future::poll_fn(|cx| {
+        assert!(first.as_mut().poll(cx).is_pending());
+        assert!(second.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    first.await;
+    assert!(host.finished.lock().unwrap().is_empty());
+    std::future::poll_fn(|cx| {
+        assert!(second.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+
+    let third = service.shutdown(Duration::from_secs(2));
+    tokio::pin!(third);
+    std::future::poll_fn(|cx| {
+        assert!(third.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    host.release.notify_one();
+    tokio::join!(second, third);
+    assert_end(&until_end(&mut receiver).await, EndStatus::Cancelled);
+    assert_eq!(*host.finished.lock().unwrap(), [accepted.run_id]);
+    let (sink, mut rejected) = events();
+    assert_eq!(
+        service
+            .start(context(&owner), request, sink)
+            .await
+            .unwrap_err()
+            .code(),
+        KitErrorCode::Cancelled
+    );
+    assert!(rejected.try_recv().is_err());
+    assert_eq!(server.await.unwrap().len(), 1);
+}

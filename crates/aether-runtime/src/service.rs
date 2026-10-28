@@ -9,6 +9,7 @@ use aether_support::{KitError, KitErrorCode};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::task::Poll;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 
@@ -127,6 +128,7 @@ pub struct RunService {
     closing: Arc<AtomicBool>,
     preparing: AtomicUsize,
     tasks: Mutex<Vec<JoinHandle<()>>>,
+    drain: tokio::sync::Mutex<()>,
     maintenance_cancel: CancellationToken,
     maintenance: Mutex<Option<JoinHandle<()>>>,
 }
@@ -186,6 +188,7 @@ impl RunService {
             closing: Arc::new(AtomicBool::new(false)),
             preparing: AtomicUsize::new(0),
             tasks: Mutex::default(),
+            drain: tokio::sync::Mutex::new(()),
             maintenance_cancel: cancel,
             maintenance: Mutex::new(maintenance),
         }))
@@ -466,30 +469,61 @@ impl RunService {
         }
         let deadline = tokio::time::Instant::now() + grace;
         let drained = tokio::time::timeout_at(deadline, async {
+            let _drain = self.drain.lock().await;
             while self.preparing.load(Ordering::Acquire) != 0 {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            let tasks = std::mem::take(&mut *lock(&self.tasks));
-            for task in tasks {
-                let _ = task.await;
-            }
-            let maintenance = lock(&self.maintenance).take();
-            if let Some(task) = maintenance {
-                let _ = task.await;
-            }
+            // Retain ownership across timeout/cancellation so a later caller can finish draining.
+            while std::future::poll_fn(|cx| {
+                let mut tasks = lock(&self.tasks);
+                let Some(task) = tasks.last_mut() else {
+                    return Poll::Ready(false);
+                };
+                match std::pin::Pin::new(task).poll(cx) {
+                    Poll::Pending => Poll::Pending,
+                    Poll::Ready(_) => {
+                        tasks.pop();
+                        Poll::Ready(true)
+                    }
+                }
+            })
+            .await
+            {}
+            std::future::poll_fn(|cx| {
+                let mut maintenance = lock(&self.maintenance);
+                let Some(task) = maintenance.as_mut() else {
+                    return Poll::Ready(());
+                };
+                match std::pin::Pin::new(task).poll(cx) {
+                    Poll::Pending => Poll::Pending,
+                    Poll::Ready(_) => {
+                        maintenance.take();
+                        Poll::Ready(())
+                    }
+                }
+            })
+            .await;
         })
         .await;
-        if drained.is_err() {
-            let active = lock(&self.registry)
-                .records
-                .values()
-                .filter(|record| record.cancel.is_some())
-                .count();
-            tracing::warn!(
-                active,
-                preparing = self.preparing.load(Ordering::Acquire),
-                "runtime.shutdown.incomplete"
+        let active = lock(&self.registry)
+            .records
+            .values()
+            .filter(|record| record.cancel.is_some())
+            .count();
+        let preparing = self.preparing.load(Ordering::Acquire);
+        let left = lock(&self.tasks)
+            .iter()
+            .filter(|task| !task.is_finished())
+            .count()
+            + usize::from(
+                lock(&self.maintenance)
+                    .as_ref()
+                    .is_some_and(|task| !task.is_finished()),
             );
+        if drained.is_err() {
+            tracing::warn!(active, preparing, left, "runtime.shutdown.incomplete");
+        } else {
+            tracing::info!(active, preparing, left, "runtime.shutdown.complete");
         }
     }
 }

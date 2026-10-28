@@ -18,6 +18,7 @@ use hyper_util::rt::TokioIo;
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
 use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio::net::TcpListener;
+use tokio::task::{JoinError, JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use crate::handler::Mcp;
@@ -29,12 +30,18 @@ type Service = StreamableHttpService<Mcp, NeverSessionManager>;
 /// Room for the JSON-RPC envelope around a tool's arguments.
 const ENVELOPE_BYTES: usize = 8 * 1024;
 
-/// Accept loop; returns (dropping the listener) once `cancel` fires.
+/// Accept loop; cancellation drops the listener and drains every connection task.
 pub(crate) async fn serve(listener: TcpListener, inner: Arc<Inner>, cancel: CancellationToken) {
     let service = mcp_service(&inner, &cancel);
+    let mut connections = JoinSet::new();
     loop {
         let (stream, peer) = tokio::select! {
+            biased;
             () = cancel.cancelled() => break,
+            Some(result) = connections.join_next(), if !connections.is_empty() => {
+                observe_connection(result);
+                continue;
+            },
             accepted = listener.accept() => match accepted {
                 Ok(pair) => pair,
                 Err(error) => {
@@ -48,7 +55,7 @@ pub(crate) async fn serve(listener: TcpListener, inner: Arc<Inner>, cancel: Canc
         let inner = Arc::clone(&inner);
         let service = service.clone();
         let cancel = cancel.clone();
-        tokio::spawn(async move {
+        connections.spawn(async move {
             let handler = service_fn(move |request| {
                 let inner = Arc::clone(&inner);
                 let service = service.clone();
@@ -62,6 +69,22 @@ pub(crate) async fn serve(listener: TcpListener, inner: Arc<Inner>, cancel: Canc
                 },
             }
         });
+    }
+    drop(listener);
+    let drained = connections.len();
+    while let Some(result) = connections.join_next().await {
+        observe_connection(result);
+    }
+    tracing::info!(connections = drained, "mcp.server.connections_drained");
+}
+
+fn observe_connection(result: Result<(), JoinError>) {
+    if let Err(error) = result {
+        tracing::error!(
+            panicked = error.is_panic(),
+            cancelled = error.is_cancelled(),
+            "mcp.server.connection_task_failed"
+        );
     }
 }
 

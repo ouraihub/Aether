@@ -326,9 +326,14 @@ impl McpServer {
         let running = self.lock().running.take();
         if let Some(running) = running {
             running.cancel.cancel();
-            // The accept loop owns the listener; joining it frees the port. A panic in
-            // that loop has nothing left to clean up.
-            let _ = running.task.await;
+            // The accept loop owns the listener and drains its connection tasks.
+            if let Err(error) = running.task.await {
+                tracing::error!(
+                    panicked = error.is_panic(),
+                    cancelled = error.is_cancelled(),
+                    "mcp.server.task_failed"
+                );
+            }
             tracing::info!("mcp.server.stopped");
         }
     }

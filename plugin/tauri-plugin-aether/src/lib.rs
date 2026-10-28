@@ -348,8 +348,10 @@ fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, event: &tauri::RunEvent) {
     } = event
     {
         app.state::<runs::Runs>().close(label);
+        tracing::info!("aether.plugin.window_destroyed.cancelled");
     }
     if matches!(event, tauri::RunEvent::Exit) {
+        tracing::info!("aether.plugin.shutdown.started");
         // The event-loop thread waits while the executor asynchronously drains services;
         // no executor thread spins or joins another runtime.
         tauri::async_runtime::block_on(async {
@@ -363,6 +365,7 @@ fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, event: &tauri::RunEvent) {
                 let client = app.state::<mcp_client::McpClient>();
                 client.cancel.cancel();
                 client.runtime.shutdown().await;
+                tracing::info!("aether.plugin.mcp_client.shutdown.complete");
             }
             #[cfg(feature = "mcp-server")]
             if let Err(error) = app.state::<aether_mcp_server::McpServer>().stop().await {
@@ -372,6 +375,7 @@ fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, event: &tauri::RunEvent) {
             app.state::<providers::Providers>().cancel_all();
             #[cfg(feature = "search")]
             app.state::<search::Search>().cancel_all();
+            tracing::info!("aether.plugin.shutdown.finished");
             if let Err(error) = app.state::<LogHandle>().flush() {
                 tracing::warn!(%error, "logs.flush_failed");
             }
