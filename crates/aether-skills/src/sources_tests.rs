@@ -85,6 +85,18 @@ fn selection_never_mixes_sibling_skills_or_repository_files() {
 }
 
 #[test]
+fn nested_skill_in_ignored_directory_is_rejected() {
+    let mut entries = skill_tree();
+    entries.push(entry("skills/one/docs", "tree", "040000", 0));
+    entries.push(entry("skills/one/docs/SKILL.md", "blob", "100644", 80));
+    let target = vec!["skills".into(), "one".into()];
+    assert_eq!(
+        selected(&entries, &target).unwrap_err().details().reason(),
+        Some("nested_skill")
+    );
+}
+
+#[test]
 fn ref_namespace_collisions_are_explicit_errors() {
     let branch = GitObject {
         sha: "a".repeat(40),

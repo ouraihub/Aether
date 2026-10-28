@@ -531,6 +531,15 @@ fn selected<'a>(
         if !folded.insert(relative.to_ascii_lowercase()) {
             return Err(invalid("path", "duplicate"));
         }
+        // Nested skills are rejected anywhere, including directories the whitelist ignores.
+        if relative != "SKILL.md"
+            && relative
+                .rsplit('/')
+                .next()
+                .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
+        {
+            return Err(invalid("skill", "nested_skill"));
+        }
         if !whitelist(relative) {
             if entry.kind != "tree" {
                 if ignored.len() == MAX_ENTRIES {
@@ -546,14 +555,6 @@ fn selected<'a>(
         }
         if !package_path(relative) {
             return Err(invalid("path", "unsafe"));
-        }
-        if relative != "SKILL.md"
-            && relative
-                .rsplit('/')
-                .next()
-                .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
-        {
-            return Err(invalid("skill", "nested_skill"));
         }
         if entry.kind == "tree" && entry.mode == "040000" {
             continue;
