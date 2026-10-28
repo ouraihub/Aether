@@ -55,7 +55,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     #[cfg(feature = "skills")]
-    let skills = Arc::new(aether_skills::Store::open(&root, &[])?);
+    let skills = Arc::new(aether_skills::Store::open(
+        &root,
+        aether_skills::creator::CREATOR_SKILLS,
+    )?);
     #[cfg(feature = "mcp-client")]
     let mcp = Arc::new(aether_mcp_client::McpRuntime::new(Arc::new(
         aether_mcp_client::Store::open(&root)?,
@@ -80,6 +83,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 aether_runtime::AddressPolicy::default(),
             )
         })?;
+        #[cfg(feature = "skills")]
+        let aether = aether.skill_authoring(tauri::async_runtime::block_on(async {
+            aether_runtime::SkillAuthoringService::new(
+                providers.clone(),
+                skills.clone(),
+                aether_runtime::AddressPolicy::default(),
+            )
+        })?);
         aether.providers(providers).runs(runs)
     };
     #[cfg(feature = "conversations")]

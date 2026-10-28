@@ -28,6 +28,10 @@ mod providers;
 mod runs;
 #[cfg(feature = "search")]
 mod search;
+#[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+mod skill_authoring;
+#[cfg(feature = "skills")]
+mod skill_sources;
 #[cfg(feature = "skills")]
 mod skills;
 #[cfg(test)]
@@ -50,6 +54,8 @@ pub struct Builder {
     skills: Option<Arc<aether_skills::Store>>,
     #[cfg(feature = "search")]
     search: Option<Arc<aether_search::Store>>,
+    #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+    skill_authoring: Option<Arc<aether_runtime::SkillAuthoringService>>,
 }
 
 impl Builder {
@@ -72,6 +78,8 @@ impl Builder {
             skills: None,
             #[cfg(feature = "search")]
             search: None,
+            #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+            skill_authoring: None,
         }
     }
 
@@ -126,6 +134,14 @@ impl Builder {
         self
     }
 
+    /// Enables multi-turn skill authoring through a host-created service.
+    #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+    #[must_use]
+    pub fn skill_authoring(mut self, service: Arc<aether_runtime::SkillAuthoringService>) -> Self {
+        self.skill_authoring = Some(service);
+        self
+    }
+
     /// Shares search configuration storage with the search management commands.
     #[cfg(feature = "search")]
     #[must_use]
@@ -155,6 +171,8 @@ impl Builder {
             skills,
             #[cfg(feature = "search")]
             search,
+            #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+            skill_authoring,
         } = self;
         #[cfg(feature = "chat")]
         let runs =
@@ -183,6 +201,8 @@ impl Builder {
         let search = search::Search::from_arc(
             search.ok_or_else(|| KitError::bad_request("search", "missing_instance"))?,
         );
+        #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+        let skill_authoring = skill_authoring.map(skill_authoring::SkillAuthoring::new);
         let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> =
             Box::new(tauri::generate_handler![
                 logs::logs_tail,
@@ -278,6 +298,30 @@ impl Builder {
                 skills::skills_reorder,
                 #[cfg(feature = "skills")]
                 skills::skills_delete,
+                #[cfg(feature = "skills")]
+                skill_sources::skills_source_search,
+                #[cfg(feature = "skills")]
+                skill_sources::skills_source_prepare,
+                #[cfg(feature = "skills")]
+                skill_sources::skills_system_discover,
+                #[cfg(feature = "skills")]
+                skill_sources::skills_system_prepare,
+                #[cfg(feature = "skills")]
+                skill_sources::skills_pick_directory,
+                #[cfg(feature = "skills")]
+                skill_sources::skills_pick_search_directory,
+                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                skill_authoring::skills_authoring_create,
+                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                skill_authoring::skills_authoring_send,
+                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                skill_authoring::skills_authoring_approve,
+                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                skill_authoring::skills_authoring_cancel,
+                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                skill_authoring::skills_authoring_prepare,
+                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                skill_authoring::skills_authoring_close,
                 #[cfg(feature = "search")]
                 search::search_settings,
                 #[cfg(feature = "search")]
@@ -324,6 +368,15 @@ impl Builder {
                 app.manage(providers);
                 #[cfg(feature = "skills")]
                 app.manage(skills);
+                #[cfg(feature = "skills")]
+                app.manage(skill_sources::SearchRoots::default());
+                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                if let Some(authoring) = skill_authoring {
+                    for label in app.webview_windows().keys() {
+                        authoring.register(label);
+                    }
+                    app.manage(authoring);
+                }
                 #[cfg(feature = "search")]
                 app.manage(search);
                 Ok(())
@@ -331,6 +384,10 @@ impl Builder {
             .on_window_ready(|window| {
                 #[cfg(feature = "chat")]
                 window.state::<runs::Runs>().register(window.label());
+                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                if let Some(authoring) = window.try_state::<skill_authoring::SkillAuthoring>() {
+                    authoring.register(window.label());
+                }
                 let _ = window;
             })
             .on_event(on_event)
@@ -340,6 +397,25 @@ impl Builder {
 
 /// Exit, unlike ExitRequested, cannot be vetoed by the host.
 fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, event: &tauri::RunEvent) {
+    #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+    if let tauri::RunEvent::WindowEvent {
+        label,
+        event: tauri::WindowEvent::Destroyed,
+        ..
+    } = event
+        && let Some(authoring) = app.try_state::<skill_authoring::SkillAuthoring>()
+    {
+        authoring.close(label);
+    }
+    #[cfg(feature = "skills")]
+    if let tauri::RunEvent::WindowEvent {
+        label,
+        event: tauri::WindowEvent::Destroyed,
+        ..
+    } = event
+    {
+        app.state::<skill_sources::SearchRoots>().close(label);
+    }
     #[cfg(feature = "chat")]
     if let tauri::RunEvent::WindowEvent {
         label,
@@ -360,6 +436,13 @@ fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, event: &tauri::RunEvent) {
                 .service
                 .shutdown(std::time::Duration::from_secs(3))
                 .await;
+            #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+            if let Some(authoring) = app.try_state::<skill_authoring::SkillAuthoring>() {
+                authoring
+                    .service
+                    .shutdown(std::time::Duration::from_secs(3))
+                    .await;
+            }
             #[cfg(feature = "mcp-client")]
             {
                 let client = app.state::<mcp_client::McpClient>();

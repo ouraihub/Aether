@@ -11,7 +11,19 @@
 - 不管：**执行脚本**、安装钩子、下载依赖、把包内文件写到磁盘、读任意文件、模型自主加载其他技能（D5）、**登记或管理 MCP 服务**。包内文件只是数据：是否、何时、以何种方式运行脚本由宿主决定并负责审批，本 crate 只交出字节。技能正文可以写"需要地图工具"，实际服务由用户在 MCP 设置里配置。
 - 没有"最多启用 3 个"之类的全局开关：技能按**每次运行**选择，受预算约束（12 文档 §2.1）。
 
-### 1.1 模块与依赖
+### 1.1 四种添加来源（Native 共享能力）
+
+技能页“添加技能”菜单统一提供 Agent 创建、在线搜索、系统搜索、本地导入。界面由 aether-ui 的 SkillsSettings/SkillAdd 组合，宿主不复制管理组件。来源获取在 aether-skills 的 sources/system 中：只返回内存 Source 与来源、被排除条目，不调用 git/npx、不执行下载内容、不直接安装。在线搜索结果和 GitHub URL 必须定位明确技能目录，先固定提交再读取白名单文件；多技能仓库先列出候选，由用户选择，不能把整个仓库当一个技能安装。
+
+只保留选中技能目录内 SKILL.md、LICENSE/许可证变体、scripts、references、assets；其他条目在预览显示“未导入文件”。合法名称、链接／junction、包深度、文件／总量限制和凭据检测仍以既有 package 校验为准；不为外来技能截断正文或扩大权限。系统扫描仅已知 CLI 根目录以及原生目录选择框明确授予的项目目录；权限按窗口保存，关闭窗口移除，不递归扫描整个磁盘，不改源文件。
+
+Agent 创建使用 runtime 的 SkillAuthoringService，形态对齐 Cherry 的“启用 skill-creator → 助手会话”：宿主显式注入 Providers、技能 Store（含 `aether_skills::creator::CREATOR_SKILLS` 内置 skill-creator，完整 Cherry Apache-2.0 正文与 agents/references/scripts/eval-viewer 资源）与 AddressPolicy，界面先展示 creator 正文由用户确认，再显式选择模型多轮会话。只固定 builtin 来源的 skill-creator，同名手动/导入技能不能替代；未安装时 needs_config，不降级为短提示。
+
+每个会话独立临时目录：`creator/` 只读参考资源，`skill/` 唯一待安装包，`evaluations/` 测试输入输出（不进入包）。模型只获得 authoring_list/read/write/validate/run 五个工具，无 MCP、搜索、图片；路径拒绝绝对路径、越界、链接/junction。authoring_run 只运行已落盘的明确脚本（path+args+timeout，不允许任意 shell 命令），每次逐次审批，最小化环境变量不继承提供商密钥，输出有界；这只是工作目录约束，不是操作系统沙箱。取消／关闭／窗口销毁／退出时回收进程树与临时目录，关闭的窗口 owner 不可复活。“预览产物”只打包 `skill/`，仍经同一个 preview → digest确认 → install，不将模型产物当作已安装或已可信。Tauri 插件只映射来源命令、目录授权与会话生命周期。Web 未声明 Native 来源端口时，不显示本机扫描、文件夹操作与 Agent 创建。
+
+本轮实现与验证证据将在90登记；不沿用旧版通过记录作为新增来源已经验证的证据。
+
+### 1.2 模块与依赖
 
 ```mermaid
 flowchart TD

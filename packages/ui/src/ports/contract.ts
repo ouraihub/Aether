@@ -37,6 +37,7 @@ import type {
   ToolDto,
 } from '@ouraihub/aether-contracts'
 import type { SearchPort } from './search'
+import type { SkillSourcesPort } from './skill-sources'
 
 export interface CallOptions {
   signal?: AbortSignal
@@ -141,6 +142,7 @@ export interface KitPorts {
   conversations?: ConversationClient
   search?: SearchPort
   skills?: SkillsPort
+  skillSources?: SkillSourcesPort
   mcpClient?: McpClientPort
   mcpServer?: McpServerPort
 }

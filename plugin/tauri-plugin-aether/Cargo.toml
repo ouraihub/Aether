@@ -13,7 +13,7 @@ providers = ["dep:aether-providers"]
 search = ["dep:aether-search", "aether-runtime?/search"]
 chat = ["dep:aether-runtime", "aether-runtime/runs"]
 conversations = ["dep:aether-runtime", "aether-runtime/conversations"]
-skills = ["dep:aether-skills", "aether-runtime?/skills"]
+skills = ["dep:aether-skills", "dep:rfd", "aether-runtime?/skills"]
 mcp-client = ["dep:aether-mcp-client", "aether-runtime?/mcp-client"]
 mcp-server = ["dep:aether-mcp-server"]
 
@@ -30,6 +30,7 @@ aether-skills = { workspace = true, optional = true }
 aether-mcp-client = { workspace = true, optional = true }
 aether-search = { workspace = true, optional = true }
 aether-mcp-server = { workspace = true, optional = true }
+rfd = { version = "=0.17.2", optional = true }
 
 [dev-dependencies]
 serde_json.workspace = true

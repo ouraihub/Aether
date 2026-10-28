@@ -9,6 +9,8 @@ mod host;
 mod prepare;
 #[cfg(feature = "runs")]
 mod service;
+#[cfg(all(feature = "runs", feature = "skills"))]
+mod skill_authoring;
 #[cfg(feature = "runs")]
 mod tools;
 
@@ -22,6 +24,8 @@ pub use contract::*;
 pub use host::*;
 #[cfg(feature = "runs")]
 pub use service::{EventSink, RunConfig, RunContext, RunDependencies, RunOwner, RunService};
+#[cfg(all(feature = "runs", feature = "skills"))]
+pub use skill_authoring::SkillAuthoringService;
 
 #[cfg(all(test, feature = "runs"))]
 mod tests;

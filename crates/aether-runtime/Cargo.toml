@@ -8,7 +8,8 @@ publish.workspace = true
 default = []
 conversations = ["dep:aether-chat", "dep:aether-images", "aether-support/native", "dep:rusqlite", "dep:sha2"]
 runs = ["conversations", "aether-chat/native", "dep:aether-providers", "aether-images/client", "dep:tokio", "dep:tokio-util", "dep:async-trait"]
-skills = ["dep:aether-skills"]
+# Authoring workspaces (runs + skills) need temp roots and approved, tree-killed script processes.
+skills = ["dep:aether-skills", "dep:process-wrap", "dep:tempfile", "tokio?/process", "tokio?/io-util", "tokio?/fs"]
 search = ["dep:aether-search"]
 mcp-client = ["dep:aether-mcp-client"]
 
@@ -25,6 +26,8 @@ sha2 = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tokio-util = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
+process-wrap = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 ts-rs.workspace = true

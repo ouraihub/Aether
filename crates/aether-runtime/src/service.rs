@@ -84,8 +84,16 @@ impl RunOwner {
             closed: AtomicBool::new(false),
         }))
     }
-    fn closed(&self) -> bool {
+    pub(crate) fn closed(&self) -> bool {
         self.0.closed.load(Ordering::Acquire)
+    }
+    #[cfg(feature = "skills")]
+    pub(crate) fn same_owner(&self, other: &Self) -> bool {
+        self.0.id == other.0.id
+    }
+    #[cfg(feature = "skills")]
+    pub(crate) fn close(&self) {
+        self.0.closed.store(true, Ordering::Release);
     }
 }
 impl Default for RunOwner {
