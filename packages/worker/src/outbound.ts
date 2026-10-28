@@ -145,7 +145,7 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
       let finished = false
       function clean(): void {
         clearTimeout(firstTimer)
-        clearTimeout(idleTimer)
+        clearTimeout(idleTimer ?? 0)
         clearTimeout(totalTimer)
         init.signal?.removeEventListener('abort', callerAbort)
         abort.signal.removeEventListener('abort', onAbort)
@@ -173,7 +173,13 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
       try {
         const headers = new Headers(init.headers)
         headers.set('User-Agent', 'Aether-Worker/1')
-        const request: RequestInit = { ...init, headers, redirect: 'manual', signal: abort.signal, credentials: 'omit' }
+        const request: RequestInit & { credentials: 'omit' } = {
+          ...init,
+          headers,
+          redirect: 'manual',
+          signal: abort.signal,
+          credentials: 'omit',
+        }
         // Remote fetch is always the trusted binding. Global fetch is only the literal-loopback opt-in.
         const pending = local
           ? (options.localFetch ?? fetch)(target.href, request)

@@ -6,7 +6,7 @@ export interface SseEvent {
 }
 /** Limits count encoded bytes, including unterminated lines and multiline data. */
 export class SseParser {
-  private readonly decoder = new TextDecoder('utf-8', { fatal: true })
+  private readonly decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false })
   private line = ''
   private event: string | null = null
   private data: string[] = []

@@ -167,7 +167,7 @@ async function readReply(response: Response, id: number, signal: AbortSignal): P
   if (!response.body) throw invalid()
   const reader = response.body.getReader()
   const parser = sse ? new SseParser(MAX_MESSAGE_BYTES, MAX_MESSAGE_BYTES) : null
-  const decoder = new TextDecoder('utf-8', { fatal: true })
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false })
   let text = ''
   let bytes = 0
   const eventsReply = (events: readonly { data: string }[]): Record<string, unknown> | null => {

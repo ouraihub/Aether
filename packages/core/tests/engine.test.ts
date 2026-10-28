@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import type { Protocol, RunEvent } from '@ouraihub/aether-contracts'
 import { RunEngine } from '../src/engine/index.js'
 import type { RunInput, ToolExecution, ToolSpec } from '../src/types.js'
@@ -87,6 +88,35 @@ function textResponse(protocol: Protocol): Response {
     { choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 15, completion_tokens: 4 } },
   ])
 }
+
+test('terminal text-only token limits preserve the reply without replaying a model request', async () => {
+  for (const protocol of ['anthropic-messages', 'openai-chat', 'openai-responses'] as const) {
+    const bytes = await readFile(new URL(`../../ui/fixtures/sse/${protocol}/truncated.sse`, import.meta.url))
+    let requests = 0
+    const events: RunEvent[] = []
+    const engine = new RunEngine({
+      outbound: {
+        fetch: async () => {
+          requests++
+          return new Response(bytes)
+        },
+      },
+      tools: {
+        authorize: () => 'deny',
+        execute: async () => {
+          throw new Error('No tools allowed')
+        },
+      },
+      approver: { wait: async () => false },
+      validateArguments: schemaArguments,
+    })
+    const result = await engine.run(input(protocol), new AbortController().signal, (event) => events.push(event))
+    assert.equal(result.status, 'completed')
+    assert.equal(requests, 1)
+    assert.equal(events.filter((event) => event.kind === 'end').length, 1)
+    assert.ok(result.messages.some((message) => 'assistant' in message && message.assistant.text))
+  }
+})
 function callsResponse(calls: readonly { id: string; value: unknown }[], truncated = false): Response {
   return sse([
     {
