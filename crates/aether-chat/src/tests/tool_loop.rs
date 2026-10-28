@@ -284,6 +284,40 @@ async fn repeated_call_id_executes_once() {
 }
 
 #[tokio::test]
+async fn reused_call_id_with_changed_arguments_fails_without_reexecution() {
+    for protocol in PROTOCOLS {
+        let changed = fixture(protocol, "multi-tool").replace("a.md", "changed.md");
+        let (input, _) = scripted(protocol, vec![multi(protocol), sse(changed)]).await;
+        let host = Host::new(Approval::Auto);
+        let (summary, events) = run_with(&host, input, &CancellationToken::new(), false).await;
+        assert_eq!(host.executed().len(), 2, "{protocol:?}");
+        assert_eq!(summary.status, EndStatus::Failed);
+        assert_eq!(end(&events).1, Some(aether_support::KitErrorCode::Conflict));
+    }
+}
+
+#[tokio::test]
+async fn tool_error_payload_reaches_event_without_entering_model_text() {
+    let protocol = Protocol::OpenaiChat;
+    let (input, _) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
+    let mut host = Host::new(Approval::Auto);
+    let payload = json!({"diagnostic": "private structured result"});
+    host.reply = ToolExecution::Error {
+        code: "invalid".into(),
+        message: "fix arguments".into(),
+        payload: Some(payload.clone()),
+    };
+    let (summary, events) = run_with(&host, input, &CancellationToken::new(), false).await;
+    assert!(events.iter().any(|event| matches!(event, RunEvent::ToolResult { outcome: ToolOutcome::Error, payload: Some(value), .. } if value == &payload)));
+    assert!(
+        fed_back(&summary)
+            .iter()
+            .all(|(_, text)| text.contains("fix arguments")
+                && !text.contains("private structured result"))
+    );
+}
+
+#[tokio::test]
 async fn round_limit_stops_the_loop_as_exhausted() {
     for protocol in PROTOCOLS {
         // Every request asks for tools again.

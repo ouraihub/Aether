@@ -5,12 +5,12 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-aether-support.workspace = true
+aether-support = { workspace = true, features = ["native"] }
 reqwest.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-# stdio transport: child process with piped, line-delimited JSON-RPC (docs/13 §3).
+# stdio transport: child process with piped, line-delimited JSON-RPC (docs/27 §4).
 tokio = { workspace = true, features = ["process", "io-util"] }
 # The server's whole tree lives in a kill-on-close Job Object (Windows) or a process
 # group (Unix), so descendants end with the session even after the root has exited.

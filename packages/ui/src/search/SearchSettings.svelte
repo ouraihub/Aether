@@ -13,6 +13,8 @@
   import * as Field from '#lib/components/ui/field/index.js'
   import { getKitContext } from '../context'
   import { isKitClientError } from '../ports'
+  import { createClientSession } from '../session'
+  import { saveSearchSettings } from './settings-flow'
   import type {
     SearchCap,
     SearchKey,
@@ -31,6 +33,9 @@
   let settings = $state<Partial<Record<SearchCap, SearchSettingsDto>>>({})
   let drafts = $state<Record<string, Draft>>({})
   let keyDrafts = $state<Record<string, string>>({})
+  const draftRevisions: Record<string, Partial<Record<keyof Draft, number>>> = {}
+  const keyRevisions: Record<string, number> = {}
+  const flowSessions = { search: createClientSession(), fetch: createClientSession() }
   let pending = $state<Record<string, boolean>>({})
   let errors = $state<Record<string, string>>({})
   let checks = $state<Record<string, number | undefined>>({})
@@ -57,7 +62,9 @@
   let password = $state('')
   let revealed = $state<Record<string, string>>({})
   let dialogError = $state('')
-  let dialogEpoch = 0
+  const dialogSession = createClientSession()
+  let editRevision = 0
+  let passwordRevision = 0
 
   const keyOf = (cap: SearchCap, provider: string) => `${cap}:${provider}`
   const errorText = (error: unknown) => (isKitClientError(error) ? t(`errors.${error.code}`) : t('errors.internal'))
@@ -90,6 +97,9 @@
   function patchDraft(cap: SearchCap, provider: string, patch: Draft) {
     const key = keyOf(cap, provider)
     drafts = { ...drafts, [key]: { ...drafts[key], ...patch } }
+    const revisions = draftRevisions[key] ?? {}
+    for (const field of Object.keys(patch) as (keyof Draft)[]) revisions[field] = (revisions[field] ?? 0) + 1
+    draftRevisions[key] = revisions
     checks = { ...checks, [key]: undefined }
   }
   async function load() {
@@ -122,57 +132,69 @@
       setPending(cap, false)
     }
   }
-  async function commit(cap: SearchCap, provider: SearchProvider): Promise<boolean> {
-    if (!port) return false
-    const key = keyOf(cap, provider.id)
-    const draft = draftOf(cap, provider.id)
-    const value = keyDrafts[key]?.trim()
-    if (value && value.length > 4096) throw new Error('credential too long')
-    apply(
-      await port.save(
-        {
-          capability: cap,
-          provider: provider.id,
-          ...(draft.baseUrl !== undefined ? { baseUrl: draft.baseUrl.trim() } : {}),
-          ...(provider.basicAuth && draft.basicAuthUsername !== undefined
-            ? { basicAuthUsername: draft.basicAuthUsername.trim() }
-            : {}),
-        },
-        options,
-      ),
-    )
-    if (controller.signal.aborted) return false
-    if (value) {
-      apply(await port.saveKey(cap, provider.id, value, undefined, options))
-      if (controller.signal.aborted) return false
-      keyDrafts = { ...keyDrafts, [key]: '' }
-    }
-    drafts = Object.fromEntries(Object.entries(drafts).filter(([name]) => name !== key))
-    return true
-  }
   async function saveAndCheck(cap: SearchCap, provider: SearchProvider, check = false) {
     if (!port || pending[cap]) return
+    const key = keyOf(cap, provider.id)
+    const draft = { ...draftOf(cap, provider.id) }
+    const revisions = { ...draftRevisions[key] }
+    const keyRevision = keyRevisions[key] ?? 0
+    const value = keyDrafts[key]?.trim()
+    const session = flowSessions[cap]
+    session.invalidate()
+    const token = session.capture()
+    const isCurrent = () => !controller.signal.aborted && session.isCurrent(token)
     setPending(cap, true)
     setError(cap, '')
-    const key = keyOf(cap, provider.id)
     checks = { ...checks, [key]: undefined }
     try {
-      if (!(await commit(cap, provider))) return
-      if (check) {
-        const checked = await port.check(cap, provider.id, options)
-        if (!controller.signal.aborted) checks = { ...checks, [key]: checked.count }
-      } else notify.toast('success', t('search.saved'))
+      if (value && value.length > 4096) throw new Error('credential too long')
+      const saved = await saveSearchSettings(
+        port,
+        {
+          config: {
+            capability: cap,
+            provider: provider.id,
+            ...(draft.baseUrl !== undefined ? { baseUrl: draft.baseUrl.trim() } : {}),
+            ...(provider.basicAuth && draft.basicAuthUsername !== undefined
+              ? { basicAuthUsername: draft.basicAuthUsername.trim() }
+              : {}),
+          },
+          ...(value ? { key: { value } } : {}),
+          check,
+        },
+        {
+          isCurrent,
+          onSettings: apply,
+          onConfigSaved(sent) {
+            const next = { ...drafts[key] }
+            for (const field of ['baseUrl', 'basicAuthUsername'] as const) {
+              if (sent[field] !== undefined && draftRevisions[key]?.[field] === revisions[field]) delete next[field]
+            }
+            drafts = { ...drafts, [key]: next }
+          },
+          onKeySaved() {
+            if ((keyRevisions[key] ?? 0) === keyRevision) keyDrafts = { ...keyDrafts, [key]: '' }
+          },
+        },
+        options,
+      )
+      if (!isCurrent()) return
+      if (saved.checked) checks = { ...checks, [key]: saved.checked.count }
+      else notify.toast('success', t('search.saved'))
     } catch (error) {
-      if (!controller.signal.aborted) setError(cap, errorText(error))
+      if (isCurrent()) setError(cap, errorText(error))
     } finally {
-      setPending(cap, false)
+      if (isCurrent()) setPending(cap, false)
     }
   }
   function clearDialog() {
-    dialogEpoch++
+    dialogSession.invalidate()
+    if (keyTarget) keyDrafts = { ...keyDrafts, [keyOf(keyTarget.cap, keyTarget.provider)]: '' }
     keyTarget = null
     editingId = undefined
+    editRevision++
     editValue = ''
+    passwordRevision++
     password = ''
     revealed = {}
     dialogError = ''
@@ -182,72 +204,85 @@
     keyTarget = { cap, provider }
     keyDialog.showModal()
   }
+  function invalidateCredentials() {
+    dialogSession.invalidate()
+    passwordRevision++
+    password = ''
+    revealed = {}
+    dialogError = ''
+  }
   async function saveEditedKey() {
     if (!port || !keyTarget || dialogBusy || !editValue.trim()) return
-    const target = keyTarget
-    const epoch = dialogEpoch
+    const target = { ...keyTarget }
+    const value = editValue.trim()
+    const id = editingId
+    const revision = editRevision
+    invalidateCredentials()
+    const token = dialogSession.capture()
+    const isCurrent = () => !controller.signal.aborted && dialogSession.isCurrent(token)
     setPending(target.cap, true)
-    dialogError = ''
     try {
-      apply(await port.saveKey(target.cap, target.provider, editValue.trim(), editingId, options))
-      if (!controller.signal.aborted && epoch === dialogEpoch) {
+      const next = await port.saveKey(target.cap, target.provider, value, id, options)
+      if (!isCurrent()) return
+      apply(next)
+      if (revision === editRevision) {
         editValue = ''
         editingId = undefined
-        revealed = {}
+        editRevision++
       }
     } catch (error) {
-      if (!controller.signal.aborted && epoch === dialogEpoch) dialogError = errorText(error)
+      if (isCurrent()) dialogError = errorText(error)
     } finally {
-      setPending(target.cap, false)
+      if (!controller.signal.aborted) setPending(target.cap, false)
     }
   }
   async function removeKey(key: SearchKey) {
     if (!port || !keyTarget || dialogBusy) return
-    const target = keyTarget
-    const epoch = dialogEpoch
+    const target = { ...keyTarget }
+    const revision = editRevision
+    invalidateCredentials()
+    const token = dialogSession.capture()
+    const isCurrent = () => !controller.signal.aborted && dialogSession.isCurrent(token)
     setPending(target.cap, true)
-    dialogError = ''
     try {
-      apply(await port.removeKey(target.cap, target.provider, key.id, options))
-      if (epoch === dialogEpoch) {
-        const next = { ...revealed }
-        delete next[key.id]
-        revealed = next
-        if (editingId === key.id) {
-          editingId = undefined
-          editValue = ''
-        }
+      const next = await port.removeKey(target.cap, target.provider, key.id, options)
+      if (!isCurrent()) return
+      apply(next)
+      if (editingId === key.id && revision === editRevision) {
+        editingId = undefined
+        editValue = ''
+        editRevision++
       }
     } catch (error) {
-      if (!controller.signal.aborted && epoch === dialogEpoch) dialogError = errorText(error)
+      if (isCurrent()) dialogError = errorText(error)
     } finally {
-      setPending(target.cap, false)
+      if (!controller.signal.aborted) setPending(target.cap, false)
     }
   }
   async function revealKey(key: SearchKey, copy = false) {
     if (!port || !keyTarget || dialogBusy) return
-    const target = keyTarget
-    const epoch = dialogEpoch
+    const target = { ...keyTarget }
+    const token = dialogSession.capture()
+    const revision = passwordRevision
+    const currentPassword = port.revealNeedsPassword ? password : undefined
+    const isCurrent = () => !controller.signal.aborted && dialogSession.isCurrent(token)
     setPending(target.cap, true)
     dialogError = ''
     try {
-      const value = await port.reveal(
-        target.cap,
-        target.provider,
-        key.id,
-        port.revealNeedsPassword ? password : undefined,
-        options,
-      )
-      if (controller.signal.aborted || epoch !== dialogEpoch) return
+      const value = await port.reveal(target.cap, target.provider, key.id, currentPassword, options)
+      if (!isCurrent()) return
       if (copy) {
         await navigator.clipboard.writeText(value)
-        notify.toast('success', t('search.copied'))
+        if (isCurrent()) notify.toast('success', t('search.copied'))
       } else revealed = { ...revealed, [key.id]: value }
     } catch (error) {
-      if (!controller.signal.aborted && epoch === dialogEpoch)
-        dialogError = copy && !isKitClientError(error) ? t('search.copyFailed') : errorText(error)
+      if (isCurrent()) dialogError = copy && !isKitClientError(error) ? t('search.copyFailed') : errorText(error)
     } finally {
-      setPending(target.cap, false)
+      if (isCurrent() && passwordRevision === revision) {
+        password = ''
+        passwordRevision++
+      }
+      if (!controller.signal.aborted) setPending(target.cap, false)
     }
   }
   async function savePreferences() {
@@ -308,6 +343,8 @@
     void load()
     return () => {
       controller.abort()
+      for (const session of Object.values(flowSessions)) session.invalidate()
+      keyDrafts = {}
       keyDialog?.close()
       clearDialog()
     }
@@ -385,6 +422,7 @@
                     value={keyDrafts[key] ?? ''}
                     oninput={(event) => {
                       keyDrafts = { ...keyDrafts, [key]: event.currentTarget.value }
+                      keyRevisions[key] = (keyRevisions[key] ?? 0) + 1
                       checks = { ...checks, [key]: undefined }
                     }}
                   />
@@ -589,7 +627,11 @@
             type="password"
             autocomplete="off"
             disabled={dialogBusy}
-            bind:value={password}
+            value={password}
+            oninput={(event) => {
+              password = event.currentTarget.value
+              passwordRevision++
+            }}
           /></Field.Field
         >{/if}
       <ul class="flex flex-col gap-3">
@@ -603,9 +645,10 @@
                 size="sm"
                 disabled={dialogBusy}
                 onclick={() => {
+                  invalidateCredentials()
                   editingId = key.id
                   editValue = ''
-                  revealed = {}
+                  editRevision++
                 }}>{t('search.editKey')}</Button
               >
               <Button
@@ -637,7 +680,11 @@
           spellcheck={false}
           maxlength={4096}
           disabled={dialogBusy}
-          bind:value={editValue}
+          value={editValue}
+          oninput={(event) => {
+            editValue = event.currentTarget.value
+            editRevision++
+          }}
         /></Field.Field
       >
       {#if dialogError}<p class="text-destructive text-kit-sm" role="alert">{dialogError}</p>{/if}

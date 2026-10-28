@@ -3,14 +3,13 @@
 use std::collections::HashSet;
 use std::fmt::Write as _;
 
-use aether_support::net;
 use aether_support::{KitError, KitErrorCode, ReasoningDialect, ReasoningEffort};
 
-use crate::run::Runner;
+#[cfg(feature = "native")]
+use crate::run::RunEngine;
 use crate::tools;
-use crate::types::{
-    IMAGE_MIMES, ImagePart, MAX_IMAGE_BYTES, MAX_IMAGES, PermissionMode, RunInput, SystemPart,
-};
+use crate::types::{MAX_IMAGES, PermissionMode, RunInput, SystemPart};
+use aether_images::ImagePart;
 
 const TRUNCATED: &str = "…(truncated)";
 const SANITIZED: &str = "[[MARKER_SANITIZED]]";
@@ -32,32 +31,16 @@ pub(crate) const PLAN_NOTICE: &str = "当前为仅规划模式：只能读取资
 /// # Errors
 /// `bad_request{field:"images", reason:"count"|"mime"|"encoding"|"size"}`.
 pub fn check_images(images: &[ImagePart]) -> Result<(), KitError> {
-    use base64::Engine as _;
     if images.len() > MAX_IMAGES {
         return Err(KitError::bad_request("images", "count").with_limit(MAX_IMAGES as u64));
     }
-    let too_big = || KitError::bad_request("images", "size").with_limit(MAX_IMAGE_BYTES as u64);
-    for image in images {
-        if !IMAGE_MIMES.contains(&image.mime.as_str()) {
-            return Err(KitError::bad_request("images", "mime"));
-        }
-        // Decodes to at least len/4*3 - 2 bytes: reject huge payloads without allocating.
-        if image.data.len() / 4 * 3 > MAX_IMAGE_BYTES + 2 {
-            return Err(too_big());
-        }
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(&image.data)
-            .map_err(|_| KitError::bad_request("images", "encoding"))?;
-        if bytes.len() > MAX_IMAGE_BYTES {
-            return Err(too_big());
-        }
-    }
-    Ok(())
+    aether_images::check_images(images)
 }
 
-impl Runner {
+#[cfg(feature = "native")]
+impl RunEngine {
     /// Checks `input` before the run is accepted and normalises it in place: truncates
-    /// host context, drops tools the model cannot take. Idempotent; [`Runner::run`] calls
+    /// host context, drops tools the model cannot take. Idempotent; [`RunEngine::run`] calls
     /// it again so an unvalidated input still cannot bypass the budget.
     ///
     /// # Errors
@@ -67,11 +50,19 @@ impl Runner {
     /// [`check_images`] errors and `bad_request{field:"images", reason:"vision_unsupported"}`
     /// for images on a model without vision; `internal` when the OS random source fails.
     pub fn validate(&self, input: &mut RunInput) -> Result<(), KitError> {
-        prepare(input).map(drop)
+        validate(input)
     }
 }
 
-/// [`Runner::validate`] plus the assembled system text.
+/// Checks and normalizes complete backend input without constructing a network client.
+///
+/// # Errors
+/// Invalid images/tools/connection, unsupported capabilities or exceeded input budgets.
+pub fn validate(input: &mut RunInput) -> Result<(), KitError> {
+    prepare(input).map(drop)
+}
+
+/// Validation plus the assembled system text.
 pub(crate) fn prepare(input: &mut RunInput) -> Result<String, KitError> {
     let connection = &input.connection;
     check_images(&input.images)?;
@@ -137,9 +128,15 @@ pub(crate) fn prepare(input: &mut RunInput) -> Result<String, KitError> {
 
     let connection = &input.connection;
     if connection.api_keys.is_empty() {
-        let url = reqwest::Url::parse(&connection.base_url)
+        let url = url::Url::parse(&connection.base_url)
             .map_err(|e| KitError::bad_request("url", "invalid_url").with_cause(e))?;
-        if !net::is_loopback(&url) {
+        let loopback = match url.host() {
+            Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => std::net::IpAddr::V6(ip).to_canonical().is_loopback(),
+            None => false,
+        };
+        if !loopback {
             return Err(KitError::needs_config("missing_key"));
         }
     }

@@ -1,5 +1,5 @@
 // Regenerates the ts-rs DTOs (docs/00 §7.5) into a temp dir and compares them with the committed
-// packages/ui/src/ports/generated. Exits 1 on any missing, extra or changed file.
+// packages/contracts/src/generated. Exits 1 on any missing, extra or changed file.
 // `--write` replaces the committed dir with the fresh output instead.
 import { execFileSync } from 'node:child_process'
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const committed = join(root, 'packages/ui/src/ports/generated')
+const committed = join(root, 'packages/contracts/src/generated')
 const fresh = mkdtempSync(join(tmpdir(), 'kit-dto-'))
 
 // An explicit TS_RS_EXPORT_DIR wins over .cargo/config.toml [env] (no `force`).

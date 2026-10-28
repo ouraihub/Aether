@@ -5,8 +5,8 @@ import { createI18n } from '../i18n'
 import {
   createFakePorts,
   KitClientError,
-  type ChatPort,
-  type ChatHistoryPort,
+  type RunClient,
+  type ConversationClient,
   type Conversation,
   type ProvidersPort,
   type ModelOption,
@@ -36,10 +36,10 @@ interface Run {
 
 interface Extra {
   props?: Partial<ComponentProps<typeof ChatPanel>>
-  history?: Partial<ChatHistoryPort>
+  history?: Partial<ConversationClient>
   providers?: Partial<ProvidersPort>
   search?: Partial<SearchPort>
-  chat?: Partial<ChatPort>
+  chat?: Partial<RunClient>
 }
 
 function setup(
@@ -72,7 +72,7 @@ function setup(
     },
     ...(extra.search ? { search: extra.search } : {}),
     chat: {
-      run: (request, emit, options) => {
+      start: (request, emit, options) => {
         const id = crypto.randomUUID()
         const source = stored.turns.find((turn) => turn.id === (request.retryTurnId ?? request.translateTurnId))
         const turn: Conversation['turns'][number] = {
@@ -133,9 +133,9 @@ function setup(
       ...extra.chat,
     },
   })
-  if (ports.chat?.history)
+  if (ports.conversations)
     Object.assign(
-      ports.chat.history,
+      ports.conversations,
       {
         get: (id: string) =>
           id === stored.summary.id
@@ -144,7 +144,7 @@ function setup(
       },
       extra.history,
     )
-  if (!withHistory && ports.chat) delete ports.chat.history
+  if (!withHistory) delete ports.conversations
   const notify = { toast: vi.fn(), confirm: vi.fn(() => Promise.resolve(true)) }
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
   const kit = { ports, i18n: createI18n('en'), notify, logger }
@@ -330,7 +330,7 @@ describe('ChatPanel', () => {
       createdAt: 0,
       updatedAt: 0,
     }
-    const get = vi.fn<ChatHistoryPort['get']>(() => Promise.resolve({ summary, turns: [turn] }))
+    const get = vi.fn<ConversationClient['get']>(() => Promise.resolve({ summary, turns: [turn] }))
     const onConversationChange = vi.fn()
     const { runs } = setup(true, null, { history: { get }, props: { conversationId: 'c9', onConversationChange } })
     await screen.findByText('earlier')
@@ -633,13 +633,13 @@ describe('ChatPanel', () => {
 
   it('restores a preaccept-rejected draft and its removed context for the next request', async () => {
     const requests: RunRequest[] = []
-    const run = vi.fn<ChatPort['run']>().mockImplementation((request) => {
+    const run = vi.fn<RunClient['start']>().mockImplementation((request) => {
       requests.push(request)
       return requests.length === 1
         ? Promise.reject(new KitClientError({ code: 'network', message: 'offline' }))
         : Promise.resolve({ runId: 'r2', conversationId: null, turnId: null })
     })
-    setup(false, { kind: 'note', id: 'n1', label: 'Draft' }, { chat: { run } })
+    setup(false, { kind: 'note', id: 'n1', label: 'Draft' }, { chat: { start: run } })
     await fireEvent.click(screen.getByRole('button', { name: 'Do not send Draft with the next message' }))
     await send('  recover me\nplease  ')
     const input = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
@@ -654,7 +654,7 @@ describe('ChatPanel', () => {
 
   it('does not overwrite a new draft when an earlier request is rejected', async () => {
     const pending = Promise.withResolvers<RunAccepted>()
-    setup(false, null, { chat: { run: () => pending.promise } })
+    setup(false, null, { chat: { start: () => pending.promise } })
     await send('unsent original')
     const input = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
     await fireEvent.input(input, { target: { value: 'new draft' } })
@@ -694,7 +694,7 @@ describe('ChatPanel', () => {
 
   it('renames through history and retains current messages when deletion fails', async () => {
     let saved = 'Saved'
-    const remove = vi.fn<ChatHistoryPort['remove']>(() =>
+    const remove = vi.fn<ConversationClient['remove']>(() =>
       Promise.reject(new KitClientError({ code: 'network', message: 'offline' })),
     )
     const summary = () => ({ id: 'c9', title: saved, scope: null, selectedTurnId: 't', createdAt: 0, updatedAt: 0 })
@@ -1026,7 +1026,7 @@ describe('ChatPanel', () => {
   it('retries a failed history restore without losing the saved conversation or replacing its identity', async () => {
     const onConversationChange = vi.fn()
     const get = vi
-      .fn<ChatHistoryPort['get']>()
+      .fn<ConversationClient['get']>()
       .mockRejectedValueOnce(new KitClientError({ code: 'network', message: 'offline' }))
       .mockResolvedValueOnce({
         summary: { id: 'saved', title: 'Saved', scope: null, selectedTurnId: 't', createdAt: 0, updatedAt: 0 },
@@ -1113,10 +1113,10 @@ describe('ChatPanel', () => {
 
   it('renders full same-question candidates once and sets context via 👍 without forking', async () => {
     const conversation = candidates()
-    const selectTurn = vi.fn<ChatHistoryPort['selectTurn']>((_id, turnId) =>
+    const selectTurn = vi.fn<ConversationClient['selectTurn']>((_id, turnId) =>
       Promise.resolve({ ...conversation, summary: { ...conversation.summary, selectedTurnId: turnId } }),
     )
-    const fork = vi.fn<ChatHistoryPort['fork']>(() => Promise.resolve(conversation))
+    const fork = vi.fn<ConversationClient['fork']>(() => Promise.resolve(conversation))
     const { runs } = setup(true, null, {
       props: { conversationId: 'saved' },
       history: { get: () => Promise.resolve(conversation), selectTurn, fork },
@@ -1139,7 +1139,7 @@ describe('ChatPanel', () => {
   it('edits with compare-and-swap and retains both saved reply and local draft on conflict', async () => {
     const conversation = candidates()
     const editTurn = vi
-      .fn<ChatHistoryPort['editTurn']>()
+      .fn<ConversationClient['editTurn']>()
       .mockRejectedValueOnce(new KitClientError({ code: 'conflict', message: 'changed' }))
       .mockImplementationOnce((_id, turnId, text) =>
         Promise.resolve({
@@ -1239,7 +1239,7 @@ describe('ChatPanel', () => {
   it('hides set-as-context for an only reply and deletes it after confirmation', async () => {
     const conversation = candidates()
     conversation.turns = [required(conversation.turns[0])]
-    const removeTurn = vi.fn<ChatHistoryPort['removeTurn']>(() =>
+    const removeTurn = vi.fn<ConversationClient['removeTurn']>(() =>
       Promise.resolve({ ...conversation, summary: { ...conversation.summary, selectedTurnId: null }, turns: [] }),
     )
     const { notify } = setup(true, null, {
@@ -1262,10 +1262,10 @@ describe('ChatPanel', () => {
 
   it('branches and copies via the selected ancestor chain and only shows save-note for a host callback', async () => {
     const conversation = candidates()
-    const fork = vi.fn<ChatHistoryPort['fork']>(() =>
+    const fork = vi.fn<ConversationClient['fork']>(() =>
       Promise.resolve({ ...conversation, summary: { ...conversation.summary, id: 'forked' } }),
     )
-    const selectTurn = vi.fn<ChatHistoryPort['selectTurn']>((_id, turnId) =>
+    const selectTurn = vi.fn<ConversationClient['selectTurn']>((_id, turnId) =>
       Promise.resolve({ ...conversation, summary: { ...conversation.summary, selectedTurnId: turnId } }),
     )
     const onSaveNote = vi.fn(() => Promise.reject(new Error('disk full')))
@@ -1349,7 +1349,7 @@ describe('ChatPanel', () => {
     const conversation = candidates()
     conversation.summary.selectedTurnId = 'b'
     required(conversation.turns[1]).parentId = 'a'
-    const removeTurn = vi.fn<ChatHistoryPort['removeTurn']>(() =>
+    const removeTurn = vi.fn<ConversationClient['removeTurn']>(() =>
       Promise.resolve({ ...conversation, turns: [{ ...required(conversation.turns[1]), parentId: null }] }),
     )
     const { notify } = setup(true, null, {
@@ -1395,13 +1395,13 @@ describe('ChatPanel', () => {
 
   it('retains translation language and original candidates when acceptance fails', async () => {
     const conversation = candidates()
-    const run = vi.fn<ChatPort['run']>(() =>
+    const run = vi.fn<RunClient['start']>(() =>
       Promise.reject(new KitClientError({ code: 'network', message: 'offline' })),
     )
     setup(true, null, {
       props: { conversationId: 'saved' },
       history: { get: () => Promise.resolve(conversation) },
-      chat: { run },
+      chat: { start: run },
     })
     await screen.findByText('Alternative reply')
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Translate' })[1]))
@@ -1417,7 +1417,7 @@ describe('ChatPanel', () => {
 
   it('keeps branch drafts and selection unchanged when context persistence rejects', async () => {
     const conversation = candidates()
-    const selectTurn = vi.fn<ChatHistoryPort['selectTurn']>(() =>
+    const selectTurn = vi.fn<ConversationClient['selectTurn']>(() =>
       Promise.reject(new KitClientError({ code: 'network', message: 'offline' })),
     )
     const { notify } = setup(true, null, {
@@ -1505,10 +1505,10 @@ describe('ChatPanel permission modes', () => {
   })
 
   it('consumes FullAccess even if run acceptance fails', async () => {
-    const run = vi.fn<ChatPort['run']>(() =>
+    const run = vi.fn<RunClient['start']>(() =>
       Promise.reject(new KitClientError({ code: 'network', message: 'offline' })),
     )
-    setup(false, null, { props: { permissionModes: [...modes] }, chat: { run } })
+    setup(false, null, { props: { permissionModes: [...modes] }, chat: { start: run } })
     await choose('Full access')
     await send('execute')
     await waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -1628,9 +1628,9 @@ describe('ChatPanel images', () => {
 
   it('restores images with the draft when the request is rejected before acceptance', async () => {
     const run = vi
-      .fn<ChatPort['run']>()
+      .fn<RunClient['start']>()
       .mockRejectedValueOnce(new KitClientError({ code: 'network', message: 'offline' }))
-    visionSetup({ chat: { run } })
+    visionSetup({ chat: { start: run } })
     await pick([png()])
     await screen.findByRole('button', { name: 'Remove image 1' })
     await send('keep my image')

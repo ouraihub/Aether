@@ -10,33 +10,32 @@ links = "tauri-plugin-aether"
 [features]
 default = []
 providers = ["dep:aether-providers"]
-search = ["dep:aether-search"]
-chat = ["providers", "dep:aether-chat"]
-skills = ["dep:aether-skills"]
-mcp-client = ["dep:aether-mcp-client"]
+search = ["dep:aether-search", "aether-runtime?/search"]
+chat = ["dep:aether-runtime", "aether-runtime/runs"]
+conversations = ["dep:aether-runtime", "aether-runtime/conversations"]
+skills = ["dep:aether-skills", "aether-runtime?/skills"]
+mcp-client = ["dep:aether-mcp-client", "aether-runtime?/mcp-client"]
 mcp-server = ["dep:aether-mcp-server"]
 
 [dependencies]
-async-trait.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 tauri.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
-ts-rs.workspace = true
 aether-support.workspace = true
 aether-observability.workspace = true
 aether-providers = { workspace = true, optional = true }
-aether-chat = { workspace = true, optional = true }
+aether-runtime = { workspace = true, optional = true }
 aether-skills = { workspace = true, optional = true }
 aether-mcp-client = { workspace = true, optional = true }
 aether-search = { workspace = true, optional = true }
 aether-mcp-server = { workspace = true, optional = true }
 
 [dev-dependencies]
+serde_json.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["net", "io-util"] }
+aether-providers.workspace = true
+tokio.workspace = true
 
 [build-dependencies]
 tauri-plugin.workspace = true

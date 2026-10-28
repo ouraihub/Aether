@@ -2,20 +2,30 @@
 
 [![CI](https://github.com/ouraihub/Aether/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ouraihub/Aether/actions/workflows/ci.yml)
 
-A Rust + Tauri 2 framework for AI desktop apps with model providers, streaming chat, tool approval, Skills, MCP client/server, observability, and Svelte UI.
+A shared AI foundation with Rust/Tauri desktop services, a TypeScript execution core, Cloudflare Worker adapters, and Svelte UI: model providers, streaming chat, tool approval, Skills, MCP client/server, search, images, and observability. Product routes, login, business data and final resource authorization stay in each host.
 
-- 设计与任务：`docs/00-概要设计.md` → 各详细设计 → `docs/90-开发任务清单.md`（开发唯一入口）。
-- 当前状态：已实现至 R6-2；R6-1 §12.1 文档待补。
+- Web 基座：`@ouraihub/aether-contracts` → `@ouraihub/aether-core` → `@ouraihub/aether-worker`；[Worker示例](examples/worker/README.md)组合真实D1/R2与每run一个Durable Object，UI使用`@ouraihub/aether-ui/web`。设计入口：`docs/02-概要设计-Web共享基座.md` → `docs/22-详细设计-跨运行时公共契约.md`、`docs/23-详细设计-Web Worker运行时.md`、`docs/29-详细设计-Web数据与安全.md`。
+- 新版职责分层：先读 [00 总览](docs/00-概要设计.md) → [03 自顶向下模块图](docs/03-契约优先架构与职责拆分设计.md) → [模块详细设计索引与迁移验收](docs/24-详细设计-职责分层与实现契约.md)。各能力接口直接更新原设计，长主题分文件，不并行维护新旧两套规范。
 
 ## 目录
 
-| 路径                         | 内容                                                                               |
-| ---------------------------- | ---------------------------------------------------------------------------------- |
-| `crates/aether-*`            | 核心 crate，不依赖 Tauri                                                           |
-| `plugin/tauri-plugin-aether` | Tauri 接入层，按 feature 启用能力                                                  |
-| `packages/ui`                | `@ouraihub/aether-ui`，子路径导出各能力组件                                        |
-| `examples/`                  | `assistant`、`providers-only`、`mcp-server-only`（Tauri 窗口）与 `cli`（无 Tauri） |
-| `scripts/`                   | Windows 本地构建用的便携 MSVC 环境脚本                                             |
+| 路径                         | 内容                                                                                     |
+| ---------------------------- | ---------------------------------------------------------------------------------------- |
+| `crates/aether-*`            | 核心 crate，不依赖 Tauri                                                                 |
+| `plugin/tauri-plugin-aether` | Tauri 接入层，按 feature 启用能力                                                        |
+| `packages/ui`                | `@ouraihub/aether-ui`，子路径导出各能力组件                                              |
+| `packages/contracts`         | 公共TS绑定/预编译校验；canonical DTO：`src/generated`，不手改                            |
+| `packages/core`              | TS三协议/RunEngine、Providers/Search/Skills/MCP/Images执行，不依赖UI或平台I/O            |
+| `packages/worker`            | 原生fetch组合、WorkerRuntime/DO、D1 CAS/R2、密文凭据与公共能力路由                       |
+| `examples/`                  | Tauri `assistant`/`providers-only`/`mcp-server-only`、无Tauri `cli`、Cloudflare `worker` |
+| `scripts/`                   | Windows 本地构建用的便携 MSVC 环境脚本                                                   |
+| `contracts/`                 | 跨语言JSON Schema、共享样本和行为场景；检查说明见[合同资产](contracts/README.md)         |
+
+Worker运行采用两阶段：`POST /api/v1/runs`准备并返回`{accepted,events}`，首次有效SSE订阅才执行；30秒未订阅取消，断开取消，不支持replay，重启未终态转interrupted而非重放工具。D1保存actor隔离JSON与revision CAS，大文档指向不可变R2 blob；旧blob有意保留至显式安全GC，不承诺D1/R2跨服务事务。
+
+Worker凭据采用AES-GCM key ring与application/tenant/subject/purpose/recordId AAD；public MCP/OAuth只在HTTPS启用。生产远程出站必须使用真正执行connect-time地址策略的可信egress，Search页面读取另需all-address DNS checker；binding配置不是安全证明，普通fetch不能代替。示例loopback例外仅用于本地受控验收，产品仍需接入真实身份/CSRF/授权与部署资源。
+
+当前已实现TS/Worker公共能力，并已执行真实workerd HTTPS模型/工具/审批、隔离、D1/R2、取消/replay拒绝与OAuth PKCE/MCP scope冒烟；完整CI、浏览器UI、重启及Native/各平台验证的最新结果统一见[90任务清单](docs/90-开发任务清单.md)，不将局部冒烟等同产品迁移或全量验收。
 
 ## 本地检查（Windows）
 
@@ -29,6 +39,8 @@ pnpm run ci
 合并到 `main` 必须通过确定性 `CI gate`，分支须包含最新 `main`，管理员也受约束。普通文档仅运行策略／提交检查；工作流、根 `AGENTS.md` 和 CI 调度／门禁脚本进入自动化检查（工作流语法、分类／门禁行为、提交规则），不因配置变化编译产品；纯 `packages/ui/src` 手写 TS/Svelte/CSS 运行前端 lint、格式、类型、测试、示例构建及 i18n；Rust、依赖、生成 DTO、产品构建脚本和未知路径运行 Windows 完整检查。混合改动取最高风险，无法确定范围完整执行；最终门禁要求所有适用任务真实成功，不把意外 skipped 算通过。自动化检查不能证明新编译命令有效；修改工具链或实际编译参数时须另行手动运行受影响平台的完整检查。
 
 本地 `pnpm run ci` 默认完整执行；显式 `node scripts/ci.mjs --scope docs|automation|frontend` 与远端轻检查复用相同步骤。日常 `CI` 手动触发运行 Windows 完整检查。同 PR 新提交取消旧运行；不实现历史凭据复用，不新增 `actions: read`。AI review 保留辅助意见，但不作为必需检查或自动合并裁判；维护者或获授权助手须处理实质问题后通过正常 PR 合并，不使用管理员绕过。历史失败记录保留，验收看最新提交适用检查。
+
+完整检查还包含纯support/chat/images、独立conversations和插件单feature编译门禁，以及`node scripts/contracts-check.mjs`：AJV共享样本、TypeScript绑定赋值和真实Rust序列化共同校验。Native宿主使用`aether-runtime`运行/会话服务，Tauri插件只做IPC/生命周期适配；外仓升级前阅读[破坏性迁移与验收](docs/24-详细设计-职责分层与实现契约.md)。
 
 ## macOS / Linux 凭据与完整检查
 

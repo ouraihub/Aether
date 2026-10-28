@@ -1,7 +1,9 @@
 //! Real loopback HTTP against the server (docs/13 §6–§8, MS5-1).
 #![expect(clippy::unwrap_used, reason = "a failed unwrap is a failed test")]
 
+use std::io::Read as _;
 use std::sync::Arc;
+use std::time::Duration;
 
 use aether_mcp_server::{
     CallContext, DEFAULT_MAX_REQUEST_BYTES, ExposedTool, KitErrorCode, McpServer, ScopeSpec,
@@ -9,6 +11,8 @@ use aether_mcp_server::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::net::TcpStream;
 
 fn free_port() -> u16 {
     // Not `bind(0)` in the server: find a free port here and hand it over.
@@ -321,6 +325,64 @@ async fn non_loopback_origin_is_forbidden() {
         assert_eq!(reply.status, 200, "{origin}");
     }
     server.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn stop_closes_idle_and_inflight_connections_before_returning() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let dir = tempfile::tempdir().unwrap();
+        let port = free_port();
+        let server = server(dir.path(), port);
+        let token = server.issue_token("cli", &["read"]).unwrap();
+        server.start().await.unwrap();
+
+        // A completed keep-alive request proves this idle socket was accepted.
+        let mut idle = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        idle.write_all(b"GET / HTTP/1.1\r\nhost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        let mut buffer = [0; 256];
+        while !response.ends_with(b"\r\n\r\nnot found") {
+            let count = idle.read(&mut buffer).await.unwrap();
+            assert_ne!(count, 0);
+            response.extend_from_slice(&buffer[..count]);
+        }
+        assert!(response.starts_with(b"HTTP/1.1 404 "));
+
+        // 100 Continue proves the authenticated route is waiting for this body.
+        let mut inflight = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let headers = format!(
+            "POST /mcp HTTP/1.1\r\nhost: localhost\r\nauthorization: Bearer {}\r\n\
+             content-type: application/json\r\naccept: application/json, text/event-stream\r\n\
+             content-length: 128\r\nexpect: 100-continue\r\n\r\n",
+            token.token
+        );
+        inflight.write_all(headers.as_bytes()).await.unwrap();
+        let mut continued = [0; 25];
+        inflight.read_exact(&mut continued).await.unwrap();
+        assert_eq!(&continued, b"HTTP/1.1 100 Continue\r\n\r\n");
+        inflight.write_all(b"{").await.unwrap();
+
+        let connections = [idle.into_std().unwrap(), inflight.into_std().unwrap()];
+        assert!(!server.stop().await.unwrap().running);
+        // Do not await socket readiness: that would let detached tasks finish late.
+        for mut connection in connections {
+            match connection.read(&mut [0; 1]) {
+                Ok(count) => assert_eq!(count, 0, "connection still has response data"),
+                Err(error) => assert!(
+                    matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+                    ),
+                    "connection not closed when stop returned: {error}"
+                ),
+            }
+        }
+        let _rebound = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

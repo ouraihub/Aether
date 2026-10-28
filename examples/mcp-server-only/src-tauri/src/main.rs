@@ -11,10 +11,6 @@ use aether_mcp_server::{
 use aether_observability::LogConfig;
 use serde_json::{Value, json};
 
-/// Uses every `KitHost` default.
-struct McpOnlyHost;
-impl tauri_plugin_aether::KitHost for McpOnlyHost {}
-
 #[expect(
     clippy::print_stderr,
     reason = "logging may not be initialised yet; this is the only way to report a startup failure"
@@ -50,7 +46,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         ],
         counter_tools(),
     )?;
-    let aether = tauri_plugin_aether::Builder::new(Arc::new(McpOnlyHost), logs)
+    let aether = tauri_plugin_aether::Builder::new(logs)
         .mcp_server(server)
         .build()?;
     tauri::Builder::default()

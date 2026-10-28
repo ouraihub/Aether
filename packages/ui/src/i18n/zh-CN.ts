@@ -446,7 +446,7 @@ export const zhCN: Messages = {
   'mcp.server.issue': '发放 token',
   'mcp.server.issuedTitle': '已发放 token“{name}”',
   'mcp.server.issuedOnce': '请立即复制：它只显示这一次。',
-  'mcp.server.copyClaude': '复制 Claude Code 配置',
+  'mcp.server.copyClaude': '复制 Claude Code 命令（POSIX shell）',
   'mcp.server.copyJson': '复制通用 JSON 配置',
   'mcp.server.copied': '已复制',
   'mcp.server.dismiss': '完成',

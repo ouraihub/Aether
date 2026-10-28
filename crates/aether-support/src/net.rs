@@ -11,7 +11,46 @@ use std::time::Duration;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use url::{Host, Url};
 
-use crate::KitError;
+use crate::connection::RESERVED_HEADERS;
+use crate::{KitError, KitErrorCode};
+
+/// Adds custom `headers` to `builder`; call before setting system headers. Reserved
+/// names are skipped again here, so system headers can never be doubled or replaced.
+pub fn custom_headers(
+    mut builder: reqwest::RequestBuilder,
+    headers: &[(String, String)],
+) -> reqwest::RequestBuilder {
+    for (name, value) in headers {
+        if !RESERVED_HEADERS
+            .iter()
+            .any(|r| name.eq_ignore_ascii_case(r))
+        {
+            builder = builder.header(name, value);
+        }
+    }
+    builder
+}
+
+/// Whether an explicit upstream response permits trying another configured key.
+/// The caller must still enforce its request's pre-output retry boundary.
+#[must_use]
+pub fn next_key(error: &KitError) -> bool {
+    matches!(error.details().status(), Some(401 | 403 | 429))
+}
+
+/// Maps a Native transport error without retaining a possibly secret-bearing URL.
+pub fn transport(error: reqwest::Error) -> KitError {
+    let error = error.without_url();
+    if is_blocked(&error) {
+        return KitError::bad_request("url", "blocked_address").with_cause(error);
+    }
+    let code = if error.is_timeout() {
+        KitErrorCode::Timeout
+    } else {
+        KitErrorCode::Network
+    };
+    KitError::new(code, "upstream unreachable").with_cause(error)
+}
 
 /// A target the user explicitly allowed although it is private or plain http.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +114,42 @@ pub fn check_url(url: &str, policy: &AddressPolicy) -> Result<Url, KitError> {
     // IP literals never reach the resolver, so they are vetted here.
     if ip.is_some_and(is_restricted) && !allowed && !loopback {
         return Err(reject("blocked_address"));
+    }
+    Ok(parsed)
+}
+
+/// Preflights a target URL and all locally resolved addresses before proxy submission.
+/// This does not pin a third-party proxy's DNS or replace connect-time checks.
+///
+/// # Errors
+/// URL policy errors, `network` on lookup failure or no addresses, or
+/// `bad_request{url, blocked_address}` for a restricted address.
+pub async fn check_target(url: &str, policy: &AddressPolicy) -> Result<Url, KitError> {
+    let parsed = check_url(url, policy)?;
+    if let Some(Host::Domain(host)) = parsed.host() {
+        let port = parsed.port_or_known_default().unwrap_or_default();
+        let addresses = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|error| {
+                KitError::new(KitErrorCode::Network, "target lookup failed").with_cause(error)
+            })?;
+        let mut found = false;
+        for address in addresses {
+            found = true;
+            let ip = address.ip();
+            if is_restricted(ip)
+                && !(is_localhost(host) && ip.to_canonical().is_loopback())
+                && !policy.allows(host, port)
+            {
+                return Err(KitError::bad_request("url", "blocked_address"));
+            }
+        }
+        if !found {
+            return Err(KitError::new(
+                KitErrorCode::Network,
+                "target lookup returned no addresses",
+            ));
+        }
     }
     Ok(parsed)
 }
@@ -246,6 +321,40 @@ mod tests {
                 SocketAddr::from(([10, 0, 0, 5], 0)),
             ])
         })
+    }
+
+    #[tokio::test]
+    async fn target_preflight_keeps_url_policy_and_localhost_exception() {
+        let none = AddressPolicy::default();
+        assert_eq!(
+            check_target("https://10.0.0.5/page", &none)
+                .await
+                .unwrap_err()
+                .details()
+                .reason(),
+            Some("blocked_address")
+        );
+        assert_eq!(
+            check_target("https://name:secret@localhost/page", &none)
+                .await
+                .unwrap_err()
+                .details()
+                .reason(),
+            Some("userinfo")
+        );
+        let local = check_target("http://localhost:8080/page", &none)
+            .await
+            .unwrap();
+        assert_eq!(local.port(), Some(8080));
+        let permitted = check_target("http://10.0.0.5:8080/page", &allow("10.0.0.5", 8080))
+            .await
+            .unwrap();
+        assert_eq!(permitted.path(), "/page");
+        assert!(
+            check_target("http://10.0.0.5:8081/page", &allow("10.0.0.5", 8080))
+                .await
+                .is_err()
+        );
     }
 
     #[test]

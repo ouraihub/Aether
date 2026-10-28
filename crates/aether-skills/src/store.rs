@@ -11,8 +11,8 @@ use aether_support::db::{self, Migration};
 use aether_support::id::new_id;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ValueRef};
 use rusqlite::{Connection as Db, OptionalExtension, Row, Transaction, params};
-use sha2::{Digest, Sha256};
 
+use crate::content::{self, ContentIdentity};
 use crate::dto::{
     ManualSave, Preview, PreviewAction, PreviewCurrent, SkillDto, SkillFileKind, SkillFileMeta,
     SkillMeta, SkillOrigin, SkillRef, SkillSnapshot,
@@ -99,12 +99,6 @@ enum FileSource<'a> {
     Stored(&'a str),
 }
 
-/// A file as the digest sees it.
-struct FileHash {
-    path: String,
-    sha256: String,
-}
-
 impl Store {
     /// Opens (creating and migrating) `<root>/skills.db` and syncs `builtin` by name:
     /// changed content bumps the revision, built-ins the host no longer ships are
@@ -181,7 +175,14 @@ impl Store {
         let db = self.lock()?;
         let current = existing(&db, &package.skill.name)?
             .map(|(_, version, revision)| PreviewCurrent { version, revision });
-        let digest = Content::package(&package).digest(&db)?;
+        let content = Content::package(&package);
+        let digest = content::digest(
+            content.identity(),
+            package
+                .files
+                .iter()
+                .map(|file| (file.path.as_str(), file.sha256.as_str())),
+        );
         drop(db);
         let action = if current.is_some() {
             PreviewAction::Replace
@@ -228,7 +229,14 @@ impl Store {
         let content = Content::package(&package);
         let mut db = self.lock()?;
         // Passing validation again is not approval: only the previewed bytes are (docs/14 §7.1).
-        if content.digest(&db)? != confirmed_digest {
+        if content::digest(
+            content.identity(),
+            package
+                .files
+                .iter()
+                .map(|file| (file.path.as_str(), file.sha256.as_str())),
+        ) != confirmed_digest
+        {
             return Err(KitError::conflict("content_changed"));
         }
         let tx = db.transaction()?;
@@ -448,64 +456,41 @@ impl<'a> Content<'a> {
         }
     }
 
-    fn digest(&self, db: &Db) -> Result<String, KitError> {
-        let files = match self.files {
-            FileSource::Package(files) => files
-                .iter()
-                .map(|file| FileHash {
-                    path: file.path.clone(),
-                    sha256: file.sha256.clone(),
-                })
-                .collect(),
-            FileSource::Stored(id) => db
-                .prepare_cached(
-                    "SELECT path, sha256 FROM skill_files WHERE skill_id = ?1 ORDER BY path",
-                )?
-                .query_map([id], |row| {
-                    Ok(FileHash {
-                        path: row.get(0)?,
-                        sha256: row.get(1)?,
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?,
-        };
-        Ok(digest(
-            [
-                Some(self.name),
-                Some(self.description),
-                self.version,
-                Some(self.body),
-            ],
-            self.license,
-            &files,
-        ))
+    fn identity(&self) -> ContentIdentity<'_> {
+        ContentIdentity {
+            name: self.name,
+            description: self.description,
+            version: self.version,
+            body: self.body,
+            license: self.license,
+        }
     }
 }
 
-/// `sha256` of the text fields, each length-prefixed so moving text between fields changes
-/// the digest (`None` and `Some("")` differ), then — only when the skill has a license or
-/// files — the license and every `(path, sha256)` in path order. Skills without either
-/// keep the migration 1 digest, so upgrading does not bump their revision.
-fn digest(text: [Option<&str>; 4], license: Option<&str>, files: &[FileHash]) -> String {
-    let mut hasher = Sha256::new();
-    let mut field = |value: Option<&str>| match value {
-        Some(text) => {
-            hasher.update([1]);
-            hasher.update((text.len() as u64).to_le_bytes());
-            hasher.update(text.as_bytes());
-        }
-        None => hasher.update([0]),
-    };
-    text.into_iter().for_each(&mut field);
-    if license.is_some() || !files.is_empty() {
-        field(Some("package"));
-        field(license);
-        for file in files {
-            field(Some(&file.path));
-            field(Some(&file.sha256));
+/// Reads stored hashes in the caller's write transaction; package hashes are borrowed.
+fn content_digest(tx: &Transaction<'_>, content: &Content<'_>) -> Result<String, KitError> {
+    match content.files {
+        FileSource::Package(files) => Ok(content::digest(
+            content.identity(),
+            files
+                .iter()
+                .map(|file| (file.path.as_str(), file.sha256.as_str())),
+        )),
+        FileSource::Stored(id) => {
+            let files: Vec<(String, String)> = tx
+                .prepare_cached(
+                    "SELECT path, sha256 FROM skill_files WHERE skill_id = ?1 ORDER BY path",
+                )?
+                .query_map([id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<_, _>>()?;
+            Ok(content::digest(
+                content.identity(),
+                files
+                    .iter()
+                    .map(|(path, sha256)| (path.as_str(), sha256.as_str())),
+            ))
         }
     }
-    hex(&hasher.finalize())
 }
 
 fn sync_builtin(db: &mut Db, builtin: &[BuiltinSkill]) -> Result<(), KitError> {
@@ -594,7 +579,7 @@ fn insert(
             content.license,
             serde_json::to_string(content.extra).map_err(KitError::internal)?,
             origin_str(origin),
-            content.digest(tx)?,
+            content_digest(tx, content)?,
             now,
         ],
     )?;
@@ -633,7 +618,7 @@ fn update(
             content.license,
             serde_json::to_string(content.extra).map_err(KitError::internal)?,
             origin_str(origin),
-            content.digest(tx)?,
+            content_digest(tx, content)?,
             now_millis(),
         ],
     )?;
@@ -720,11 +705,6 @@ fn ensure_revision(db: &Db, id: &str, revision: u32) -> Result<(), KitError> {
     } else {
         Err(KitError::conflict("skill_changed").with_entity(id))
     }
-}
-
-/// Lowercase hex of a hash.
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn list(db: &Db) -> Result<Vec<SkillMeta>, KitError> {

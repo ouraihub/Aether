@@ -1,20 +1,18 @@
-//! `mcp-client.db`: servers, sealed credentials, discovered tools (docs/13 §2, §4).
+//! `mcp-client.db`: synchronous configuration, credentials and cache transactions (docs/27).
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::{Mutex, MutexGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use aether_support::db::{self, Migration};
 use aether_support::{KitError, KitErrorCode, id, mask, net, secret};
 use rusqlite::{OptionalExtension, Row, params};
-use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::credentials::Secret;
-use crate::http::{self, HttpLink};
-use crate::protocol::{Connection, Link, REQUEST_TIMEOUT};
-use crate::session::{McpSession, McpTool, SessionServer};
-use crate::stdio::{Launch, StdioLink};
+use crate::http;
+use crate::protocol::Tool;
+use crate::session::McpTool;
 use crate::{Approval, McpTransport, ServerDto, ServerSave, ServerSecret, ToolDto};
 
 pub(crate) const MIGRATIONS: &[Migration] = &[
@@ -49,10 +47,6 @@ ALTER TABLE servers ADD COLUMN cwd TEXT;",
     },
 ];
 
-/// Cached tools older than this are refreshed in the background (docs/13 §2).
-const REFRESH_AFTER_MS: i64 = 10 * 60 * 1000;
-/// From starting a stdio process until `initialize` completed (docs/13 §3).
-const STDIO_STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_COMMAND_CHARS: usize = 1024;
 const MAX_ARGS: usize = 64;
 const MAX_ARG_CHARS: usize = 4096;
@@ -60,21 +54,11 @@ const MAX_ARG_CHARS: usize = 4096;
 const SERVER_COLUMNS: &str = "id, slug, name, url, secret_ciphertext, enabled, trusted, \
      allow_private, transport, command, args, cwd";
 
-type Db = Arc<Mutex<rusqlite::Connection>>;
+type Db = Mutex<rusqlite::Connection>;
 
-/// Deadlines for one connection.
-#[derive(Clone, Copy)]
-pub(crate) struct Timeouts {
-    /// Per request.
-    pub(crate) request: Duration,
-    /// stdio: from spawning until the handshake completed.
-    pub(crate) startup: Duration,
-}
-
-/// MCP server configurations, credentials and discovered tools.
+/// MCP server configurations, credentials and discovered-tool cache.
 pub struct Store {
     db: Db,
-    pub(crate) timeouts: Timeouts,
 }
 
 impl Store {
@@ -85,11 +69,7 @@ impl Store {
     pub fn open(root: &Path) -> Result<Self, KitError> {
         let conn = db::open(&root.join("mcp-client.db"), MIGRATIONS)?;
         Ok(Self {
-            db: Arc::new(Mutex::new(conn)),
-            timeouts: Timeouts {
-                request: REQUEST_TIMEOUT,
-                startup: STDIO_STARTUP_TIMEOUT,
-            },
+            db: Mutex::new(conn),
         })
     }
 
@@ -127,7 +107,7 @@ impl Store {
             return Err(KitError::bad_request("name", "empty"));
         }
         let stdio = matches!(transport, McpTransport::Stdio { .. });
-        // Only http reaches the network; stdio stores 0 (docs/13 §2).
+        // Only HTTP reaches the network; stdio stores 0 (docs/27 §2).
         let allow_private = allow_private && !stdio;
         let columns = Columns::new(&transport, allow_private)?;
         // None = keep, Some(None) = clear, Some(Some) = replace.
@@ -240,103 +220,24 @@ impl Store {
         Ok(())
     }
 
-    /// Connects, handshakes and re-discovers the server's tools (the "test connection"
-    /// action). Known tools keep their approval; new ones start at `ask`.
-    ///
-    /// # Errors
-    /// `not_found`; `needs_config{key_unreadable}`; `bad_request(url)` for a url the
-    /// policy rejects; `bad_request(command|cwd)` when a stdio command cannot be started;
-    /// `network`/`timeout`/`upstream`/`unauthorized`/`unsupported` from the server
-    /// (`network{server_exited}` when a stdio server ends); `cancelled`.
-    pub async fn refresh(
+    pub(crate) fn target(&self, id: &str) -> Result<Target, KitError> {
+        load_target(&self.db, id)
+    }
+
+    pub(crate) fn active_targets(&self) -> Result<Vec<Target>, KitError> {
+        active_targets(&self.db)
+    }
+
+    pub(crate) fn cached_tools(&self, id: &str) -> Result<Option<(i64, Vec<McpTool>)>, KitError> {
+        cached_tools(&self.db, id)
+    }
+
+    pub(crate) fn replace_tools(
         &self,
-        server_id: &str,
-        cancel: &CancellationToken,
+        id: &str,
+        tools: Vec<Tool>,
     ) -> Result<Vec<ToolDto>, KitError> {
-        let target = load_target(&self.db, server_id)?;
-        refresh_target(&self.db, &target, self.timeouts, cancel)
-            .await
-            .map(|(_, tools)| tools)
-    }
-
-    /// The catalogue of enabled and trusted servers for one run. Cached tools are used
-    /// when present; a missing cache is fetched now, a stale one is refreshed in the
-    /// background. A server that cannot be read or reached is left out with a `warn`.
-    /// `own_port` is this process's running MCP Server: an http server pointing at it is
-    /// skipped to avoid calling ourselves (docs/13 §9.2). stdio servers start on demand
-    /// and end with the session.
-    pub async fn session(&self, cancel: &CancellationToken, own_port: Option<u16>) -> McpSession {
-        let targets = match active_targets(&self.db) {
-            Ok(targets) => targets,
-            Err(error) => {
-                tracing::warn!(code = ?error.code(), "mcp.client.session_failed");
-                return McpSession::new(Vec::new(), self.timeouts);
-            }
-        };
-        let mut servers = Vec::new();
-        for target in targets {
-            if own_port.is_some_and(|port| target.is_local_port(port)) {
-                tracing::warn!(server_id = %target.id, "mcp.client.self_server_skipped");
-                continue;
-            }
-            match self.session_server(target, cancel).await {
-                Ok(server) => servers.push(server),
-                Err((server_id, error)) => {
-                    tracing::warn!(server_id = %server_id, code = ?error.code(), "mcp.client.server_unavailable");
-                }
-            }
-        }
-        McpSession::new(servers, self.timeouts)
-    }
-
-    async fn session_server(
-        &self,
-        target: Target,
-        cancel: &CancellationToken,
-    ) -> Result<SessionServer, (String, KitError)> {
-        let cached = cached_tools(&self.db, &target.id).map_err(|e| (target.id.clone(), e))?;
-        let (connection, tools) = match cached {
-            Some((fetched_at, tools)) => {
-                if now_ms() - fetched_at > REFRESH_AFTER_MS {
-                    self.refresh_in_background(target.id.clone());
-                }
-                (None, tools)
-            }
-            None => {
-                let (connection, _) = refresh_target(&self.db, &target, self.timeouts, cancel)
-                    .await
-                    .map_err(|e| (target.id.clone(), e))?;
-                let tools = cached_tools(&self.db, &target.id)
-                    .map_err(|e| (target.id.clone(), e))?
-                    .map(|(_, tools)| tools)
-                    .unwrap_or_default();
-                (Some(connection), tools)
-            }
-        };
-        Ok(SessionServer {
-            target,
-            connection,
-            tools,
-        })
-    }
-
-    // ponytail: detached task with its own token; outlives the run but is bounded by the
-    // request timeout. Owner-managed cancellation if hosts need clean shutdown here.
-    fn refresh_in_background(&self, server_id: String) {
-        let db = Arc::clone(&self.db);
-        let timeouts = self.timeouts;
-        tokio::spawn(async move {
-            let cancel = CancellationToken::new();
-            let result = match load_target(&db, &server_id) {
-                Ok(target) => refresh_target(&db, &target, timeouts, &cancel)
-                    .await
-                    .map(drop),
-                Err(error) => Err(error),
-            };
-            if let Err(error) = result {
-                tracing::warn!(server_id = %server_id, code = ?error.code(), "mcp.client.refresh_failed");
-            }
-        });
+        replace_tools(&self.db, id, tools)
     }
 }
 
@@ -346,9 +247,9 @@ pub(crate) struct Target {
     pub(crate) slug: String,
     pub(crate) name: String,
     /// Unmasked.
-    transport: McpTransport,
-    sealed: Option<Vec<u8>>,
-    allow_private: bool,
+    pub(crate) transport: McpTransport,
+    pub(crate) sealed: Option<Vec<u8>>,
+    pub(crate) allow_private: bool,
 }
 
 impl Target {
@@ -361,66 +262,6 @@ impl Target {
             sealed: row.get(4)?,
             allow_private: row.get(7)?,
         })
-    }
-
-    /// A loopback http url on `port`: this process's own MCP Server when that runs there.
-    fn is_local_port(&self, port: u16) -> bool {
-        let McpTransport::Http { url } = &self.transport else {
-            return false;
-        };
-        Url::parse(url).is_ok_and(|url| {
-            url.port_or_known_default() == Some(port)
-                && match url.host() {
-                    Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
-                    Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-                    Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-                    None => false,
-                }
-        })
-    }
-
-    /// Opens the secret, connects (a stdio server is started) and performs the handshake.
-    pub(crate) async fn connect(
-        &self,
-        timeouts: Timeouts,
-        cancel: &CancellationToken,
-    ) -> Result<Connection, KitError> {
-        let secret = match &self.sealed {
-            Some(sealed) => {
-                let plain = secret::open(sealed)?;
-                serde_json::from_str(&plain)
-                    .map_err(|_| KitError::needs_config("key_unreadable"))?
-            }
-            None => Secret::default(),
-        };
-        match &self.transport {
-            McpTransport::Http { url } => {
-                let link = HttpLink::new(url, &secret, self.allow_private)?;
-                let link = Link::Http(Box::new(link));
-                Connection::open(link, timeouts.request, timeouts.request, cancel).await
-            }
-            McpTransport::Stdio { command, args, cwd } => {
-                // The directory may have gone since it was saved.
-                if let Some(cwd) = cwd {
-                    check_cwd(cwd)?;
-                }
-                let launch = Launch {
-                    server_id: &self.id,
-                    command,
-                    args,
-                    cwd: cwd.as_deref(),
-                    env: &secret.env,
-                };
-                let link = StdioLink::spawn(&launch, secret.values())?;
-                Connection::open(
-                    Link::Stdio(Box::new(link)),
-                    timeouts.request,
-                    timeouts.startup,
-                    cancel,
-                )
-                .await
-            }
-        }
     }
 }
 
@@ -448,7 +289,7 @@ fn transport_from_row(row: &Row<'_>) -> rusqlite::Result<McpTransport> {
     }
 }
 
-/// The columns `save` writes for a transport, after validating it (docs/13 §4).
+/// The columns `save` writes for a transport, after validating it (docs/27 §2).
 struct Columns {
     kind: &'static str,
     /// Empty for stdio.
@@ -613,14 +454,7 @@ fn cached_tools(db: &Db, server_id: &str) -> Result<Option<(i64, Vec<McpTool>)>,
     Ok((!tools.is_empty()).then_some((oldest, tools)))
 }
 
-async fn refresh_target(
-    db: &Db,
-    target: &Target,
-    timeouts: Timeouts,
-    cancel: &CancellationToken,
-) -> Result<(Connection, Vec<ToolDto>), KitError> {
-    let mut connection = target.connect(timeouts, cancel).await?;
-    let tools = connection.list_tools(cancel).await?;
+fn replace_tools(db: &Db, server_id: &str, tools: Vec<Tool>) -> Result<Vec<ToolDto>, KitError> {
     let mut conn = lock(db)?;
     let tx = conn.transaction()?;
     let mut dtos = Vec::with_capacity(tools.len());
@@ -630,11 +464,11 @@ async fn refresh_target(
         let mut kept = Vec::with_capacity(tools.len());
         for tool in &tools {
             let approval: Option<String> = old
-                .query_row(params![target.id, tool.name], |row| row.get(0))
+                .query_row(params![server_id, tool.name], |row| row.get(0))
                 .optional()?;
             kept.push(approval.map_or(Approval::Ask, |a| parse_approval(&a)));
         }
-        tx.execute("DELETE FROM tools WHERE server_id = ?1", [&target.id])?;
+        tx.execute("DELETE FROM tools WHERE server_id = ?1", [server_id])?;
         let mut insert = tx.prepare(
             "INSERT INTO tools (server_id, name, description, input_schema, read_only, approval, fetched_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -642,7 +476,7 @@ async fn refresh_target(
         let now = now_ms();
         for (tool, approval) in tools.into_iter().zip(kept) {
             insert.execute(params![
-                target.id,
+                server_id,
                 tool.name,
                 tool.description,
                 tool.schema,
@@ -659,8 +493,8 @@ async fn refresh_target(
         }
     }
     tx.commit()?;
-    tracing::info!(server_id = %target.id, count = dtos.len(), "mcp.client.tools_refreshed");
-    Ok((connection, dtos))
+    tracing::info!(server_id, count = dtos.len(), "mcp.client.tools_refreshed");
+    Ok(dtos)
 }
 
 /// Seals the new secret; `None` = cleared. Fails before anything is written. http takes
@@ -689,7 +523,7 @@ fn seal(input: ServerSecret, stdio: bool) -> Result<Option<Vec<u8>>, KitError> {
     secret::seal(&plain).map(Some)
 }
 
-/// The url must pass the address policy and carry no credentials (docs/13 §4).
+/// The URL must pass the address policy and carry no credentials (docs/27 §2).
 fn check_server_url(url: &str, allow_private: bool) -> Result<(), KitError> {
     let parsed = net::check_url(url, &http::policy(url, allow_private))?;
     // mask_url is the single definition of a credential-looking query: if it would
@@ -701,10 +535,14 @@ fn check_server_url(url: &str, allow_private: bool) -> Result<(), KitError> {
     Ok(())
 }
 
-/// docs/13 §4: command non-empty, ≤ 1024 characters, single line; ≤ 64 args of ≤ 4096
+/// docs/27 §2: command non-empty, ≤ 1024 characters, single line; ≤ 64 args of ≤ 4096
 /// characters; `cwd` an existing absolute directory. Args are listed unmasked, so a
 /// credential-looking one is rejected: it belongs in `secret.env`.
-fn check_stdio(command: &str, args: &[String], cwd: Option<&str>) -> Result<(), KitError> {
+pub(crate) fn check_stdio(
+    command: &str,
+    args: &[String],
+    cwd: Option<&str>,
+) -> Result<(), KitError> {
     if command.trim().is_empty() {
         return Err(KitError::bad_request("command", "empty"));
     }
@@ -774,7 +612,7 @@ fn parse_approval(value: &str) -> Approval {
     }
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| {

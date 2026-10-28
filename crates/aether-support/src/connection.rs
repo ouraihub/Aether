@@ -69,23 +69,6 @@ pub const RESERVED_HEADERS: [&str; 10] = [
     "cookie",
 ];
 
-/// Adds custom `headers` to `builder`; call before setting system headers. Reserved
-/// names are skipped again here, so system headers can never be doubled or replaced.
-pub fn custom_headers(
-    mut builder: reqwest::RequestBuilder,
-    headers: &[(String, String)],
-) -> reqwest::RequestBuilder {
-    for (name, value) in headers {
-        if !RESERVED_HEADERS
-            .iter()
-            .any(|r| name.eq_ignore_ascii_case(r))
-        {
-            builder = builder.header(name, value);
-        }
-    }
-    builder
-}
-
 impl fmt::Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Connection")

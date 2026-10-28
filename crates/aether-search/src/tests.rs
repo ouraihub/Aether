@@ -1,6 +1,13 @@
 #![expect(clippy::unwrap_used, reason = "failed assertions fail the test")]
 use super::*;
+use crate::{
+    Compression, SearchHit,
+    execution::ResolvedConfig,
+    policy::{check_blacklist, cutoff, process_hits},
+    vendor,
+};
 use serde_json::json;
+use zeroize::Zeroizing;
 #[test]
 fn each_provider_preserves_its_result_content_and_rejects_bad_shape() {
     let cases = [
@@ -46,7 +53,7 @@ fn each_provider_preserves_its_result_content_and_rejects_bad_shape() {
         ),
     ];
     for (provider, value) in cases {
-        let hits = protocol::parse_hits(provider, &value, 5).unwrap();
+        let hits = vendor::parse_hits(provider, &value, 5).unwrap();
         assert_eq!(
             hits,
             vec![SearchHit {
@@ -56,20 +63,20 @@ fn each_provider_preserves_its_result_content_and_rejects_bad_shape() {
             }],
             "{provider}"
         );
-        assert!(protocol::parse_hits(provider, &json!({"error":"bad"}), 5).is_err());
+        assert!(vendor::parse_hits(provider, &json!({"error":"bad"}), 5).is_err());
     }
     let body = "data: {\"result\":{\"content\":[{\"text\":\"Title: A\\nURL: https://example.com\\nText: line one\\nline two\"}]}}\n\n";
     assert_eq!(
-        protocol::parse_mcp(body, 5).unwrap()[0].snippet,
+        vendor::parse_mcp(body, 5).unwrap()[0].snippet,
         "line one\nline two"
     );
-    assert!(protocol::parse_mcp("{\"error\":{\"message\":\"bad\"}}", 5).is_err());
+    assert!(vendor::parse_mcp("{\"error\":{\"message\":\"bad\"}}", 5).is_err());
 }
 #[test]
 fn mcp_highlights_keep_paragraphs_between_results() {
     let body = json!({"result":{"content":[{"text":"Title: First\nURL: https://example.com/first\nHighlights:\nIntro\n\n# Body\nDetails\n\nTitle: Second\nURL: https://example.com/second\nText: Last"}]}}).to_string();
     assert_eq!(
-        protocol::parse_mcp(&body, 5).unwrap(),
+        vendor::parse_mcp(&body, 5).unwrap(),
         vec![
             SearchHit {
                 title: "First".into(),
@@ -210,18 +217,20 @@ async fn real_local_http_search_honors_basic_password_and_result_limit() {
             .unwrap();
         request
     });
-    let runtime = Runtime {
+    let config = ResolvedConfig {
         provider: "searxng".into(),
-        base: format!("http://127.0.0.1:{port}"),
-        key: Some(Zeroizing::new("password".into())),
-        user: Some("user".into()),
-        max: 1,
+        base_url: format!("http://127.0.0.1:{port}"),
+        api_keys: vec![Zeroizing::new("password".into())],
+        basic_auth_username: Some("user".into()),
+        preferences: SearchPreferences {
+            max_results: 1,
+            ..SearchPreferences::default()
+        },
+        address_policy: AddressPolicy::default(),
     };
-    let result = protocol::search(&AddressPolicy::default(), &runtime, "hello ?/")
-        .await
-        .unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].snippet, "body");
+    let result = crate::search::search(config, "hello ?/").await.unwrap();
+    assert_eq!(result.hits.len(), 1);
+    assert_eq!(result.hits[0].snippet, "body");
     let request = server.await.unwrap().to_lowercase();
     assert!(request.contains("authorization: basic dxnlcjpwyxnzd29yza=="));
     assert!(request.starts_with("get /search?"));
@@ -286,7 +295,7 @@ fn preferences_reject_invalid_rules_and_filter_before_unicode_cutoff() {
     prefs.blacklist = vec!["example.com".into(); 33];
     assert!(validate_preferences(&prefs).is_err());
     assert!(serde_json::from_value::<SearchPreferences>(json!({"maxResults":5,"compression":"regex","cutoffLimit":2000,"blacklist":[],"modelToolsPreferred":false})).is_err());
-    let parsed = protocol::parse_hits(
+    let parsed = vendor::parse_hits(
         "tavily",
         &json!({"results":[{"title":"A","url":"https://good.test","content":body}]}),
         5,
@@ -480,12 +489,12 @@ fn rejected_preferences_preserve_policy_and_unreadable_keys_never_leak() {
     assert_eq!(provider.keys[0].masked, "[unreadable]");
     assert!(!provider.ready);
     assert!(store.reveal(SearchCap::Search, "exa", "broken").is_err());
-    assert!(store.runtime(SearchCap::Search, Some("exa")).is_err());
+    assert!(store.resolve(SearchCap::Search, Some("exa")).is_err());
     assert!(
         store
-            .runtime(SearchCap::Search, Some("exa-mcp"))
+            .resolve(SearchCap::Search, Some("exa-mcp"))
             .unwrap()
-            .1
+            .api_keys
             .is_empty()
     );
 }
@@ -510,22 +519,20 @@ async fn fetch_blocks_blacklisted_redirect_before_request_and_cuts_unicode_pages
                 .is_err()
         );
     });
-    let runtime = Runtime {
-        provider: "fetch".into(),
-        base: String::new(),
-        key: None,
-        user: None,
-        max: 5,
-    };
     let mut prefs = SearchPreferences {
         blacklist: vec![format!("http://{addr}/blocked")],
         ..SearchPreferences::default()
     };
-    let error = protocol::fetch(
-        &AddressPolicy::default(),
-        &runtime,
+    let error = crate::fetch::fetch(
+        ResolvedConfig {
+            provider: "fetch".into(),
+            base_url: String::new(),
+            api_keys: Vec::new(),
+            basic_auth_username: None,
+            preferences: prefs.clone(),
+            address_policy: AddressPolicy::default(),
+        },
         &format!("http://{addr}/start"),
-        &prefs,
     )
     .await
     .unwrap_err();
@@ -540,4 +547,217 @@ async fn fetch_blocks_blacklisted_redirect_before_request_and_cuts_unicode_pages
     cutoff(&mut content, &prefs);
     assert_eq!(content.chars().count(), 101);
     assert!(content.ends_with('🙂'));
+}
+
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+#[test]
+fn resolve_skips_unreadable_keys_rotates_partitions_and_freezes_snapshots() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("search.db"), AddressPolicy::default()).unwrap();
+    for (cap, values) in [
+        (SearchCap::Search, ["search-one", "search-two"]),
+        (SearchCap::Fetch, ["fetch-one", "fetch-two"]),
+    ] {
+        for value in values {
+            store.save_key(cap, "querit", value, None).unwrap();
+        }
+    }
+    store.lock().unwrap().execute("INSERT INTO search_keys(id,capability,provider,key_ciphertext,position)VALUES('broken','search','querit',?1,-1)", [b"invalid-ciphertext".as_slice()]).unwrap();
+    let snapshot = store.resolve(SearchCap::Search, Some("querit")).unwrap();
+    assert_eq!(
+        snapshot
+            .api_keys
+            .iter()
+            .map(|key| key.as_str())
+            .collect::<Vec<_>>(),
+        ["search-one", "search-two"]
+    );
+    assert_eq!(
+        store
+            .resolve(SearchCap::Search, Some("querit"))
+            .unwrap()
+            .api_keys[0]
+            .as_str(),
+        "search-two"
+    );
+    assert_eq!(
+        store
+            .resolve(SearchCap::Fetch, Some("querit"))
+            .unwrap()
+            .api_keys[0]
+            .as_str(),
+        "fetch-one"
+    );
+    assert_eq!(
+        store
+            .resolve(SearchCap::Search, Some("querit"))
+            .unwrap()
+            .api_keys[0]
+            .as_str(),
+        "search-one"
+    );
+    store
+        .save(SearchSave {
+            capability: SearchCap::Search,
+            provider: "querit".into(),
+            base_url: Some("http://localhost:8088".into()),
+            basic_auth_username: None,
+        })
+        .unwrap();
+    let id = store
+        .settings(SearchCap::Search)
+        .unwrap()
+        .providers
+        .into_iter()
+        .find(|provider| provider.id == "querit")
+        .unwrap()
+        .keys
+        .into_iter()
+        .find(|key| key.id != "broken")
+        .unwrap()
+        .id;
+    store.remove_key(SearchCap::Search, "querit", &id).unwrap();
+    store
+        .save_preferences(SearchPreferences {
+            max_results: 1,
+            ..SearchPreferences::default()
+        })
+        .unwrap();
+    store.set_default(SearchCap::Search, "querit").unwrap();
+    assert_eq!(snapshot.base_url, "https://api.querit.ai");
+    assert_eq!(snapshot.preferences.max_results, 5);
+    assert_eq!(snapshot.api_keys[0].as_str(), "search-one");
+    let next = store.resolve(SearchCap::Search, None).unwrap();
+    assert_eq!(next.provider, "querit");
+    assert_eq!(next.base_url, "http://localhost:8088");
+    assert_eq!(next.preferences.max_results, 1);
+    assert_eq!(next.api_keys.len(), 1);
+    assert_eq!(
+        store.settings(SearchCap::Fetch).unwrap().default_provider,
+        "jina"
+    );
+}
+
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+#[test]
+fn failed_key_write_preserves_previous_ciphertext_and_rolls_back_new_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("search.db"), AddressPolicy::default()).unwrap();
+    let settings = store
+        .save_key(SearchCap::Search, "exa", "old-fixture", None)
+        .unwrap();
+    let id = &settings
+        .providers
+        .iter()
+        .find(|provider| provider.id == "exa")
+        .unwrap()
+        .keys[0]
+        .id;
+    store.lock().unwrap().execute_batch("CREATE TRIGGER reject_key_update BEFORE UPDATE ON search_keys BEGIN SELECT RAISE(ABORT,'fixture write failure'); END; CREATE TRIGGER reject_key_insert BEFORE INSERT ON search_keys BEGIN SELECT RAISE(ABORT,'fixture write failure'); END;").unwrap();
+    assert!(
+        store
+            .save_key(SearchCap::Search, "exa", "replacement-fixture", Some(id))
+            .is_err()
+    );
+    assert!(
+        store
+            .save_key(SearchCap::Search, "exa", "new-fixture", None)
+            .is_err()
+    );
+    assert_eq!(
+        store.reveal(SearchCap::Search, "exa", id).unwrap(),
+        "old-fixture"
+    );
+    assert_eq!(
+        Store::keys(&store.lock().unwrap(), SearchCap::Search, "exa")
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn check_uses_selected_provider_and_canonical_inputs_without_holding_store_lock() {
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (sent, received) = tokio::sync::oneshot::channel();
+    let (release, released) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut bytes = [0; 8192];
+        let size = stream.read(&mut bytes).await.unwrap();
+        assert!(
+            String::from_utf8_lossy(&bytes[..size])
+                .starts_with("GET /search?q=web+search&format=json&language=auto ")
+        );
+        sent.send(()).unwrap();
+        released.await.unwrap();
+        let body = "{\"results\":[]}";
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let size = stream.read(&mut bytes).await.unwrap();
+        assert!(String::from_utf8_lossy(&bytes[..size]).starts_with("GET /https://example.com "));
+        let body = "{\"data\":{\"content\":\"readable\"}}";
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("search.db"), AddressPolicy::default()).unwrap();
+    for (cap, provider) in [(SearchCap::Search, "searxng"), (SearchCap::Fetch, "jina")] {
+        store
+            .save(SearchSave {
+                capability: cap,
+                provider: provider.into(),
+                base_url: Some(format!("http://{addr}")),
+                basic_auth_username: None,
+            })
+            .unwrap();
+    }
+    let check = store.check(SearchCap::Search, "searxng");
+    tokio::pin!(check);
+    tokio::select! {
+        _ = &mut check => panic!("check finished before fixture response"),
+        _ = received => {}
+    }
+    assert!(store.db.try_lock().is_ok());
+    store
+        .save_preferences(SearchPreferences {
+            max_results: 1,
+            ..SearchPreferences::default()
+        })
+        .unwrap();
+    release.send(()).unwrap();
+    let error = check.await.unwrap_err();
+    assert_eq!(error.code(), KitErrorCode::Upstream);
+    assert_eq!(error.message(), "provider returned no results");
+    assert_eq!(
+        store.check(SearchCap::Fetch, "jina").await.unwrap().count,
+        1
+    );
+    assert_eq!(
+        store.settings(SearchCap::Search).unwrap().default_provider,
+        "exa-mcp"
+    );
+    server.await.unwrap();
 }

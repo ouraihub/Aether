@@ -4,6 +4,8 @@ members = [
   "crates/aether-observability",
   "crates/aether-providers",
   "crates/aether-chat",
+  "crates/aether-images",
+  "crates/aether-runtime",
   "crates/aether-search",
   "crates/aether-mcp-client",
   "crates/aether-mcp-server",
@@ -23,10 +25,12 @@ publish = false
 # Dependency baseline: docs/00-概要设计.md §6. Each crate opts in to what it uses;
 # versions are pinned here and only upgraded in this repository.
 [workspace.dependencies]
-aether-support = { path = "crates/aether-support" }
+aether-support = { path = "crates/aether-support", default-features = false }
 aether-observability = { path = "crates/aether-observability" }
 aether-providers = { path = "crates/aether-providers" }
-aether-chat = { path = "crates/aether-chat" }
+aether-chat = { path = "crates/aether-chat", default-features = false }
+aether-images = { path = "crates/aether-images", default-features = false }
+aether-runtime = { path = "crates/aether-runtime", default-features = false }
 aether-skills = { path = "crates/aether-skills" }
 aether-mcp-client = { path = "crates/aether-mcp-client" }
 aether-mcp-server = { path = "crates/aether-mcp-server" }

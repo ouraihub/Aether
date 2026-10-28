@@ -1,10 +1,16 @@
 //! 示例宿主：providers + chat + skills + mcp-client。验收用法见 `docs/90-开发任务清单.md`。
 //! 宿主工具（feature `aether`）：`read_note`（只读，auto）与 `write_note`（写入，ask），见 `notes.rs`。
-//! `AETHER_NO_HISTORY=1` 启动时不传会话存储：无历史模式，`aether:chat-history` 不授权。
+//! `AETHER_NO_HISTORY=1` runs without persistence; independent history management remains available when compiled.
 //! feature `skills`：技能存储与 `aether:skills`，界面经 `?skills=1` 得知（见 ui/src/App.svelte）。
 //! feature `mcp-client`：外部 MCP 服务存储与 `aether:mcp-client`，界面经 `?mcp=1` 得知。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(any(
+    feature = "aether",
+    feature = "conversations",
+    feature = "skills",
+    feature = "mcp-client"
+))]
 use std::sync::Arc;
 
 use aether_observability::LogConfig;
@@ -13,12 +19,6 @@ use aether_observability::LogConfig;
 mod notes;
 #[cfg(feature = "aether")]
 use notes::AssistantHost;
-
-/// Without aether features the host has nothing to provide.
-#[cfg(not(feature = "aether"))]
-struct AssistantHost;
-#[cfg(not(feature = "aether"))]
-impl tauri_plugin_aether::KitHost for AssistantHost {}
 
 #[expect(
     clippy::print_stderr,
@@ -35,28 +35,63 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Before `tauri::Builder`, so logs from other plugins' setup reach the file (docs/10 §8).
     let root = aether_observability::data_root("aether-assistant")?;
     let logs = aether_observability::init(&root.join("logs"), LogConfig::default(), None)?;
-    #[cfg(feature = "aether")]
-    let host = AssistantHost::default();
-    #[cfg(not(feature = "aether"))]
-    let host = AssistantHost;
-    let aether = tauri_plugin_aether::Builder::new(Arc::new(host), logs);
+    let aether = tauri_plugin_aether::Builder::new(logs);
     #[cfg(feature = "aether")]
     let history = std::env::var_os("AETHER_NO_HISTORY").is_none();
     #[cfg(feature = "aether")]
-    let aether = {
-        let store: Option<Arc<dyn tauri_plugin_aether::ConversationStore>> = if history {
-            Some(Arc::new(aether_chat::SqliteStore::open(&root)?))
+    let providers = Arc::new(aether_providers::Store::open(&root)?);
+    #[cfg(any(feature = "aether", feature = "conversations"))]
+    let conversations: Option<Arc<dyn aether_runtime::conversations::ConversationStore>> = {
+        #[cfg(feature = "conversations")]
+        let enabled = true;
+        #[cfg(not(feature = "conversations"))]
+        let enabled = history;
+        if enabled {
+            Some(Arc::new(aether_runtime::conversations::SqliteStore::open(
+                &root,
+            )?))
         } else {
             None
-        };
-        aether
-            .providers(aether_providers::Store::open(&root)?)
-            .chat(tauri_plugin_aether::ChatConfig::default(), store)
+        }
     };
     #[cfg(feature = "skills")]
-    let aether = aether.skills(aether_skills::Store::open(&root, &[])?);
+    let skills = Arc::new(aether_skills::Store::open(&root, &[])?);
     #[cfg(feature = "mcp-client")]
-    let aether = aether.mcp_client(aether_mcp_client::Store::open(&root)?);
+    let mcp = Arc::new(aether_mcp_client::McpRuntime::new(Arc::new(
+        aether_mcp_client::Store::open(&root)?,
+    )));
+    #[cfg(feature = "aether")]
+    let aether = {
+        let mut deps = aether_runtime::RunDependencies::new(providers.clone());
+        deps.conversations = if history { conversations.clone() } else { None };
+        #[cfg(feature = "skills")]
+        {
+            deps.skills = Some(skills.clone());
+        }
+        #[cfg(feature = "mcp-client")]
+        {
+            deps.mcp = Some(mcp.clone());
+        }
+        let runs = tauri::async_runtime::block_on(async {
+            aether_runtime::RunService::new(
+                Arc::new(AssistantHost::default()),
+                aether_runtime::RunConfig::default(),
+                deps,
+                aether_runtime::AddressPolicy::default(),
+            )
+        })?;
+        aether.providers(providers).runs(runs)
+    };
+    #[cfg(feature = "conversations")]
+    let aether = aether.conversations(Arc::new(
+        aether_runtime::conversations::ConversationService::new(
+            conversations.ok_or("history management requires a store")?,
+        ),
+    ));
+    #[cfg(feature = "skills")]
+    let aether = aether.skills(skills);
+    #[cfg(feature = "mcp-client")]
+    let aether = aether.mcp_client(mcp);
     tauri::Builder::default()
         .plugin(aether.build()?)
         .setup(move |app| {
@@ -65,11 +100,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(feature = "aether")]
             tauri::Manager::add_capability(
                 app,
-                if history {
-                    r#"{ "identifier": "aether", "windows": ["main"], "permissions": ["aether:chat", "aether:chat-history", "aether:providers"] }"#
-                } else {
-                    r#"{ "identifier": "aether", "windows": ["main"], "permissions": ["aether:chat", "aether:providers"] }"#
-                },
+                r#"{ "identifier": "aether", "windows": ["main"], "permissions": ["aether:chat", "aether:providers"] }"#,
+            )?;
+            #[cfg(feature = "conversations")]
+            tauri::Manager::add_capability(
+                app,
+                r#"{ "identifier": "aether-history", "windows": ["main"], "permissions": ["aether:chat-history"] }"#,
             )?;
             #[cfg(feature = "skills")]
             tauri::Manager::add_capability(
@@ -85,7 +121,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(feature = "aether")]
             {
                 let query = [
-                    (!history, "history=0"),
+                    (!history || !cfg!(feature = "conversations"), "history=0"),
                     (cfg!(feature = "skills"), "skills=1"),
                     (cfg!(feature = "mcp-client"), "mcp=1"),
                 ]

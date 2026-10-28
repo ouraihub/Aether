@@ -1,6 +1,7 @@
 <script lang="ts">
   // Key management (docs/34 §5.2): every action saves at once; one request at a time.
-  import { untrack } from 'svelte'
+  import { onDestroy, untrack } from 'svelte'
+  import { createClientSession } from '../session'
   import CheckIcon from '@lucide/svelte/icons/check'
   import CopyIcon from '@lucide/svelte/icons/copy'
   import EditIcon from '@lucide/svelte/icons/pencil'
@@ -37,16 +38,38 @@
   let password = $state('')
   /** Key waiting for the current password before it can be copied or edited (web). */
   let asking = $state<{ id: string; action: 'copy' | 'edit' } | null>(null)
+  const session = createClientSession()
+  let passwordRevision = 0
+  let editRevision = 0
+  let lastTarget = ''
+  function invalidateRequests() {
+    session.invalidate()
+    password = ''
+    passwordRevision++
+    asking = null
+    busy = false
+  }
+  function clear() {
+    invalidateRequests()
+    edit = null
+    editRevision++
+  }
   $effect.pre(() => {
-    if (!open) return
+    const target = JSON.stringify([open, endpoint.id, editKeyId])
+    const keys = JSON.stringify(endpoint.keys)
     untrack(() => {
-      edit = null
-      password = ''
-      asking = null
-      const key = endpoint.keys.find((k) => k.id === editKeyId)
-      if (key) void startEdit(key)
+      const changed = lastTarget !== target
+      lastTarget = target
+      // Reading the full credential metadata also detects replacement under the same id.
+      void keys
+      clear()
+      if (open && changed) {
+        const key = endpoint.keys.find((key) => key.id === editKeyId)
+        if (key) void startEdit(key)
+      }
     })
   })
+  onDestroy(clear)
   const enabled = $derived(endpoint.keys.filter((k) => k.enabled).length)
   const name = (key: EndpointKey) => key.label || maskedText(key, t)
   /** Set aside by fill-first and not yet recovered; the host clears it lazily, so the time decides. */
@@ -54,65 +77,87 @@
   const until = (ms: number) => new Date(ms).toLocaleString(i18n.locale, { dateStyle: 'short', timeStyle: 'short' })
 
   async function run(action: (port: ProvidersPort) => Promise<Provider[]>): Promise<boolean> {
-    if (!ports.providers || busy) return false
+    if (!ports.providers || busy || !open) return false
+    invalidateRequests()
+    const token = session.capture()
     busy = true
     try {
-      onchanged(await action(ports.providers))
+      const next = await action(ports.providers)
+      if (!session.isCurrent(token)) return false
+      onchanged(next)
       return true
     } catch (error) {
-      notify.toast('error', keyError(error, t))
+      if (session.isCurrent(token)) notify.toast('error', keyError(error, t))
       return false
     } finally {
-      busy = false
+      if (session.isCurrent(token)) busy = false
     }
   }
   async function save() {
-    if (!edit) return
-    const key = edit.key.trim()
-    if (edit.id === null && !key) return notify.toast('error', t('providers.keys_err_empty'))
-    const input: EndpointKeySave = { endpointId: endpoint.id, label: edit.label.trim() }
-    if (edit.id !== null) input.id = edit.id
+    if (!edit || busy) return
+    const sent = edit
+    const revision = editRevision
+    const key = sent.key.trim()
+    if (sent.id === null && !key) return notify.toast('error', t('providers.keys_err_empty'))
+    const input: EndpointKeySave = { endpointId: endpoint.id, label: sent.label.trim() }
+    if (sent.id !== null) input.id = sent.id
     if (key) input.key = key
-    if (await run((port) => port.saveKey(input))) edit = null
+    if (await run((port) => port.saveKey(input))) {
+      if (edit === sent && editRevision === revision) edit = null
+    }
   }
   async function plaintext(key: EndpointKey, action: 'copy' | 'edit'): Promise<string | null> {
     const port = ports.providers
-    if (!port || !key.readable || busy) return null
+    if (!port || !key.readable || busy || !open) return null
     if (port.revealNeedsPassword && !password) {
       asking = { id: key.id, action }
       return null
     }
+    const token = session.capture()
+    const revision = passwordRevision
     busy = true
     try {
       const text = await port.revealKey(key.id, password)
+      if (!session.isCurrent(token)) return null
       asking = null
       return text
     } catch (error) {
-      password = ''
-      notify.toast('error', error instanceof Error ? error.message : t('providers.key_reveal_failed'))
+      if (session.isCurrent(token))
+        notify.toast('error', error instanceof Error ? error.message : t('providers.key_reveal_failed'))
       return null
     } finally {
-      busy = false
+      if (session.isCurrent(token)) {
+        busy = false
+        if (passwordRevision === revision) password = ''
+      }
     }
   }
   async function copy(key: EndpointKey) {
+    if (busy || !open) return
+    if (!asking || asking.id !== key.id || asking.action !== 'copy') clear()
+    const token = session.capture()
     const text = await plaintext(key, 'copy')
-    if (text === null) return
+    if (text === null || !session.isCurrent(token)) return
     try {
       await navigator.clipboard.writeText(text)
-      notify.toast('success', t('providers.key_copied'))
+      if (session.isCurrent(token)) notify.toast('success', t('providers.key_copied'))
     } catch {
-      notify.toast('error', t('providers.key_copy_failed'))
+      if (session.isCurrent(token)) notify.toast('error', t('providers.key_copy_failed'))
     }
   }
   /** Edits start from the stored key; an unreadable key can only be replaced. */
   async function startEdit(key: EndpointKey) {
+    if (busy || !open) return
+    if (!asking || asking.id !== key.id || asking.action !== 'edit') clear()
+    const token = session.capture()
+    const revision = editRevision
     if (!key.readable) {
       edit = { id: key.id, label: key.label, key: '' }
       return
     }
     const text = await plaintext(key, 'edit')
-    if (text !== null) edit = { id: key.id, label: key.label, key: text }
+    if (text !== null && session.isCurrent(token) && editRevision === revision)
+      edit = { id: key.id, label: key.label, key: text }
   }
   function keydown(event: KeyboardEvent) {
     if (event.key !== 'Enter') return
@@ -134,6 +179,7 @@
           aria-label={t('providers.keys_label')}
           disabled={busy}
           bind:value={edit.label}
+          oninput={() => editRevision++}
           onkeydown={keydown}
         />
         <Input
@@ -148,6 +194,7 @@
           aria-label={t('providers.api_key')}
           disabled={busy}
           bind:value={edit.key}
+          oninput={() => editRevision++}
           onkeydown={keydown}
         />
       </div>
@@ -165,20 +212,25 @@
         title={t('providers.keys_cancel')}
         aria-label={t('providers.keys_cancel')}
         disabled={busy}
-        onclick={() => (edit = null)}><XIcon /></Button
+        onclick={clear}><XIcon /></Button
       >
     </div>
   {/if}
 {/snippet}
 
-<Dialog.Root bind:open>
+<Dialog.Root
+  bind:open
+  onOpenChange={(next) => {
+    if (!next) clear()
+  }}
+>
   <Dialog.Content
     class="flex max-h-[85dvh] min-w-0 flex-col sm:max-w-md"
     onEscapeKeydown={(event) => {
       // Escape cancels the edit row first; a second one closes the dialog.
       if (!edit) return
       event.preventDefault()
-      edit = null
+      clear()
     }}
   >
     <Dialog.Header class="min-w-0 text-left">
@@ -193,6 +245,7 @@
         aria-label={t('providers.key_current_password')}
         disabled={busy}
         bind:value={password}
+        oninput={() => passwordRevision++}
         onkeydown={(event) => {
           const key = endpoint.keys.find((k) => k.id === asking?.id)
           if (event.key !== 'Enter' || !password || !key) return
@@ -278,7 +331,10 @@
       variant="secondary"
       class="w-full"
       disabled={busy || edit !== null || endpoint.keys.length >= MAX_KEYS}
-      onclick={() => (edit = { id: null, label: '', key: '' })}><PlusIcon />{t('providers.keys_add')}</Button
+      onclick={() => {
+        clear()
+        edit = { id: null, label: '', key: '' }
+      }}><PlusIcon />{t('providers.keys_add')}</Button
     >
     <p class="text-muted-foreground text-right text-kit-xs">
       {t('providers.keys_enabled_count', { enabled, total: endpoint.keys.length })}

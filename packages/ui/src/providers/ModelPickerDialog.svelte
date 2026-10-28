@@ -10,6 +10,7 @@
   import * as Select from '#lib/components/ui/select/index.js'
   import { getKitContext } from '../context'
   import type { Model, ModelType, ProbeResult } from '../ports'
+  import { mergeModels } from './draft'
 
   let {
     open = $bindable(false),
@@ -67,33 +68,7 @@
 
   /** Models outside this probe (added by hand, or no longer listed) are kept untouched. */
   function emit() {
-    const probed = new Set(models.map((m) => m.id))
-    const kept = selected.filter((m) => !probed.has(m.id))
-    const picked = models
-      .filter((m) => checked[m.id])
-      .map((m): Model => {
-        const existing = selected.find((item) => item.id === m.id)
-        const modelType = types[m.id] ?? m.modelType
-        // Keep user-edited metadata when a probe refreshes it; new models take the probe's group (docs/41 §3.2).
-        const chat = modelType === 'chat'
-        return {
-          id: m.id,
-          name: existing ? existing.name : m.name,
-          groupName: existing ? existing.groupName : m.group,
-          modelType,
-          typeSource:
-            existing?.modelType === modelType ? existing.typeSource : modelType === m.modelType ? m.typeSource : 'user',
-          contextWindow: existing ? existing.contextWindow : m.contextWindow,
-          maxOutput: existing ? existing.maxOutput : m.maxOutput,
-          // Chat-only settings would be rejected on any other type.
-          reasoning: chat ? (existing ? existing.reasoning : m.reasoning) : null,
-          nativeWebSearch: chat && (existing ? existing.nativeWebSearch : m.nativeWebSearch),
-          pricing: chat ? (existing ? existing.pricing : m.pricing) : null,
-          canVision: existing ? existing.canVision : m.canVision,
-          supportsTools: existing ? existing.supportsTools : m.supportsTools,
-        }
-      })
-    onchange([...kept, ...picked])
+    onchange(mergeModels(selected, models, checked, types))
   }
 </script>
 

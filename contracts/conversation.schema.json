@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aether.local/contracts/v1/conversation.schema.json",
+  "$ref": "#/definitions/Conversation",
+  "definitions": {
+    "TurnStatus": { "enum": ["running", "completed", "failed", "cancelled"] },
+    "ConversationSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "scope", "selectedTurnId", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "common.schema.json#/definitions/Id" },
+        "title": { "type": "string", "maxLength": 200 },
+        "scope": { "type": ["string", "null"], "maxLength": 200 },
+        "selectedTurnId": { "$ref": "common.schema.json#/definitions/NullableId" },
+        "createdAt": { "$ref": "common.schema.json#/definitions/Timestamp" },
+        "updatedAt": { "$ref": "common.schema.json#/definitions/Timestamp" }
+      }
+    },
+    "Conversation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "turns"],
+      "properties": {
+        "summary": { "$ref": "#/definitions/ConversationSummary" },
+        "turns": { "type": "array", "items": { "$ref": "#/definitions/Turn" } }
+      }
+    },
+    "Turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "parentId",
+        "questionId",
+        "supersedesId",
+        "kind",
+        "status",
+        "input",
+        "text",
+        "modelId",
+        "endpointId",
+        "errorCode",
+        "reasoningText",
+        "images",
+        "generated"
+      ],
+      "properties": {
+        "id": { "$ref": "common.schema.json#/definitions/Id" },
+        "parentId": { "$ref": "common.schema.json#/definitions/NullableId" },
+        "questionId": { "$ref": "common.schema.json#/definitions/Id" },
+        "supersedesId": { "$ref": "common.schema.json#/definitions/NullableId" },
+        "kind": { "enum": ["reply", "translation"] },
+        "status": { "$ref": "#/definitions/TurnStatus" },
+        "input": { "type": "string", "maxLength": 100000 },
+        "text": { "type": "string" },
+        "modelId": { "type": ["string", "null"] },
+        "endpointId": { "type": ["string", "null"] },
+        "errorCode": { "type": ["string", "null"] },
+        "usage": { "anyOf": [{ "$ref": "common.schema.json#/definitions/TokenUsage" }, { "type": "null" }] },
+        "contextUsage": { "anyOf": [{ "$ref": "common.schema.json#/definitions/ContextUsage" }, { "type": "null" }] },
+        "reasoningEffort": {
+          "anyOf": [{ "$ref": "common.schema.json#/definitions/ReasoningEffort" }, { "type": "null" }]
+        },
+        "cost": { "anyOf": [{ "$ref": "common.schema.json#/definitions/Cost" }, { "type": "null" }] },
+        "reasoningText": { "type": ["string", "null"] },
+        "images": { "type": "array", "items": { "$ref": "common.schema.json#/definitions/ImageRef" } },
+        "generated": { "type": "array", "items": { "$ref": "common.schema.json#/definitions/ImageRef" } }
+      }
+    }
+  }
+}

@@ -8,6 +8,7 @@ import {
   type KeyStrategy,
   type EndpointSave,
   type Model,
+  type ProbeResult,
   type ModelSave,
   type ModelType,
   type ProbeTarget,
@@ -96,17 +97,50 @@ export function savable(draft: ProviderDraft): ProviderDraft {
  * sent endpoints get their stored record (new ones matched by slug); edits stay in the draft.
  */
 export function adopt(current: ProviderDraft, sent: ProviderDraft, stored: Provider): ProviderDraft {
-  const sentSlugs = new Set(sent.endpoints.map((e) => e.slug))
+  const sentEndpoints = new Map(sent.endpoints.map((endpoint) => [endpoint.slug, endpoint]))
   return {
     ...current,
     id: stored.id,
     endpoints: current.endpoints.map((endpoint) => {
+      const original = sentEndpoints.get(endpoint.slug)
       const record =
-        stored.endpoints.find((e) => e.id === endpoint.saved?.id) ??
-        (sentSlugs.has(endpoint.slug) ? stored.endpoints.find((e) => e.slug === endpoint.slug) : undefined)
+        original &&
+        stored.endpoints.find((item) => (original.saved ? item.id === original.saved.id : item.slug === original.slug))
       return record ? { ...endpoint, saved: record } : endpoint
     }),
   }
+}
+
+/** Probe selection preserves every existing user field; only new models take probe defaults. */
+export function mergeModels(
+  current: readonly Model[],
+  probed: ProbeResult['models'],
+  checked: Readonly<Record<string, boolean>>,
+  types: Readonly<Record<string, ModelType>> = {},
+): Model[] {
+  const fetched = new Set(probed.map((model) => model.id))
+  const existing = new Map(current.map((model) => [model.id, model]))
+  const merged = new Map(current.filter((model) => !fetched.has(model.id)).map((model) => [model.id, model]))
+  for (const model of probed) {
+    if (!checked[model.id] || merged.has(model.id)) continue
+    const previous = existing.get(model.id)
+    const base: Model = previous ?? {
+      id: model.id,
+      name: model.name,
+      groupName: model.group,
+      modelType: model.modelType,
+      typeSource: model.typeSource,
+      contextWindow: model.contextWindow,
+      maxOutput: model.maxOutput,
+      reasoning: model.reasoning,
+      nativeWebSearch: model.nativeWebSearch,
+      pricing: model.pricing,
+      canVision: model.canVision,
+      supportsTools: model.supportsTools,
+    }
+    merged.set(model.id, withType(base, types[model.id] ?? base.modelType))
+  }
+  return [...merged.values()]
 }
 
 export function toSave(draft: ProviderDraft): ProviderSave {

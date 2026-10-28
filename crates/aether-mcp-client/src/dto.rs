@@ -1,4 +1,4 @@
-//! MCP client configuration DTOs (docs/13 §4). Requests reject unknown fields.
+//! MCP client configuration DTOs (docs/27 §2). Requests reject unknown fields.
 
 use std::collections::BTreeMap;
 
@@ -22,7 +22,7 @@ pub struct ToolDto {
     pub approval: Approval,
 }
 
-/// How the server is reached (docs/13 §2). Requests reject unknown fields.
+/// How the server is reached (docs/27 §2). Requests reject unknown fields.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export)]

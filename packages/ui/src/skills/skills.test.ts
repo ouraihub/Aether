@@ -144,7 +144,9 @@ describe('SkillPicker in ChatPanel', () => {
       return Promise.resolve({ runId: 'r2', conversationId: null, turnId: null })
     })
     const get = vi.fn(() => Promise.resolve({ ...meta(2), body: 'edited body', license: null, extra: {}, files: [] }))
-    mount({ chat: { run }, skills: { list: () => Promise.resolve([meta(2)]), get } }, [{ id: 's1', revision: 1 }])
+    mount({ chat: { start: run }, skills: { list: () => Promise.resolve([meta(2)]), get } }, [
+      { id: 's1', revision: 1 },
+    ])
 
     const send = async (text: string) => {
       await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: text } })

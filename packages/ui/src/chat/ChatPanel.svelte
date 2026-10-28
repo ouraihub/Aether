@@ -111,9 +111,12 @@
   } = $props()
 
   const { ports, i18n, notify } = getKitContext()
+  let viewGeneration = 0
+  let listGeneration = 0
+  let disposed = false
   const { t } = i18n
-  const history = ports.chat?.history
-  const session = ports.chat ? new RunSession(ports.chat) : null
+  const history = ports.conversations
+  const session = ports.chat ? new RunSession(ports.chat, history) : null
   // svelte-ignore state_referenced_locally
   let picked = $state<ModelRef | null>(model)
   let modelOptions = $state<ModelOption[] | null>(null)
@@ -144,6 +147,7 @@
   )
   async function chooseMode(next: PermissionMode) {
     if (session?.running || next === mode || !allowedModes.includes(next)) return
+    const generation = viewGeneration
     if (next === 'full_access') {
       if (
         !(await notify.confirm({
@@ -153,7 +157,8 @@
         }))
       )
         return
-      if (!session?.running && allowedModes.includes(next)) fullAccess = true
+      if (!disposed && generation === viewGeneration && !session?.running && allowedModes.includes(next))
+        fullAccess = true
     } else {
       fullAccess = false
       permissionMode = next
@@ -262,7 +267,13 @@
   let reported = conversationId
   let restored = $state(false)
   let restoreBlocked = $state(false)
-  $effect(() => () => session?.stop())
+  $effect(() => () => {
+    disposed = true
+    viewGeneration++
+    listGeneration++
+    fullAccess = false
+    session?.dispose()
+  })
   $effect(() => {
     if (session && !session.running) void refresh()
   })
@@ -277,17 +288,20 @@
 
   async function refresh() {
     if (!history) return
+    const generation = ++listGeneration
     historyLoading = true
     try {
-      conversations = await history.list(scope)
+      const next = await history.list(scope)
+      if (disposed || generation !== listGeneration) return
+      conversations = next
       if (retryHistory === refresh) historyError = null
     } catch (error) {
-      if (!restoreBlocked) {
+      if (!disposed && generation === listGeneration && !restoreBlocked) {
         historyError = errorText(error)
         retryHistory = refresh
       }
     } finally {
-      historyLoading = false
+      if (!disposed && generation === listGeneration) historyLoading = false
     }
   }
   async function restore(id: string | null) {
@@ -299,9 +313,12 @@
   }
   async function open(id: string) {
     if (!history || !session || session.running || historyBusy) return
+    const generation = ++viewGeneration
+    fullAccess = false
     historyBusy = true
     try {
       const conversation = await history.get(id)
+      if (disposed || generation !== viewGeneration) return
       session.show(id, conversation.turns, conversation.summary.selectedTurnId)
       shownSummary = conversation.summary
       restoreBlocked = false
@@ -312,14 +329,17 @@
       renaming = false
       follow = true
     } catch (error) {
+      if (disposed || generation !== viewGeneration) return
       historyError = errorText(error)
       retryHistory = () => open(id)
     } finally {
-      historyBusy = false
+      if (!disposed && generation === viewGeneration) historyBusy = false
     }
   }
   function newConversation() {
     if (!session || session.running || historyBusy) return
+    viewGeneration++
+    fullAccess = false
     session.show(null)
     shownSummary = null
     restoreBlocked = false
@@ -333,28 +353,33 @@
     const id = session?.conversationId
     const next = renameTitle.trim()
     if (!history || !id || !next || session?.running || historyBusy) return
+    const generation = viewGeneration
     historyBusy = true
     try {
       const summary = await history.rename(id, next)
+      if (disposed || generation !== viewGeneration) return
       shownSummary = summary
       conversations = conversations.map((c) => (c.id === id ? summary : c))
       renaming = false
       historyError = null
     } catch (error) {
+      if (disposed || generation !== viewGeneration) return
       historyError = errorText(error)
       retryHistory = rename
     } finally {
-      historyBusy = false
+      if (!disposed && generation === viewGeneration) historyBusy = false
     }
   }
   async function remove() {
     const id = session?.conversationId
     if (!history || !session || !id || session.running || historyBusy) return
+    const generation = viewGeneration
     historyBusy = true
     try {
       const ok = await notify.confirm({ title: t('chat.deleteTitle'), body: t('chat.deleteBody'), danger: true })
-      if (!ok) return
+      if (!ok || disposed || generation !== viewGeneration) return
       await history.remove(id)
+      if (disposed || generation !== viewGeneration) return
       if (session.conversationId === id) {
         session.show(null)
         shownSummary = null
@@ -365,10 +390,11 @@
       historyError = null
       void refresh()
     } catch (error) {
+      if (disposed || generation !== viewGeneration) return
       historyError = errorText(error)
       retryHistory = remove
     } finally {
-      historyBusy = false
+      if (!disposed && generation === viewGeneration) historyBusy = false
     }
   }
 
@@ -429,6 +455,8 @@
     replyOpen = true
   }
   function showConversation(conversation: Conversation) {
+    viewGeneration++
+    fullAccess = false
     session?.show(conversation.summary.id, conversation.turns, conversation.summary.selectedTurnId)
     shownSummary = conversation.summary
     follow = true
@@ -436,6 +464,7 @@
   async function mutateReply(turn: ChatTurn, action: 'select' | 'remove' | 'branch' | 'copy') {
     const id = session?.conversationId
     if (!history || !session || !id || actionBusy) return
+    let generation = viewGeneration
     historyBusy = true
     try {
       if (action === 'remove') {
@@ -450,13 +479,16 @@
         )
           return
       }
+      if (disposed || generation !== viewGeneration) return
       const conversation =
         action === 'select' || action === 'branch'
           ? await history.selectTurn(id, turn.id)
           : action === 'remove'
             ? await history.removeTurn(id, turn.id)
             : await history.fork(id, turn.id)
+      if (disposed || generation !== viewGeneration) return
       showConversation(conversation)
+      generation = viewGeneration
       if (action === 'branch') {
         draft = ''
         draftRevision++
@@ -465,9 +497,10 @@
       historyError = null
       void refresh()
     } catch (error) {
+      if (disposed || generation !== viewGeneration) return
       notify.toast('error', errorText(error))
     } finally {
-      historyBusy = false
+      if (!disposed && generation === viewGeneration) historyBusy = false
     }
   }
   async function retryReply(turn: ChatTurn) {
@@ -497,24 +530,31 @@
   }
   async function submitReply() {
     const turn = sourceReply
+    if (disposed) return
     if (!session || !turn || actionBusy) return
+    let generation = viewGeneration
     replyError = null
     if (replyDialog === 'edit') {
       const id = session.conversationId
       if (!history || !id || !editDraft.trim() || editDraft.length > 24_000 || !canEdit(turn)) return
       historyBusy = true
       try {
-        showConversation(await history.editTurn(id, turn.id, editDraft, expectedText))
+        const conversation = await history.editTurn(id, turn.id, editDraft, expectedText)
+        if (disposed || generation !== viewGeneration) return
+        showConversation(conversation)
+        generation = viewGeneration
         replyOpen = false
       } catch (error) {
+        if (disposed || generation !== viewGeneration) return
         replyError = errorText(error)
       } finally {
-        historyBusy = false
+        if (!disposed && generation === viewGeneration) historyBusy = false
       }
     } else {
       if (!validReplyModel || !replyModel) return
       if (!targetLanguage.trim() || targetLanguage.trim().length > 80) return
       const accepted = await session.translate({ ...consumeBase(), model: replyModel }, turn.id, targetLanguage.trim())
+      if (disposed || generation !== viewGeneration) return
       if (accepted) replyOpen = false
       else replyError = session.actionError ? t(`errors.${session.actionError}`) : t('errors.internal')
     }
@@ -664,6 +704,7 @@
   }
   async function send() {
     if (!session || !canSend) return
+    const generation = viewGeneration
     const original = draft
     const attached = images
     const revision = draftRevision
@@ -680,6 +721,10 @@
       webSearch,
       attached.map(({ mime, data }) => ({ mime, data })),
     )
+    if (disposed || generation !== viewGeneration) {
+      for (const image of attached) URL.revokeObjectURL(image.preview)
+      return
+    }
     if (accepted) {
       for (const image of attached) URL.revokeObjectURL(image.preview)
       if (contextRevision === contextVersion && contextKey === key) droppedKey = null

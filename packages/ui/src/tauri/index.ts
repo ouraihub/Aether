@@ -2,15 +2,15 @@
 // Argument names are the camelCase of the Rust command parameters (docs/15 §5).
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { KitClientError } from '../ports'
-import type { KitError, KitPorts, LogsPort, RunAccepted, RunEvent, SearchPort } from '../ports'
+import type { DesktopActions, KitError, KitPorts, LogsPort, RunAccepted, RunEvent, SearchPort } from '../ports'
 
 /** Which feature ports the host enabled; the rest stay absent so their UI areas are hidden. */
 export interface TauriPortsOptions {
   providers?: boolean
   search?: boolean
   chat?: boolean
-  /** The host passed a conversation store (`aether:chat-history`); needs `chat`. */
-  chatHistory?: boolean
+  /** Independent conversation storage capability (`aether:chat-history`). */
+  conversations?: boolean
   skills?: boolean
   mcpClient?: boolean
   mcpServer?: boolean
@@ -33,15 +33,17 @@ async function call<T>(command: string, args: Record<string, unknown> = {}): Pro
 }
 
 /** The plugin always registers the log commands, so desktop hosts always get `logs`. */
-export function createTauriPorts(options: TauriPortsOptions = {}): KitPorts & { logs: LogsPort } {
-  const ports: KitPorts & { logs: LogsPort } = {
+export function createTauriPorts(
+  options: TauriPortsOptions = {},
+): KitPorts & { logs: LogsPort; desktop: DesktopActions } {
+  const ports: KitPorts & { logs: LogsPort; desktop: DesktopActions } = {
     logs: {
       tail: (limit) => call('logs_tail', { limit }),
       ingest: (batch) => call('logs_ingest', { batch }),
-      openDir: () => call('logs_open_dir'),
       getLevel: () => call('logs_get_level'),
       setLevel: (level) => call('logs_set_level', { level }),
     },
+    desktop: { openLogsDirectory: () => call('logs_open_dir') },
   }
   if (options.providers) {
     ports.providers = {
@@ -106,34 +108,62 @@ export function createTauriPorts(options: TauriPortsOptions = {}): KitPorts & { 
   }
   if (options.chat) {
     ports.chat = {
-      // Resolves on acceptance; aborting afterwards calls chat_cancel and the run ends with `cancelled`.
-      run: async (request, onEvent, callOptions) => {
+      start: async (request, onEvent, callOptions) => {
         const signal = callOptions?.signal
         if (signal?.aborted) throw new KitClientError(CANCELLED)
-        const accepted = await call<RunAccepted>('chat_run', { request, onEvent: new Channel<RunEvent>(onEvent) })
-        const cancel = () => void call('chat_cancel', { runId: accepted.runId }).catch(() => undefined)
-        if (signal?.aborted) cancel()
-        else signal?.addEventListener('abort', cancel, { once: true })
-        return accepted
+        let accepted: RunAccepted | null = null
+        let ended = false
+        let requested = false
+        let dispatched = false
+        const cleanup = () => signal?.removeEventListener('abort', cancel)
+        const dispatchCancel = () => {
+          if (!accepted || ended || dispatched) return
+          dispatched = true
+          void call('chat_cancel', { runId: accepted.runId }).catch(() => undefined)
+        }
+        const cancel = () => {
+          requested = true
+          dispatchCancel()
+        }
+        signal?.addEventListener('abort', cancel, { once: true })
+        const channel = new Channel<RunEvent>((event) => {
+          if (ended) return
+          if (event.kind === 'end') {
+            ended = true
+            cleanup()
+          }
+          onEvent(event)
+        })
+        try {
+          accepted = await call<RunAccepted>('chat_run', { request, onEvent: channel })
+          if (requested || signal?.aborted) dispatchCancel()
+          return accepted
+        } catch (error) {
+          ended = true
+          cleanup()
+          throw error
+        }
       },
+      cancel: (runId) => call('chat_cancel', { runId }),
+      getSnapshot: (runId) => call('chat_snapshot', { runId }),
       approve: async (runId, callId, allow) => {
         await call('chat_approve', { runId, callId, allow })
       },
     }
-    if (options.chatHistory) {
-      ports.chat.history = {
-        list: (scope) => call('chat_conversations', { scope: scope ?? null }),
-        get: (id) => call('chat_conversation', { id }),
-        remove: async (id) => {
-          await call('chat_delete', { id })
-        },
-        rename: (id, title) => call('chat_rename', { id, title }),
-        editTurn: (conversationId, turnId, text, expectedText) =>
-          call('chat_edit_turn', { conversationId, turnId, text, expectedText }),
-        removeTurn: (conversationId, turnId) => call('chat_remove_turn', { conversationId, turnId }),
-        fork: (conversationId, turnId) => call('chat_fork', { conversationId, turnId }),
-        selectTurn: (conversationId, turnId) => call('chat_select_turn', { conversationId, turnId }),
-      }
+  }
+  if (options.conversations) {
+    ports.conversations = {
+      list: (scope) => call('chat_conversations', { scope: scope ?? null }),
+      get: (id) => call('chat_conversation', { id }),
+      remove: async (id) => {
+        await call('chat_delete', { id })
+      },
+      rename: (id, title) => call('chat_rename', { id, title }),
+      editTurn: (conversationId, turnId, text, expectedText) =>
+        call('chat_edit_turn', { conversationId, turnId, text, expectedText }),
+      removeTurn: (conversationId, turnId) => call('chat_remove_turn', { conversationId, turnId }),
+      fork: (conversationId, turnId) => call('chat_fork', { conversationId, turnId }),
+      selectTurn: (conversationId, turnId) => call('chat_select_turn', { conversationId, turnId }),
     }
   }
   if (options.skills) {

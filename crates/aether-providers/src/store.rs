@@ -5,7 +5,6 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use aether_support::connection::RESERVED_HEADERS;
 use aether_support::db::{self, Migration};
 use aether_support::id::new_id;
 use aether_support::mask::mask_secret;
@@ -14,11 +13,14 @@ use aether_support::{Connection, KitError, ModelPricing, Protocol, ReasoningConf
 use rusqlite::{Connection as Db, OptionalExtension, params};
 use zeroize::Zeroizing;
 
+use crate::connection::{self, ConnectionSnapshot, EndpointSnapshot};
 use crate::dto::{
     Endpoint, EndpointKey, EndpointKeySave, EndpointSave, KeyStrategy, Model, ModelFilter,
-    ModelOption, ModelRef, ModelType, Provider, ProviderSave, TypeSource,
+    ModelOption, ModelRef, ModelType, ProbeResult, ProbeTarget, Provider, ProviderSave, TypeSource,
 };
+use crate::probe::{self, ProbeInput};
 use crate::{api_base, infer_reasoning};
+use tokio_util::sync::CancellationToken;
 
 const MIGRATIONS: &[Migration] = &[
 Migration {
@@ -60,19 +62,6 @@ const MAX_BASE_URL: usize = 2048;
 const MAX_KEYS: i64 = 16;
 const MAX_LABEL_CHARS: usize = 40;
 const MAX_KEY_BYTES: usize = 4096;
-const MAX_HEADERS: usize = 20;
-const MAX_HEADER_VALUE_CHARS: usize = 2048;
-
-/// One stored endpoint as requests need it: the stored (not normalised) base URL,
-/// protocol, rotated plaintext keys, custom headers and normalised image base URL.
-pub(crate) struct EndpointRow {
-    pub(crate) base_url: String,
-    pub(crate) protocol: Protocol,
-    pub(crate) keys: Vec<Zeroizing<String>>,
-    pub(crate) headers: Vec<(String, String)>,
-    pub(crate) image_base_url: Option<String>,
-    pub(crate) image_edit_base_url: Option<String>,
-}
 
 /// Provider configuration stored in `<root>/providers.db`.
 pub struct Store {
@@ -506,21 +495,21 @@ ALTER TABLE models ADD COLUMN pricing TEXT;",
         Ok(options)
     }
 
-    /// The connection snapshot for one stored model. `base_url` is [`api_base`] of the
-    /// stored address; `api_keys` are the enabled keys in this request's rotation order.
+    /// Reads the raw endpoint and effective model metadata, reserving one fixed key order.
+    /// Reasoning is resolved here, including an explicit user disable.
     ///
     /// # Errors
     /// `not_found{entity:"model"}`; `needs_config{reason:"missing_url"}` for an empty address;
     /// `needs_config{reason:"key_unreadable"}` when an enabled key cannot be decrypted;
     /// `internal` when SQLite fails.
-    pub fn resolve(&self, model: &ModelRef) -> Result<Connection, KitError> {
+    pub fn snapshot(&self, model: &ModelRef) -> Result<ConnectionSnapshot, KitError> {
         let db = self.lock()?;
         let row = db.query_row(
-            "SELECT m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, m.can_vision, m.pricing
+            "SELECT m.model_type, m.context_window, m.max_output, m.supports_tools, m.reasoning, m.native_web_search, m.can_vision, m.pricing, m.type_source, m.name, m.group_name
              FROM models m JOIN endpoints e ON e.id = m.endpoint_id JOIN providers p ON p.id = e.provider_id
              WHERE m.endpoint_id = ?1 AND m.model_id = ?2 AND p.enabled = 1",
             params![model.endpoint_id, model.model_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<u32>>(1)?, row.get::<_, Option<u32>>(2)?, row.get::<_, Option<bool>>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, bool>(5)?, row.get::<_, bool>(6)?, row.get::<_, Option<String>>(7)?)),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<u32>>(1)?, row.get::<_, Option<u32>>(2)?, row.get::<_, Option<bool>>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, bool>(5)?, row.get::<_, bool>(6)?, row.get::<_, Option<String>>(7)?, row.get::<_, String>(8)?, row.get::<_, Option<String>>(9)?, row.get::<_, Option<String>>(10)?)),
         ).optional()?;
         let (
             model_type,
@@ -531,8 +520,11 @@ ALTER TABLE models ADD COLUMN pricing TEXT;",
             native_web_search,
             can_vision,
             pricing,
+            type_source,
+            name,
+            group_name,
         ) = row.ok_or_else(|| KitError::not_found("model"))?;
-        let row = self.endpoint_row(&db, &model.endpoint_id)?;
+        let mut row = self.read_endpoint(&db, &model.endpoint_id)?;
         if row.base_url.trim().is_empty() {
             return Err(KitError::needs_config("missing_url"));
         }
@@ -547,12 +539,11 @@ ALTER TABLE models ADD COLUMN pricing TEXT;",
             max_output,
         )?;
         let pricing = read_pricing(pricing.as_deref())?;
-        Ok(Connection {
-            base_url: api_base(&row.base_url),
-            protocol,
-            api_keys: row.keys,
-            model_id: Some(model.model_id.clone()),
-            endpoint_id: Some(model.endpoint_id.clone()),
+        connection::validate_endpoint(&row)?;
+        let metadata = Model {
+            id: model.model_id.clone(),
+            model_type,
+            type_source: TypeSource::parse(&type_source).ok_or_else(|| corrupt("type_source"))?,
             context_window,
             max_output,
             supports_tools,
@@ -560,59 +551,98 @@ ALTER TABLE models ADD COLUMN pricing TEXT;",
             native_web_search,
             can_vision,
             pricing,
-            headers: row.headers,
-            image_base_url: row.image_base_url,
-            image_edit_base_url: row.image_edit_base_url,
+            name,
+            group_name,
+        };
+        connection::validate_model(&row, &metadata)?;
+        row.api_keys = self.keys(&db, &model.endpoint_id)?;
+        Ok(ConnectionSnapshot {
+            endpoint: row,
+            model: Some(metadata),
         })
     }
 
-    /// The connection snapshot of an endpoint without a model.
+    /// Reads a model snapshot once, then prepares its connection without further rotation.
     /// # Errors
-    /// Reports missing endpoints, unreadable credentials or storage failures.
-    pub fn endpoint_connection(&self, endpoint_id: &str) -> Result<Connection, KitError> {
-        let row = self.endpoint(endpoint_id)?;
-        Ok(Connection {
-            base_url: api_base(&row.base_url),
-            protocol: row.protocol,
-            api_keys: row.keys,
-            model_id: None,
-            endpoint_id: Some(endpoint_id.to_owned()),
-            context_window: None,
-            max_output: None,
-            supports_tools: None,
-            reasoning: None,
-            native_web_search: false,
-            can_vision: false,
-            pricing: None,
-            headers: row.headers,
-            image_base_url: row.image_base_url,
-            image_edit_base_url: row.image_edit_base_url,
-        })
+    /// Reports invalid model configuration, missing models, unreadable keys or storage errors.
+    pub fn resolve(&self, model: &ModelRef) -> Result<Connection, KitError> {
+        connection::prepare(self.snapshot(model)?)
     }
 
-    /// One stored endpoint with its rotated keys.
-    pub(crate) fn endpoint(&self, endpoint_id: &str) -> Result<EndpointRow, KitError> {
+    /// Reads one raw stored endpoint and reserves its key order once.
+    /// # Errors
+    /// Reports missing endpoints, unreadable credentials or storage errors.
+    pub fn endpoint_snapshot(&self, endpoint_id: &str) -> Result<EndpointSnapshot, KitError> {
         self.endpoint_row(&*self.lock()?, endpoint_id)
     }
 
-    /// Custom headers of one endpoint, without touching its keys.
-    pub(crate) fn endpoint_headers(
-        &self,
-        endpoint_id: &str,
-    ) -> Result<Vec<(String, String)>, KitError> {
-        let json: String = self
-            .lock()?
-            .query_row(
-                "SELECT headers FROM endpoints WHERE id = ?1",
-                [endpoint_id],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or_else(|| KitError::not_found("endpoint"))?;
-        Ok(parse_headers(&json)?.into_iter().collect())
+    /// Prepares an endpoint without requiring a selected model.
+    /// # Errors
+    /// Reports invalid configuration, missing endpoints, unreadable keys or storage errors.
+    pub fn endpoint_connection(&self, endpoint_id: &str) -> Result<Connection, KitError> {
+        connection::prepare(ConnectionSnapshot {
+            endpoint: self.endpoint_snapshot(endpoint_id)?,
+            model: None,
+        })
     }
 
-    fn endpoint_row(&self, db: &Db, endpoint_id: &str) -> Result<EndpointRow, KitError> {
+    /// Probes saved configuration or a draft through the independent probe capability.
+    /// # Errors
+    /// Reports invalid input, missing endpoints/keys, unreadable credentials or cancellation.
+    pub async fn probe(
+        &self,
+        target: ProbeTarget,
+        cancel: &CancellationToken,
+    ) -> Result<ProbeResult, KitError> {
+        let input = {
+            let db = self.lock()?;
+            let endpoint = match target {
+                ProbeTarget::Saved { endpoint_id } => self.endpoint_row(&db, &endpoint_id)?,
+                ProbeTarget::Draft {
+                    base_url,
+                    protocol,
+                    endpoint_id,
+                    key_id,
+                } => {
+                    connection::validate_url("url", &base_url)?;
+                    match (endpoint_id, key_id) {
+                        (Some(endpoint_id), key_id) => {
+                            let mut endpoint = self.read_endpoint(&db, &endpoint_id)?;
+                            endpoint.base_url = base_url;
+                            endpoint.protocol = protocol;
+                            connection::validate_endpoint(&endpoint)?;
+                            endpoint.api_keys = if let Some(key_id) = key_id {
+                                vec![self.endpoint_key(&db, &endpoint_id, &key_id)?]
+                            } else {
+                                self.keys(&db, &endpoint_id)?
+                            };
+                            endpoint
+                        }
+                        (None, Some(_)) => return Err(KitError::not_found("key")),
+                        (None, None) => EndpointSnapshot {
+                            endpoint_id: None,
+                            base_url,
+                            protocol,
+                            api_keys: Vec::new(),
+                            headers: Vec::new(),
+                            image_base_url: None,
+                            image_edit_base_url: None,
+                        },
+                    }
+                }
+            };
+            ProbeInput {
+                base_url: endpoint.base_url,
+                protocol: endpoint.protocol,
+                api_keys: endpoint.api_keys,
+                headers: endpoint.headers,
+                policy: aether_support::net::AddressPolicy::default(),
+            }
+        };
+        probe::probe(input, cancel).await
+    }
+
+    fn read_endpoint(&self, db: &Db, endpoint_id: &str) -> Result<EndpointSnapshot, KitError> {
         let row = db
             .query_row(
                 "SELECT base_url, protocol, headers, image_base_url, image_edit_base_url FROM endpoints WHERE id = ?1",
@@ -630,24 +660,32 @@ ALTER TABLE models ADD COLUMN pricing TEXT;",
             .optional()?;
         let (base_url, protocol, headers, image_base_url, image_edit_base_url) =
             row.ok_or_else(|| KitError::not_found("endpoint"))?;
-        Ok(EndpointRow {
+        Ok(EndpointSnapshot {
+            endpoint_id: Some(endpoint_id.to_owned()),
             protocol: parse_protocol(&protocol)?,
-            keys: self.keys(db, endpoint_id)?,
+            api_keys: Vec::new(),
             headers: parse_headers(&headers)?.into_iter().collect(),
-            image_base_url: image_base_url.as_deref().map(api_base),
-            image_edit_base_url: image_edit_base_url.as_deref().map(api_base),
+            image_base_url,
+            image_edit_base_url,
             base_url,
         })
     }
 
+    fn endpoint_row(&self, db: &Db, endpoint_id: &str) -> Result<EndpointSnapshot, KitError> {
+        let mut endpoint = self.read_endpoint(db, endpoint_id)?;
+        connection::validate_endpoint(&endpoint)?;
+        endpoint.api_keys = self.keys(db, endpoint_id)?;
+        Ok(endpoint)
+    }
+
     /// One stored key of `endpoint_id`, for a probe of that key alone.
-    pub(crate) fn endpoint_key(
+    fn endpoint_key(
         &self,
+        db: &Db,
         endpoint_id: &str,
         key_id: &str,
     ) -> Result<Zeroizing<String>, KitError> {
-        let cipher: Vec<u8> = self
-            .lock()?
+        let cipher: Vec<u8> = db
             .query_row(
                 "SELECT key_ciphertext FROM endpoint_keys WHERE id = ?1 AND endpoint_id = ?2",
                 [key_id, endpoint_id],
@@ -850,28 +888,11 @@ fn too_long(field: &str, limit: usize) -> KitError {
 }
 
 fn validate_headers(headers: &BTreeMap<String, String>) -> Result<(), KitError> {
-    if headers.len() > MAX_HEADERS {
-        return Err(KitError::bad_request("headers", "too_many"));
-    }
-    let mut names = HashSet::new();
-    for (name, value) in headers {
-        let name = name.trim().to_ascii_lowercase();
-        let token = (1..=100).contains(&name.len())
-            && name
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+.^_`|~-".contains(&b));
-        if !token
-            || !names.insert(name.clone())
-            || value.chars().count() > MAX_HEADER_VALUE_CHARS
-            || value.contains(['\r', '\n'])
-        {
-            return Err(KitError::bad_request("headers", "invalid"));
-        }
-        if RESERVED_HEADERS.contains(&name.as_str()) {
-            return Err(KitError::bad_request("headers", "reserved"));
-        }
-    }
-    Ok(())
+    connection::validate_headers(
+        headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    )
 }
 
 fn write_endpoint(
@@ -1570,6 +1591,41 @@ mod tests {
     }
 
     #[test]
+    fn explicit_snapshots_reserve_once_and_survive_configuration_deletion() {
+        let (_dir, store) = store();
+        let (provider, endpoint_id) = saved(&store);
+        for key in ["first", "second"] {
+            save_key(&store, json!({ "endpointId": endpoint_id, "key": key })).unwrap();
+        }
+        let reference = ModelRef {
+            endpoint_id: endpoint_id.clone(),
+            model_id: "m1".into(),
+        };
+        let snapshot = store.snapshot(&reference).unwrap();
+        assert_eq!(snapshot.endpoint.api_keys[0].as_str(), "first");
+        assert_eq!(snapshot.model.as_ref().unwrap().id, "m1");
+        let next = store.endpoint_snapshot(&endpoint_id).unwrap();
+        assert_eq!(next.api_keys[0].as_str(), "second");
+        let prepared = connection::prepare(snapshot).unwrap();
+        assert_eq!(prepared.api_keys[0].as_str(), "first");
+        assert_eq!(
+            store.endpoint_snapshot(&endpoint_id).unwrap().api_keys[0].as_str(),
+            "first"
+        );
+        store.delete(&provider).unwrap();
+        let prepared = connection::prepare(ConnectionSnapshot {
+            endpoint: next,
+            model: None,
+        })
+        .unwrap();
+        assert_eq!(prepared.api_keys[0].as_str(), "second");
+        assert_eq!(
+            store.snapshot(&reference).err().unwrap().details().entity(),
+            Some("model")
+        );
+    }
+
+    #[test]
     fn invalid_keys_are_rejected() {
         let (_dir, store) = store();
         let (_, ep) = saved(&store);
@@ -1604,6 +1660,8 @@ mod tests {
                 reason(&error),
                 (KitErrorCode::BadRequest, Some(field), Some(why))
             );
+            assert_eq!(store.reveal_key(&id).unwrap().as_str(), KEY);
+            assert_eq!(keys_of(&store, &ep), [KEY]);
         }
         // Re-saving a key's own value is not a duplicate of itself.
         save_key(&store, json!({ "endpointId": ep, "id": id, "key": KEY })).unwrap();

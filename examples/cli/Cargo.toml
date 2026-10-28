@@ -8,7 +8,7 @@ publish.workspace = true
 async-trait.workspace = true
 aether-observability.workspace = true
 aether-providers.workspace = true
-aether-chat.workspace = true
+aether-runtime = { workspace = true, features = ["runs"] }
 serde_json.workspace = true
 tokio.workspace = true
 

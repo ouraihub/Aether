@@ -29,10 +29,49 @@ const noHardcodedColor = {
 const UI_SOURCE = ['packages/ui/src/**/*.{ts,svelte}']
 
 export default [
-  { ignores: ['**/node_modules/**', '**/target/**', '**/dist/**', '**/*.d.ts', 'packages/ui/src/ports/generated/**'] },
+  {
+    ignores: [
+      '**/node_modules/**',
+      '**/target/**',
+      '**/dist/**',
+      '**/*.d.ts',
+      'packages/contracts/src/generated/**',
+      'packages/contracts/src/validators.js',
+      'packages/contracts/src/validation.ts',
+      'packages/contracts/src/index.ts',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...svelte.configs.recommended,
+  {
+    files: [
+      'packages/core/src/**/*.ts',
+      'packages/core/tests/**/*.ts',
+      'packages/worker/src/**/*.ts',
+      'packages/contracts/src/**/*.ts',
+    ],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node },
+      parserOptions: {
+        project: [
+          './packages/core/tsconfig.json',
+          './packages/worker/tsconfig.json',
+          './packages/contracts/tsconfig.json',
+        ],
+      },
+    },
+    rules: {
+      'no-console': 'error',
+      '@typescript-eslint/no-floating-promises': [
+        'error',
+        { allowForKnownSafeCalls: [{ from: 'package', name: ['test', 'describe', 'it'], package: 'node:test' }] },
+      ],
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'error',
+      '@typescript-eslint/consistent-type-imports': 'error',
+    },
+  },
   {
     files: UI_SOURCE,
     languageOptions: {

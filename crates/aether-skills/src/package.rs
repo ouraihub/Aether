@@ -14,9 +14,9 @@ use ts_rs::TS;
 use zip::ZipArchive;
 use zip::result::ZipError;
 
+use crate::content::hex;
 use crate::dto::SkillFileKind;
 use crate::frontmatter::{self, SkillFile};
-use crate::store::hex;
 
 const MAX_ZIP: usize = 5 * 1024 * 1024;
 /// ZIP entries, or files and directories visited when importing a directory.

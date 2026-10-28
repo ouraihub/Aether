@@ -342,6 +342,60 @@ async fn unauthorized_keys_fail_over_and_key_id_pins_one() {
     };
     probe(&store, pinned).await;
     assert_eq!(auth(&seen.lock().await)[2..], ["k2"]);
+    // Only Saved consumed a rotation reservation; probing a pinned key did not.
+    assert_eq!(
+        store.endpoint_snapshot(&endpoint).unwrap().api_keys[0].as_str(),
+        "k2"
+    );
+    let saved = store
+        .save(
+            serde_json::from_value(serde_json::json!({
+                "name": "Other", "endpoints": [{
+                    "slug": "other", "baseUrl": base, "protocol": "openai-chat", "models": []
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    let other = saved
+        .iter()
+        .find(|provider| provider.name == "Other")
+        .unwrap()
+        .endpoints[0]
+        .id
+        .clone();
+    assert_ne!(other, endpoint);
+    let saved = store
+        .save_key(
+            serde_json::from_value(serde_json::json!({
+                "endpointId": other, "key": "foreign"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    let other_key = saved
+        .iter()
+        .flat_map(|provider| &provider.endpoints)
+        .find(|saved| saved.id == other)
+        .unwrap()
+        .keys[0]
+        .id
+        .clone();
+    let wrong_owner = ProbeTarget::Draft {
+        base_url: base.clone(),
+        protocol: Protocol::OpenaiChat,
+        endpoint_id: Some(endpoint.clone()),
+        key_id: Some(other_key),
+    };
+    assert_eq!(
+        store
+            .probe(wrong_owner, &CancellationToken::new())
+            .await
+            .unwrap_err()
+            .details()
+            .entity(),
+        Some("key")
+    );
     let foreign = ProbeTarget::Draft {
         base_url: base,
         protocol: Protocol::OpenaiChat,

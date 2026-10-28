@@ -3,11 +3,11 @@
 
 use std::sync::{Mutex, PoisonError};
 
-use serde_json::json;
-use tauri_plugin_aether::{
+use aether_runtime::{
     Approval, CancellationToken, HostTool, KitHost, PermissionMode, RunRequest, ToolCall,
     ToolEffect, ToolError, ToolOutput, ToolSource, ToolSpec,
 };
+use serde_json::json;
 
 /// The host: every other `KitHost` method keeps its default.
 #[derive(Default)]

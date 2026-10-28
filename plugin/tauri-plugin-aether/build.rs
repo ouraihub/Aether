@@ -19,12 +19,12 @@ const FEATURES: &[(&str, &str, &[&str])] = &[
     (
         "chat",
         "CARGO_FEATURE_CHAT",
-        &["chat_run", "chat_cancel", "chat_approve"],
+        &["chat_run", "chat_cancel", "chat_approve", "chat_snapshot"],
     ),
-    // Granted by hosts that pass a conversation store (docs/15 §5).
+    // Independent history access does not require run IPC.
     (
         "chat-history",
-        "CARGO_FEATURE_CHAT",
+        "CARGO_FEATURE_CONVERSATIONS",
         &[
             "chat_conversations",
             "chat_conversation",

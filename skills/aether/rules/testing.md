@@ -22,6 +22,8 @@ Core crates use unit tests and local controlled upstreams. Use loopback HTTP/MCP
 
 Use Vitest, jsdom, Testing Library, and `createFakePorts()`. Instantiate state classes with fake ports. Test components through user-visible interaction and accessibility. Do not import the Tauri adapter in component tests unless the adapter itself is the subject.
 
+Core/Worker packages also have Node test-runner checks and shared contract fixtures; inspect their package scripts rather than assuming every TS test uses jsdom. `packages/contracts/scripts/generate.mjs --check` validates generated index/validators, while root DTO checks compare Rust bindings against `packages/contracts/src/generated`.
+
 ## Repository gates
 
 Run the smallest relevant checks first, then the repository gates required by the changed surface:
@@ -43,3 +45,5 @@ On Windows, use the repository's MSVC wrapper when the project requires its pinn
 ## Smoke proof
 
 Tests are not the only proof. For changed integration behavior, launch the relevant example or use a controlled local service and observe the consumer-visible result: the window opens, the command is authorized, streaming reaches the UI, cancellation closes the upstream, or a denied tool is not executed.
+
+For Worker integration use actual workerd/Wrangler D1, R2 and per-run DO bindings plus a real model for model/tool proof. HTTP local AI smoke does not prove HTTPS OAuth: verify PKCE/consent/scopes through the HTTPS public endpoint separately. Exercise actual Worker restart and interrupted reservation recovery without replay; unit-level reconstruction alone is not a real restart. Browser UI proof, platform security, full CI and product migrations are separate evidence. Record only observed outcomes in docs90; do not promote historical Native test results to current verification.

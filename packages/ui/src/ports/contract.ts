@@ -1,38 +1,41 @@
 // Port interfaces and KitClientError (docs/16 §2, docs/04 §3.2). Pure TS: no Tauri imports.
-import type { Conversation } from './generated/Conversation'
-import type { ConversationSummary } from './generated/ConversationSummary'
-import type { IngestBatch } from './generated/IngestBatch'
-import type { IngestReceipt } from './generated/IngestReceipt'
-import type { IssuedToken } from './generated/IssuedToken'
-import type { KitError } from './generated/KitError'
-import type { KitErrorCode } from './generated/KitErrorCode'
-import type { Details } from './generated/Details'
-import type { EndpointKeySave } from './generated/EndpointKeySave'
-import type { LogEntry } from './generated/LogEntry'
-import type { LogLevel } from './generated/LogLevel'
-import type { LogStatus } from './generated/LogStatus'
-import type { ManualSave } from './generated/ManualSave'
-import type { Approval } from './generated/Approval'
-import type { ModelFilter } from './generated/ModelFilter'
-import type { ModelOption } from './generated/ModelOption'
-import type { ProbeResult } from './generated/ProbeResult'
-import type { Preview } from './generated/Preview'
-import type { ProbeTarget } from './generated/ProbeTarget'
-import type { Provider } from './generated/Provider'
-import type { ProviderSave } from './generated/ProviderSave'
-import type { Protocol } from './generated/Protocol'
-import type { RunAccepted } from './generated/RunAccepted'
-import type { RunEvent } from './generated/RunEvent'
-import type { RunRequest } from './generated/RunRequest'
-import type { ServerDto } from './generated/ServerDto'
-import type { ServerSave } from './generated/ServerSave'
-import type { SkillDto } from './generated/SkillDto'
-import type { SkillMeta } from './generated/SkillMeta'
-import type { Source } from './generated/Source'
-import type { ScopeState } from './generated/ScopeState'
-import type { Status } from './generated/Status'
-import type { TokenRecord } from './generated/TokenRecord'
-import type { ToolDto } from './generated/ToolDto'
+import type {
+  Conversation,
+  ConversationSummary,
+  IngestBatch,
+  IngestReceipt,
+  IssuedToken,
+  KitError,
+  KitErrorCode,
+  Details,
+  EndpointKeySave,
+  LogEntry,
+  LogLevel,
+  LogStatus,
+  ManualSave,
+  Approval,
+  ModelFilter,
+  ModelOption,
+  ProbeResult,
+  Preview,
+  ProbeTarget,
+  Provider,
+  ProviderSave,
+  Protocol,
+  RunAccepted,
+  RunEvent,
+  RunRequest,
+  RunSnapshot,
+  ServerDto,
+  ServerSave,
+  SkillDto,
+  SkillMeta,
+  Source,
+  ScopeState,
+  Status,
+  TokenRecord,
+  ToolDto,
+} from '@ouraihub/aether-contracts'
 import type { SearchPort } from './search'
 
 export interface CallOptions {
@@ -42,10 +45,13 @@ export interface CallOptions {
 export interface LogsPort {
   tail(limit: number): Promise<LogEntry[]>
   ingest(batch: IngestBatch): Promise<IngestReceipt>
-  openDir(): Promise<void>
   getLevel(): Promise<LogStatus>
   /** Takes effect immediately and is persisted to `level.json`. */
   setLevel(level: LogLevel): Promise<LogStatus>
+}
+
+export interface DesktopActions {
+  openLogsDirectory(): Promise<void>
 }
 
 /** Host-supplied provider template, seeded once into the store disabled and keyless (docs/39). */
@@ -74,7 +80,7 @@ export interface ProvidersPort {
   revealKey(keyId: string, currentPassword?: string | null): Promise<string>
 }
 
-export interface ChatHistoryPort {
+export interface ConversationClient {
   list(scope?: string): Promise<ConversationSummary[]>
   get(id: string): Promise<Conversation>
   remove(id: string): Promise<void>
@@ -85,12 +91,12 @@ export interface ChatHistoryPort {
   selectTurn(conversationId: string, turnId: string): Promise<Conversation>
 }
 
-export interface ChatPort {
-  /** Resolves once the run is accepted; the outcome arrives as the single `end` event. */
-  run(request: RunRequest, onEvent: (event: RunEvent) => void, options?: CallOptions): Promise<RunAccepted>
+export interface RunClient {
+  /** Resolves once accepted; events may arrive before acceptance. */
+  start(request: RunRequest, onEvent: (event: RunEvent) => void, options?: CallOptions): Promise<RunAccepted>
+  cancel(runId: string): Promise<void>
   approve(runId: string, callId: string, allow: boolean): Promise<void>
-  /** Absent when the host passed no conversation store. */
-  history?: ChatHistoryPort
+  getSnapshot(runId: string): Promise<RunSnapshot>
 }
 
 export interface SkillsPort {
@@ -128,10 +134,11 @@ export interface McpServerPort {
 
 /** Ports the host declared; components skip the area of a missing port (docs/16 §2). */
 export interface KitPorts {
-  /** Absent on hosts without a local log file, such as a browser. */
   logs?: LogsPort
+  desktop?: DesktopActions
   providers?: ProvidersPort
-  chat?: ChatPort
+  chat?: RunClient
+  conversations?: ConversationClient
   search?: SearchPort
   skills?: SkillsPort
   mcpClient?: McpClientPort

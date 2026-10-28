@@ -1,4 +1,4 @@
-//! Streamable HTTP transport (docs/13 §3). Hand-written on `aether_support::net` so every
+//! Streamable HTTP transport (docs/27 §4). Hand-written on `aether_support::net` so every
 //! request goes through the address policy and the no-redirect client.
 
 use std::time::Duration;
@@ -126,7 +126,7 @@ impl HttpLink {
             serde_json::from_slice(&body)
                 .ok()
                 .and_then(|message| find(message, id))
-                .ok_or_else(|| RpcError::Failed(invalid_response()))
+                .ok_or_else(|| RpcError::Unknown(invalid_response()))
         }
     }
 

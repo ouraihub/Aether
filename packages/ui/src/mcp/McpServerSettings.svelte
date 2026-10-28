@@ -1,5 +1,6 @@
 <script lang="ts">
   // External MCP server settings (docs/16 §4.4): status, start/stop, port, scope switches, tokens.
+  import { onDestroy } from 'svelte'
   import { Alert, AlertDescription, AlertTitle } from '#lib/components/ui/alert/index.js'
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Field from '#lib/components/ui/field/index.js'
@@ -8,6 +9,8 @@
   import { getKitContext } from '../context'
   import { isKitClientError } from '../ports'
   import type { IssuedToken, ScopeState, Status, TokenRecord } from '../ports'
+  import { createClientSession } from '../session'
+  import { buildClaudePosixCommand, buildMcpJsonConfig } from './config'
 
   /** Server key used in the copied client configs. */
   let { serverName = 'aether' }: { serverName?: string } = $props()
@@ -24,6 +27,48 @@
   let tokenScopes = $state<string[]>([])
   let issued = $state<IssuedToken | null>(null)
   let busy = $state(false)
+  let issuing = $state(false)
+  const tokenSession = createClientSession()
+  let tokenRevision = 0
+
+  function clearIssued() {
+    tokenSession.invalidate()
+    issued = null
+    issuing = false
+  }
+
+  $effect(() => {
+    void serverName
+    clearIssued()
+    tokenName = ''
+    tokenScopes = []
+    tokenRevision++
+  })
+
+  onDestroy(() => {
+    clearIssued()
+    tokenName = ''
+    tokenScopes = []
+  })
+
+  function hasHttpUrl(value: string | undefined): value is string {
+    if (!value?.trim()) return false
+    try {
+      const url = new URL(value)
+      return url.protocol === 'http:' || url.protocol === 'https:'
+    } catch {
+      return false
+    }
+  }
+
+  // JSON accepts dynamic keys; Claude CLI names must also satisfy its naming rules.
+  const configInput = $derived.by(() => {
+    const url = status?.url
+    const token = issued?.token
+    if (!hasHttpUrl(url) || !serverName.trim() || !token?.trim()) return null
+    return { serverName, url, token }
+  })
+  const claudeNameValid = $derived(/^[A-Za-z0-9_-]+$/.test(serverName))
 
   // Actions only render when the port exists; the throw marks a host wiring bug.
   function need() {
@@ -49,6 +94,7 @@
   }
 
   function setStatus(next: Status) {
+    if (status && status.url !== next.url) clearIssued()
     status = next
     port = String(next.port)
   }
@@ -85,16 +131,36 @@
   }
 
   function toggleTokenScope(id: string, on: boolean) {
+    tokenRevision++
     tokenScopes = on ? [...tokenScopes, id] : tokenScopes.filter((s) => s !== id)
   }
 
-  const issue = () =>
-    act(async () => {
-      issued = await need().issueToken(tokenName, tokenScopes)
-      tokenName = ''
-      tokenScopes = []
-      tokens = await need().tokens()
-    })
+  async function issue() {
+    clearIssued()
+    const token = tokenSession.capture()
+    const targetName = serverName
+    const targetUrl = status?.url
+    const revision = tokenRevision
+    const name = tokenName
+    const grants = [...tokenScopes]
+    const current = () => tokenSession.isCurrent(token) && targetName === serverName && targetUrl === status?.url
+    issuing = true
+    try {
+      const next = await need().issueToken(name, grants)
+      if (!current()) return
+      issued = next
+      if (revision === tokenRevision) {
+        tokenName = ''
+        tokenScopes = []
+      }
+      const nextTokens = await need().tokens()
+      if (current()) tokens = nextTokens
+    } catch (error) {
+      if (current()) fail(error)
+    } finally {
+      if (current()) issuing = false
+    }
+  }
 
   const revoke = (token: TokenRecord) =>
     act(async () => {
@@ -104,25 +170,27 @@
         danger: true,
       })
       if (!ok) return
+      if (issued?.id === token.id) clearIssued()
       await need().revokeToken(token.id)
       tokens = await need().tokens()
     })
 
-  function claudeConfig(token: string): string {
-    return `claude mcp add --transport http ${serverName} ${status?.url ?? ''} --header "Authorization: Bearer ${token}"`
-  }
-
-  function jsonConfig(token: string): string {
-    const entry = { type: 'http', url: status?.url ?? '', headers: { Authorization: `Bearer ${token}` } }
-    return JSON.stringify({ mcpServers: { [serverName]: entry } }, null, 2)
-  }
-
-  async function copy(text: string) {
+  async function copy(format: 'json' | 'posix') {
+    const input = configInput
+    if (!input || (format === 'posix' && !claudeNameValid)) return
+    const token = tokenSession.capture()
+    const current = () =>
+      tokenSession.isCurrent(token) &&
+      serverName === input.serverName &&
+      status?.url === input.url &&
+      issued?.token === input.token
+    const text = format === 'json' ? buildMcpJsonConfig(input) : buildClaudePosixCommand(input)
+    if (!current()) return
     try {
       await navigator.clipboard.writeText(text)
-      notify.toast('success', t('mcp.server.copied'))
+      if (current()) notify.toast('success', t('mcp.server.copied'))
     } catch (error) {
-      fail(error)
+      if (current()) fail(error)
     }
   }
 
@@ -140,14 +208,22 @@
             · {t('mcp.server.toolCount', { count: status.toolCount })}
           </Field.Description>
         </Field.Content>
-        <Button disabled={busy} variant={status.running ? 'outline' : 'default'} onclick={() => void toggleRunning()}>
+        <Button
+          disabled={busy || issuing}
+          variant={status.running ? 'outline' : 'default'}
+          onclick={() => void toggleRunning()}
+        >
           {status.running ? t('mcp.server.stop') : t('mcp.server.start')}
         </Button>
       </Field.Field>
       <Field.Field orientation="horizontal">
         <Field.Label for="kit-mcp-port">{t('mcp.server.port')}</Field.Label>
         <Input id="kit-mcp-port" class="w-32" type="number" min="1024" max="65535" bind:value={port} />
-        <Button disabled={busy || port === String(status.port)} variant="outline" onclick={() => void savePort()}>
+        <Button
+          disabled={busy || issuing || port === String(status.port)}
+          variant="outline"
+          onclick={() => void savePort()}
+        >
           {t('mcp.server.savePort')}
         </Button>
       </Field.Field>
@@ -161,9 +237,8 @@
           <Field.Field orientation="horizontal">
             <Switch
               id={`kit-mcp-scope-${scope.id}`}
-              checked={scope.enabled}
-              disabled={busy}
-              onCheckedChange={(on) => void toggleScope(scope, on)}
+              bind:checked={() => scope.enabled, (on) => void toggleScope(scope, on)}
+              disabled={busy || issuing}
             />
             <Field.Label for={`kit-mcp-scope-${scope.id}`}>{t(scope.labelKey)} ({scope.id})</Field.Label>
           </Field.Field>
@@ -176,7 +251,7 @@
       <Field.Group>
         <Field.Field>
           <Field.Label for="kit-mcp-token-name">{t('mcp.server.tokenName')}</Field.Label>
-          <Input id="kit-mcp-token-name" bind:value={tokenName} maxlength={200} />
+          <Input id="kit-mcp-token-name" bind:value={tokenName} maxlength={200} oninput={() => tokenRevision++} />
         </Field.Field>
         {#each scopes as scope (scope.id)}
           <Field.Field orientation="horizontal">
@@ -189,7 +264,10 @@
           </Field.Field>
         {/each}
         <Field.Field orientation="horizontal">
-          <Button disabled={busy || tokenName.trim() === '' || tokenScopes.length === 0} onclick={() => void issue()}>
+          <Button
+            disabled={busy || issuing || tokenName.trim() === '' || tokenScopes.length === 0}
+            onclick={() => void issue()}
+          >
             {t('mcp.server.issue')}
           </Button>
         </Field.Field>
@@ -203,13 +281,18 @@
           <p>{t('mcp.server.issuedOnce')}</p>
           <code class="break-all">{issued.token}</code>
           <div class="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onclick={() => void copy(claudeConfig(issued?.token ?? ''))}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!configInput || !claudeNameValid}
+              onclick={() => void copy('posix')}
+            >
               {t('mcp.server.copyClaude')}
             </Button>
-            <Button size="sm" variant="outline" onclick={() => void copy(jsonConfig(issued?.token ?? ''))}>
+            <Button size="sm" variant="outline" disabled={!configInput} onclick={() => void copy('json')}>
               {t('mcp.server.copyJson')}
             </Button>
-            <Button size="sm" variant="ghost" onclick={() => (issued = null)}>{t('mcp.server.dismiss')}</Button>
+            <Button size="sm" variant="ghost" onclick={clearIssued}>{t('mcp.server.dismiss')}</Button>
           </div>
         </AlertDescription>
       </Alert>
@@ -230,7 +313,7 @@
               </span>
             </div>
             {#if token.revokedAt === null}
-              <Button size="sm" variant="destructive" disabled={busy} onclick={() => void revoke(token)}>
+              <Button size="sm" variant="destructive" disabled={busy || issuing} onclick={() => void revoke(token)}>
                 {t('mcp.server.revoke')}
               </Button>
             {:else}

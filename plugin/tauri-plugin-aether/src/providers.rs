@@ -18,10 +18,16 @@ pub(crate) struct Providers {
 }
 
 impl Providers {
-    pub(crate) fn new(store: Store) -> Self {
+    pub(crate) fn new(store: Arc<Store>) -> Self {
         Self {
-            store: Arc::new(store),
+            store,
             jobs: Mutex::default(),
+        }
+    }
+
+    pub(crate) fn cancel_all(&self) {
+        for cancel in self.jobs().values() {
+            cancel.cancel();
         }
     }
 

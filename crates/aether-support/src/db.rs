@@ -8,6 +8,11 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 use crate::error::{KitError, KitErrorCode};
+impl From<rusqlite::Error> for KitError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::internal(error)
+    }
+}
 
 /// One schema step. `version` is the `user_version` after `sql` ran.
 #[derive(Debug, Clone, Copy)]
@@ -202,6 +207,27 @@ mod tests {
             .query_row("SELECT v FROM a", [], |row| row.get(0))
             .unwrap();
         assert_eq!(v, "v1 row");
+        drop(bak);
+        drop(conn);
+        // Restore the last known-good file, then reopen through the same migration boundary.
+        let restored = dir.path().join("restored.db");
+        fs::copy(backup_path(&path, 1), &restored).unwrap();
+        let recovered = open(&restored, &[STEP1, STEP2]).unwrap();
+        assert_eq!(version(&recovered), 2);
+        assert!(has_table(&recovered, "b"));
+        let value: String = recovered
+            .query_row("SELECT v FROM a", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, "v1 row");
+        recovered
+            .execute("INSERT INTO a (v) VALUES ('after restore')", [])
+            .unwrap();
+        drop(recovered);
+        let reopened = open(&restored, &[STEP1, STEP2]).unwrap();
+        let count: i64 = reopened
+            .query_row("SELECT count(*) FROM a", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
     }
 
     #[test]

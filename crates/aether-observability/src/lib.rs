@@ -4,6 +4,7 @@
 //!
 //! Design: `docs/10-详细设计-基础与可观测性.md` part 2.
 
+mod contract;
 mod ingest;
 mod tail;
 mod writer;
@@ -28,6 +29,7 @@ use tracing_subscriber::reload;
 
 /// Re-exported so hosts do not depend on the private `aether-support` crate (docs/10 §1.1).
 pub use aether_support::paths::data_root;
+pub use contract::{DiagnosticLevel, LogStatus};
 pub use ingest::{IngestBatch, IngestEntry, IngestLevel, IngestReceipt};
 pub use tail::LogEntry;
 /// Re-exported so hosts can name levels without depending on `tracing` directly.
@@ -145,6 +147,15 @@ fn build(
 }
 
 impl LogHandle {
+    /// Returns the public diagnostic state without exposing the log file path.
+    #[must_use]
+    pub fn status(&self) -> LogStatus {
+        LogStatus {
+            level: self.level().into(),
+            available: self.available(),
+        }
+    }
+
     /// Applies `level` immediately and persists it to `logs/level.json`.
     ///
     /// # Errors

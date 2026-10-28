@@ -1,16 +1,22 @@
-//! Tauri 接入层：按 feature 注册命令与权限，模块间组合只发生在这里。
-//!
-//! 设计：`docs/15-详细设计-接入层.md`。
+//! Tauri commands, ACL and lifecycle adapters for host-created application services.
 
+#[cfg(any(
+    feature = "chat",
+    feature = "conversations",
+    feature = "providers",
+    feature = "skills",
+    feature = "search",
+    feature = "mcp-client"
+))]
 use std::sync::Arc;
 
 use aether_observability::LogHandle;
+use aether_support::KitError;
 use tauri::plugin::TauriPlugin;
 use tauri::{Manager, Runtime};
 
-#[cfg(feature = "chat")]
-mod chat;
-mod host;
+#[cfg(feature = "conversations")]
+mod conversations;
 mod logs;
 #[cfg(feature = "mcp-client")]
 mod mcp_client;
@@ -18,51 +24,44 @@ mod mcp_client;
 mod mcp_server;
 #[cfg(feature = "providers")]
 mod providers;
+#[cfg(feature = "chat")]
+mod runs;
 #[cfg(feature = "search")]
 mod search;
 #[cfg(feature = "skills")]
 mod skills;
 #[cfg(test)]
 mod tests;
-#[cfg(feature = "chat")]
-mod tools;
 
-#[cfg(feature = "chat")]
-pub use aether_chat::{Budget, ConversationStore};
-#[cfg(feature = "chat")]
-pub use chat::ChatConfig;
-pub use host::*;
-
-#[cfg(feature = "chat")]
-type ChatParts = (ChatConfig, Option<Arc<dyn ConversationStore>>);
-
-/// Assembles the plugin from host-created instances (docs/15 §2).
+/// The host owns service construction and shares the same Arc with other consumers.
 pub struct Builder {
-    host: Arc<dyn KitHost>,
     logs: LogHandle,
     #[cfg(feature = "chat")]
-    chat: Option<ChatParts>,
+    runs: Option<Arc<aether_runtime::RunService>>,
+    #[cfg(feature = "conversations")]
+    conversations: Option<Arc<aether_runtime::conversations::ConversationService>>,
     #[cfg(feature = "mcp-client")]
-    mcp_client: Option<aether_mcp_client::Store>,
+    mcp_client: Option<Arc<aether_mcp_client::McpRuntime>>,
     #[cfg(feature = "mcp-server")]
     mcp_server: Option<aether_mcp_server::McpServer>,
     #[cfg(feature = "providers")]
-    providers: Option<aether_providers::Store>,
+    providers: Option<Arc<aether_providers::Store>>,
     #[cfg(feature = "skills")]
-    skills: Option<aether_skills::Store>,
+    skills: Option<Arc<aether_skills::Store>>,
     #[cfg(feature = "search")]
-    search: Option<aether_search::Store>,
+    search: Option<Arc<aether_search::Store>>,
 }
 
 impl Builder {
-    /// Starts a builder; `logs` comes from `aether_observability::init`.
+    /// Creates the transport adapter with an existing shared diagnostic log handle.
     #[must_use]
-    pub fn new(host: Arc<dyn KitHost>, logs: LogHandle) -> Self {
+    pub fn new(logs: LogHandle) -> Self {
         Self {
-            host,
             logs,
             #[cfg(feature = "chat")]
-            chat: None,
+            runs: None,
+            #[cfg(feature = "conversations")]
+            conversations: None,
             #[cfg(feature = "mcp-client")]
             mcp_client: None,
             #[cfg(feature = "mcp-server")]
@@ -76,25 +75,34 @@ impl Builder {
         }
     }
 
-    /// Chat runs (feature `chat`, needs `providers`). `store: None` runs without history:
-    /// no conversation id, and the `aether:chat-history` commands are not registered.
+    /// Injects the already-constructed run service; the plugin does not assemble runs.
     #[cfg(feature = "chat")]
     #[must_use]
-    pub fn chat(mut self, config: ChatConfig, store: Option<Arc<dyn ConversationStore>>) -> Self {
-        self.chat = Some((config, store));
+    pub fn runs(mut self, runs: Arc<aether_runtime::RunService>) -> Self {
+        self.runs = Some(runs);
         self
     }
 
-    /// MCP client store behind the `mcp_client_*` commands; with `chat`, its enabled and
-    /// trusted servers' tools join every run's catalogue (feature `mcp-client`).
+    /// Enables history commands through the independent shared conversation service.
+    #[cfg(feature = "conversations")]
+    #[must_use]
+    pub fn conversations(
+        mut self,
+        conversations: Arc<aether_runtime::conversations::ConversationService>,
+    ) -> Self {
+        self.conversations = Some(conversations);
+        self
+    }
+
+    /// Shares an MCP runtime with management commands and ordered application shutdown.
     #[cfg(feature = "mcp-client")]
     #[must_use]
-    pub fn mcp_client(mut self, store: aether_mcp_client::Store) -> Self {
-        self.mcp_client = Some(store);
+    pub fn mcp_client(mut self, runtime: Arc<aether_mcp_client::McpRuntime>) -> Self {
+        self.mcp_client = Some(runtime);
         self
     }
 
-    /// Registers the external MCP server (feature `mcp-server`).
+    /// Injects the independently constructed local MCP server.
     #[cfg(feature = "mcp-server")]
     #[must_use]
     pub fn mcp_server(mut self, server: aether_mcp_server::McpServer) -> Self {
@@ -102,40 +110,41 @@ impl Builder {
         self
     }
 
-    /// Provider store behind the `providers_*` commands (feature `providers`).
+    /// Shares provider configuration storage with the host's other Native services.
     #[cfg(feature = "providers")]
     #[must_use]
-    pub fn providers(mut self, store: aether_providers::Store) -> Self {
+    pub fn providers(mut self, store: Arc<aether_providers::Store>) -> Self {
         self.providers = Some(store);
         self
     }
 
-    /// Skill store behind the `skills_*` commands and run snapshots (feature `skills`).
+    /// Shares the installed-skill store with the skill management commands.
     #[cfg(feature = "skills")]
     #[must_use]
-    pub fn skills(mut self, store: aether_skills::Store) -> Self {
+    pub fn skills(mut self, store: Arc<aether_skills::Store>) -> Self {
         self.skills = Some(store);
         self
     }
-    /// Search settings and execution (feature `search`).
+
+    /// Shares search configuration storage with the search management commands.
     #[cfg(feature = "search")]
     #[must_use]
-    pub fn search(mut self, store: aether_search::Store) -> Self {
+    pub fn search(mut self, store: Arc<aether_search::Store>) -> Self {
         self.search = Some(store);
         self
     }
 
-    /// Builds the plugin. Only commands of enabled features are registered.
+    /// Registers the enabled IPC adapters and their shared service instances.
     ///
     /// # Errors
-    /// `bad_request{missing_instance}` when an enabled feature got no instance (docs/15 §2);
-    /// `internal` when the chat HTTP client cannot be built.
+    /// Returns `bad_request/missing_instance` for each enabled but absent service.
     pub fn build<R: Runtime>(self) -> Result<TauriPlugin<R>, KitError> {
         let Self {
-            host,
             logs,
             #[cfg(feature = "chat")]
-            chat,
+            runs,
+            #[cfg(feature = "conversations")]
+            conversations,
             #[cfg(feature = "mcp-client")]
             mcp_client,
             #[cfg(feature = "mcp-server")]
@@ -147,35 +156,20 @@ impl Builder {
             #[cfg(feature = "search")]
             search,
         } = self;
+        #[cfg(feature = "chat")]
+        let runs =
+            runs::Runs::new(runs.ok_or_else(|| KitError::bad_request("runs", "missing_instance"))?);
+        #[cfg(feature = "conversations")]
+        let conversations = conversations
+            .ok_or_else(|| KitError::bad_request("conversations", "missing_instance"))?;
         #[cfg(feature = "providers")]
         let providers = providers::Providers::new(
             providers.ok_or_else(|| KitError::bad_request("providers", "missing_instance"))?,
         );
-        #[cfg(feature = "search")]
-        let search = search.map(Arc::new);
-        #[cfg(feature = "chat")]
-        let chat = {
-            let (config, store) =
-                chat.ok_or_else(|| KitError::bad_request("chat", "missing_instance"))?;
-            #[cfg(feature = "search")]
-            let result = chat::Chat::new(
-                config,
-                store,
-                search
-                    .as_ref()
-                    .ok_or_else(|| KitError::bad_request("search", "missing_instance"))?
-                    .clone(),
-            )?;
-            #[cfg(not(feature = "search"))]
-            let result = chat::Chat::new(config, store)?;
-            result
-        };
         #[cfg(feature = "mcp-client")]
         let mcp_client = mcp_client::McpClient {
-            store: Arc::new(
-                mcp_client
-                    .ok_or_else(|| KitError::bad_request("mcp-client", "missing_instance"))?,
-            ),
+            runtime: mcp_client
+                .ok_or_else(|| KitError::bad_request("mcp-client", "missing_instance"))?,
             cancel: tokio_util::sync::CancellationToken::new(),
         };
         #[cfg(feature = "mcp-server")]
@@ -183,16 +177,12 @@ impl Builder {
             mcp_server.ok_or_else(|| KitError::bad_request("mcp-server", "missing_instance"))?;
         #[cfg(feature = "skills")]
         let skills = skills::Skills {
-            store: Arc::new(
-                skills.ok_or_else(|| KitError::bad_request("skills", "missing_instance"))?,
-            ),
+            store: skills.ok_or_else(|| KitError::bad_request("skills", "missing_instance"))?,
         };
         #[cfg(feature = "search")]
         let search = search::Search::from_arc(
             search.ok_or_else(|| KitError::bad_request("search", "missing_instance"))?,
         );
-        #[cfg(feature = "chat")]
-        let has_history = chat.has_history();
         let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> =
             Box::new(tauri::generate_handler![
                 logs::logs_tail,
@@ -201,27 +191,29 @@ impl Builder {
                 logs::logs_ingest,
                 logs::logs_open_dir,
                 #[cfg(feature = "chat")]
-                chat::chat_run,
+                runs::chat_run,
                 #[cfg(feature = "chat")]
-                chat::chat_cancel,
+                runs::chat_cancel,
                 #[cfg(feature = "chat")]
-                tools::chat_approve,
+                runs::chat_approve,
                 #[cfg(feature = "chat")]
-                chat::chat_conversations,
-                #[cfg(feature = "chat")]
-                chat::chat_conversation,
-                #[cfg(feature = "chat")]
-                chat::chat_delete,
-                #[cfg(feature = "chat")]
-                chat::chat_rename,
-                #[cfg(feature = "chat")]
-                chat::chat_edit_turn,
-                #[cfg(feature = "chat")]
-                chat::chat_remove_turn,
-                #[cfg(feature = "chat")]
-                chat::chat_fork,
-                #[cfg(feature = "chat")]
-                chat::chat_select_turn,
+                runs::chat_snapshot,
+                #[cfg(feature = "conversations")]
+                conversations::chat_conversations,
+                #[cfg(feature = "conversations")]
+                conversations::chat_conversation,
+                #[cfg(feature = "conversations")]
+                conversations::chat_delete,
+                #[cfg(feature = "conversations")]
+                conversations::chat_rename,
+                #[cfg(feature = "conversations")]
+                conversations::chat_edit_turn,
+                #[cfg(feature = "conversations")]
+                conversations::chat_remove_turn,
+                #[cfg(feature = "conversations")]
+                conversations::chat_fork,
+                #[cfg(feature = "conversations")]
+                conversations::chat_select_turn,
                 #[cfg(feature = "mcp-client")]
                 mcp_client::mcp_client_list,
                 #[cfg(feature = "mcp-client")]
@@ -310,25 +302,20 @@ impl Builder {
                 search::search_cancel,
             ]);
         Ok(tauri::plugin::Builder::<R>::new("aether")
-            .invoke_handler(move |invoke| {
-                // Without a store the history commands do not exist (docs/15 §5): `false`
-                // makes Tauri answer "Command not found", as for a disabled feature.
-                #[cfg(feature = "chat")]
-                if !has_history && chat::HISTORY_COMMANDS.contains(&invoke.message.command()) {
-                    return false;
-                }
-                handler(invoke)
-            })
+            .invoke_handler(handler)
             .setup(move |app, _api| {
                 // Lands in the file only when the host called aether_observability::init first (docs/10 §8).
                 tracing::info!("aether.plugin.setup");
-                app.manage(host);
                 app.manage(logs);
                 #[cfg(feature = "chat")]
                 {
-                    chat.spawn_image_purge();
-                    app.manage(chat);
+                    for label in app.webview_windows().keys() {
+                        runs.register(label);
+                    }
+                    app.manage(runs);
                 }
+                #[cfg(feature = "conversations")]
+                app.manage(conversations);
                 #[cfg(feature = "mcp-client")]
                 app.manage(mcp_client);
                 #[cfg(feature = "mcp-server")]
@@ -341,12 +328,17 @@ impl Builder {
                 app.manage(search);
                 Ok(())
             })
+            .on_window_ready(|window| {
+                #[cfg(feature = "chat")]
+                window.state::<runs::Runs>().register(window.label());
+                let _ = window;
+            })
             .on_event(on_event)
             .build())
     }
 }
 
-/// Lifecycle (docs/15 §6). `Exit` rather than `ExitRequested`, which the host may prevent.
+/// Exit, unlike ExitRequested, cannot be vetoed by the host.
 fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, event: &tauri::RunEvent) {
     #[cfg(feature = "chat")]
     if let tauri::RunEvent::WindowEvent {
@@ -355,21 +347,38 @@ fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, event: &tauri::RunEvent) {
         ..
     } = event
     {
-        app.state::<chat::Chat>().cancel_window(label);
+        app.state::<runs::Runs>().close(label);
+        tracing::info!("aether.plugin.window_destroyed.cancelled");
     }
     if matches!(event, tauri::RunEvent::Exit) {
-        #[cfg(feature = "chat")]
-        app.state::<chat::Chat>().shutdown();
-        #[cfg(feature = "mcp-client")]
-        app.state::<mcp_client::McpClient>().cancel.cancel();
-        #[cfg(feature = "mcp-server")]
-        if let Err(error) =
-            tauri::async_runtime::block_on(app.state::<aether_mcp_server::McpServer>().stop())
-        {
-            tracing::warn!(code = ?error.code(), "mcp_server.stop_failed");
-        }
-        if let Err(error) = app.state::<LogHandle>().flush() {
-            tracing::warn!(%error, "logs.flush_failed");
-        }
+        tracing::info!("aether.plugin.shutdown.started");
+        // The event-loop thread waits while the executor asynchronously drains services;
+        // no executor thread spins or joins another runtime.
+        tauri::async_runtime::block_on(async {
+            #[cfg(feature = "chat")]
+            app.state::<runs::Runs>()
+                .service
+                .shutdown(std::time::Duration::from_secs(3))
+                .await;
+            #[cfg(feature = "mcp-client")]
+            {
+                let client = app.state::<mcp_client::McpClient>();
+                client.cancel.cancel();
+                client.runtime.shutdown().await;
+                tracing::info!("aether.plugin.mcp_client.shutdown.complete");
+            }
+            #[cfg(feature = "mcp-server")]
+            if let Err(error) = app.state::<aether_mcp_server::McpServer>().stop().await {
+                tracing::warn!(code = ?error.code(), "mcp_server.stop_failed");
+            }
+            #[cfg(feature = "providers")]
+            app.state::<providers::Providers>().cancel_all();
+            #[cfg(feature = "search")]
+            app.state::<search::Search>().cancel_all();
+            tracing::info!("aether.plugin.shutdown.finished");
+            if let Err(error) = app.state::<LogHandle>().flush() {
+                tracing::warn!(%error, "logs.flush_failed");
+            }
+        });
     }
 }

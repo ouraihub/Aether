@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createFakePorts, KitClientError } from '../ports'
-import type { ChatHistoryPort, Conversation, RunAccepted, RunEvent, RunRequest, Turn } from '../ports'
+import type { ConversationClient, Conversation, RunAccepted, RunEvent, RunRequest, Turn } from '../ports'
 import { RunSession, type RunBase } from './run-session.svelte'
 
 const sourceModel = { endpointId: 'original-endpoint', modelId: 'original-model' }
@@ -65,10 +65,14 @@ function deferred<T>(): Deferred<T> {
 
 function setup(withHistory = true) {
   const runs: { request: RunRequest; emit: (event: RunEvent) => void; accepted: Deferred<RunAccepted> }[] = []
-  const get = vi.fn<ChatHistoryPort['get']>(() => Promise.resolve(conversation([stored()])))
+  const get = vi.fn<ConversationClient['get']>(() => Promise.resolve(conversation([stored()])))
+  const cancel = vi.fn(() => Promise.resolve())
+  const approve = vi.fn(() => Promise.resolve())
   const ports = createFakePorts({
     chat: {
-      run: (request, emit) => {
+      cancel,
+      approve,
+      start: (request, emit) => {
         const accepted = deferred<RunAccepted>()
         runs.push({ request, emit, accepted })
         return accepted.promise
@@ -76,9 +80,9 @@ function setup(withHistory = true) {
     },
   })
   const chat = required(ports.chat)
-  if (withHistory) Object.assign(required(chat.history), { get })
-  else delete chat.history
-  return { session: new RunSession(chat), runs, get }
+  if (withHistory) Object.assign(required(ports.conversations), { get })
+  else delete ports.conversations
+  return { session: new RunSession(chat, ports.conversations), runs, get, cancel, approve }
 }
 
 const accepted: RunAccepted = { runId: 'run', conversationId: 'conversation', turnId: 'candidate' }
@@ -459,5 +463,64 @@ describe('RunSession candidate replies', () => {
       { amount: 0.75, currency: 'USD' },
       { amount: 1, currency: 'CNY' },
     ])
+  })
+
+  it('does not invent a terminal state when cancellation is acknowledged', async () => {
+    const { session, runs, cancel } = setup(false)
+    const sent = session.send(base, 'Partial')
+    const run = required(runs[0])
+    run.accepted.resolve({ runId: 'r', conversationId: null, turnId: null })
+    await sent
+    run.emit({ kind: 'text_delta', text: 'kept' })
+    session.stop()
+    await Promise.resolve()
+    expect(cancel).toHaveBeenCalledWith('r')
+    expect(session.running).toBe(true)
+    expect(session.turns[0]).toMatchObject({ text: 'kept', status: 'running' })
+    run.emit({ kind: 'end', status: 'cancelled' })
+    expect(session.running).toBe(false)
+    expect(session.turns[0]).toMatchObject({ text: 'kept', status: 'cancelled' })
+  })
+
+  it('cancels late acceptance and isolates old events after changing the displayed conversation', async () => {
+    const { session, runs, cancel } = setup(false)
+    const sent = session.send(base, 'Old')
+    const old = required(runs[0])
+    session.show('new', [stored({ id: 'new-turn', text: 'New' })])
+    old.emit({ kind: 'text_delta', text: 'old text' })
+    old.accepted.resolve({ runId: 'late', conversationId: 'old', turnId: 'old-turn' })
+    await sent
+    old.emit({ kind: 'end', status: 'completed' })
+    expect(cancel).toHaveBeenCalledWith('late')
+    expect(session.conversationId).toBe('new')
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0]).toMatchObject({ id: 'new-turn', text: 'New' })
+  })
+
+  it('reports a current approval failure but does not revive a card after switching sessions', async () => {
+    const { session, runs, approve } = setup(false)
+    const failure = deferred<void>()
+    approve.mockReturnValueOnce(failure.promise)
+    const sent = session.send(base, 'Tool')
+    const run = required(runs[0])
+    run.accepted.resolve({ runId: 'r', conversationId: null, turnId: null })
+    await sent
+    run.emit({ kind: 'tool_call', callId: 'call', name: 'tool', source: 'host' })
+    run.emit({ kind: 'approval_required', callId: 'call', name: 'tool', argsPreview: 'preview' })
+    const tool = required(session.turns[0]?.tools[0])
+    session.approve(tool, true)
+    failure.reject(new KitClientError({ code: 'conflict', message: 'expired' }))
+    await Promise.resolve()
+    expect(session.actionError).toBe('conflict')
+    expect(tool.pending).toBe('preview')
+    const oldFailure = deferred<void>()
+    approve.mockReturnValueOnce(oldFailure.promise)
+    session.approve(tool, true)
+    session.show(null)
+    oldFailure.reject(new KitClientError({ code: 'not_found', message: 'old' }))
+    await Promise.resolve()
+    expect(session.turns).toEqual([])
+    expect(session.actionError).toBeNull()
+    expect(tool.pending).toBeNull()
   })
 })

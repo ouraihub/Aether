@@ -10,10 +10,23 @@ const ALLOWED_KIT_DEPS = new Map([
   ['aether-observability', SUPPORT_ONLY],
   ['aether-providers', SUPPORT_ONLY],
   ['aether-search', SUPPORT_ONLY],
-  ['aether-chat', SUPPORT_ONLY],
+  ['aether-chat', ['aether-support', 'aether-images']],
   ['aether-skills', SUPPORT_ONLY],
   ['aether-mcp-client', SUPPORT_ONLY],
   ['aether-mcp-server', SUPPORT_ONLY],
+  ['aether-images', SUPPORT_ONLY],
+  [
+    'aether-runtime',
+    [
+      'aether-support',
+      'aether-chat',
+      'aether-images',
+      'aether-providers',
+      'aether-search',
+      'aether-skills',
+      'aether-mcp-client',
+    ],
+  ],
   ['tauri-plugin-aether', null],
 ])
 
@@ -27,6 +40,8 @@ const NO_TAURI = [
   'aether-skills',
   'aether-mcp-client',
   'aether-mcp-server',
+  'aether-images',
+  'aether-runtime',
   'example-cli',
 ]
 

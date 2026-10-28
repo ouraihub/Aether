@@ -5,10 +5,6 @@ use std::sync::Arc;
 
 use aether_observability::LogConfig;
 
-/// Providers-only hosts need no `KitHost` method.
-struct ProvidersHost;
-impl tauri_plugin_aether::KitHost for ProvidersHost {}
-
 #[expect(
     clippy::print_stderr,
     reason = "logging may not be initialised yet; this is the only way to report a startup failure"
@@ -24,8 +20,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Before `tauri::Builder`, so logs from other plugins' setup reach the file (docs/10 §8).
     let root = aether_observability::data_root("aether-providers-only")?;
     let logs = aether_observability::init(&root.join("logs"), LogConfig::default(), None)?;
-    let aether = tauri_plugin_aether::Builder::new(Arc::new(ProvidersHost), logs)
-        .providers(aether_providers::Store::open(&root)?)
+    let aether = tauri_plugin_aether::Builder::new(logs)
+        .providers(Arc::new(aether_providers::Store::open(&root)?))
         .build()?;
     tauri::Builder::default()
         .plugin(aether)

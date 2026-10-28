@@ -2,7 +2,8 @@
 import { SvelteMap } from 'svelte/reactivity'
 import { isKitClientError } from '../ports'
 import type {
-  ChatPort,
+  RunClient,
+  ConversationClient,
   ContextRef,
   ImagePart,
   ImageRef,
@@ -94,10 +95,13 @@ export class RunSession {
   #abort: AbortController | null = null
   /** Id of the active run, known once `chat_run` resolves. */
   #runId: string | null = null
-  readonly #port: ChatPort
+  readonly #port: RunClient
+  readonly #conversations: ConversationClient | undefined
+  #ended = false
 
-  constructor(port: ChatPort) {
+  constructor(port: RunClient, conversations?: ConversationClient) {
     this.#port = port
+    this.#conversations = conversations
   }
   resetContext() {
     this.contextUsage = null
@@ -199,7 +203,7 @@ export class RunSession {
   }
 
   get #stored() {
-    return this.#port.history !== undefined && this.conversationId !== null
+    return this.#conversations !== undefined && this.conversationId !== null
   }
 
   #source(id: string) {
@@ -254,17 +258,34 @@ export class RunSession {
   /** Cancels the active run; its `end` arrives as `cancelled`. */
   stop() {
     this.#abort?.abort()
+    for (const turn of this.turns) for (const tool of turn.tools) tool.pending = null
+    if (this.#runId && !this.#ended) {
+      const abort = this.#abort
+      void this.#port.cancel(this.#runId).catch((error: unknown) => {
+        if (this.#abort === abort && this.running) this.actionError = isKitClientError(error) ? error.code : 'internal'
+      })
+    }
+  }
+
+  /** Invalidates callbacks before the owning view is destroyed. */
+  dispose() {
+    this.stop()
+    this.#abort = null
+    this.#runId = null
+    this.running = false
   }
 
   /** Answers an `approval_required` call of the active run. */
   approve(tool: ToolItem, allow: boolean) {
     const runId = this.#runId
-    if (tool.pending === null || runId === null) return
+    const abort = this.#abort
+    if (tool.pending === null || runId === null || this.#ended || abort?.signal.aborted) return
     const preview = tool.pending
     tool.pending = null
-    // Not delivered: show the card again so the user can retry or stop.
-    this.#port.approve(runId, tool.callId, allow).catch(() => {
-      if (this.running && tool.outcome === null) tool.pending = preview
+    this.#port.approve(runId, tool.callId, allow).catch((error: unknown) => {
+      if (this.#abort !== abort || this.#ended || abort?.signal.aborted || !this.running) return
+      this.actionError = isKitClientError(error) ? error.code : 'internal'
+      if (tool.outcome === null) tool.pending = preview
     })
   }
 
@@ -334,6 +355,7 @@ export class RunSession {
     if (!turn) return Promise.resolve(false)
     const abort = new AbortController()
     this.#abort = abort
+    this.#ended = false
     this.contextUsage = null
     this.search = {
       status: webSearch ? 'searching' : 'idle',
@@ -351,8 +373,8 @@ export class RunSession {
       if (!accepted || !ended || refreshing || this.#abort !== abort) return
       refreshing = true
       try {
-        if (this.#port.history && this.conversationId) {
-          const conversation = await this.#port.history.get(this.conversationId)
+        if (this.#conversations && this.conversationId) {
+          const conversation = await this.#conversations.get(this.conversationId)
           if (this.#abort !== abort) return
           const live = new SvelteMap(this.turns.map((item) => [item.id, item]))
           this.turns = conversation.turns.map((stored) => {
@@ -383,6 +405,7 @@ export class RunSession {
     const finish = (status: TurnStatus, error: string | null) => {
       if (this.#abort !== abort) return
       ended = true
+      this.#ended = true
       turn.status = status
       turn.error = error
       if (status !== 'completed') {
@@ -492,8 +515,12 @@ export class RunSession {
     }
     this.#runId = null
     try {
-      const result = await this.#port.run(request, onEvent, { signal: abort.signal })
-      if (this.#abort !== abort) return true
+      const result = await this.#port.start(request, onEvent, { signal: abort.signal })
+      if (this.#abort !== abort) {
+        if (!ended) void this.#port.cancel(result.runId).catch(() => undefined)
+        return true
+      }
+      if (abort.signal.aborted && !ended) void this.#port.cancel(result.runId).catch(() => undefined)
       accepted = true
       this.#runId = result.runId
       if (result.conversationId) this.conversationId = result.conversationId

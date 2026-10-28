@@ -1,0 +1,21 @@
+{
+  "name": "@ouraihub/aether-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "check-generated": "node scripts/generate.mjs --check",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/contracts.test.mjs"
+  },
+  "dependencies": {
+    "ajv": "8.20.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

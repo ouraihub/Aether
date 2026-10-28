@@ -1,4 +1,7 @@
 # shadcn-svelte CLI output keeps the registry's formatting so `shadcn-svelte update` diffs stay clean (docs/16 §1).
 packages/ui/src/components/ui/
 # ts-rs output, compared byte-for-byte by `pnpm kit:dto-check`.
-packages/ui/src/ports/generated/
+packages/contracts/src/generated/
+packages/contracts/src/validators.js
+packages/contracts/src/validation.ts
+packages/contracts/src/index.ts
