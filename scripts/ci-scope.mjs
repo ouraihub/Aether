@@ -10,6 +10,13 @@ const ruleName =
 
 function pathScope(path) {
   if (typeof path !== 'string' || !path || path.includes('\\') || path.includes('\0')) return 'full'
+  if (
+    path === 'AGENTS.md' ||
+    path === 'scripts/ci.mjs' ||
+    /^\.github\/workflows\/[A-Za-z0-9_-]+\.ya?ml$/.test(path) ||
+    /^scripts\/ci-(?:scope|gate)(?:\.test)?\.mjs$/.test(path)
+  )
+    return 'automation'
   const parts = path.split('/')
   if (parts.some((part) => !part || part === '.' || part === '..' || ruleName.test(part))) return 'full'
   if (['README.md', 'CHANGELOG.md', 'LICENSE'].includes(path)) return 'docs'
@@ -24,7 +31,7 @@ export function classifyPaths(paths) {
   for (const path of paths) {
     const category = pathScope(path)
     if (category === 'full') return 'full'
-    if (category === 'frontend') scope = 'frontend'
+    if (category === 'frontend' || (category === 'automation' && scope === 'docs')) scope = category
   }
   return scope
 }
@@ -82,7 +89,7 @@ function detectScope() {
     const names = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
     if (names && !names.endsWith('\0')) return fallback
     const paths = names ? names.slice(0, -1).split('\0') : []
-    const counts = { docs: 0, frontend: 0, full: 0 }
+    const counts = { docs: 0, automation: 0, frontend: 0, full: 0 }
     for (const path of paths) counts[pathScope(path)] += 1
     return {
       scope: classifyPaths(paths),
@@ -101,7 +108,7 @@ function main() {
   process.stdout.write(output)
   // Never echo event data or filenames into a workflow command or Markdown summary.
   const categories = counts
-    ? `docs=${counts.docs}, frontend=${counts.frontend}, full=${counts.full}`
+    ? `docs=${counts.docs}, frontend=${counts.frontend}, full=${counts.full}, automation=${counts.automation}`
     : 'Path categories unavailable.'
   if (process.env.GITHUB_STEP_SUMMARY) {
     appendFileSync(

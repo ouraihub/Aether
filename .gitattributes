@@ -3,3 +3,6 @@
 *.ico binary
 *.zip binary
 *.bat text eol=crlf
+# Generator output: CI fails when it differs from `contracts generate`, so AI review lists the path only.
+packages/contracts/src/validators.js linguist-generated
+packages/contracts/src/validators.d.ts linguist-generated
