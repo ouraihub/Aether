@@ -14,6 +14,7 @@ import type {
 } from './contract'
 import type { Conversation, LogLevel, RunEvent, RunSnapshot, Turn } from '@ouraihub/aether-contracts'
 import type { SearchPort } from './search'
+import type { SkillSourcesPort } from './skill-sources'
 
 type PortName = keyof KitPorts
 
@@ -27,6 +28,7 @@ export interface FakePortsOptions {
   chat?: Partial<RunClient>
   search?: Partial<SearchPort>
   skills?: Partial<SkillsPort>
+  skillSources?: Partial<SkillSourcesPort>
   mcpClient?: Partial<McpClientPort>
   mcpServer?: Partial<McpServerPort>
   /** Ports to leave out, as a host without that feature would. */
@@ -249,7 +251,7 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       return snapshot(conversation)
     },
   }
-  const ports: Required<Omit<KitPorts, 'search'>> = {
+  const ports: Required<Omit<KitPorts, 'search' | 'skillSources'>> = {
     logs: {
       tail: () => Promise.resolve([]),
       ingest: (batch) => Promise.resolve({ accepted: batch.entries.length, rejected: 0 }),
@@ -463,6 +465,18 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       search: unavailable,
       fetch: unavailable,
       ...options.search,
+    }
+  }
+  if (options.skillSources) {
+    const unavailable = () => Promise.reject(clientError('internal', 'Configure the fake skill source method'))
+    result.skillSources = {
+      search: unavailable,
+      prepare: unavailable,
+      discover: unavailable,
+      prepareSystem: unavailable,
+      pickDirectory: unavailable,
+      pickSearchDirectory: unavailable,
+      ...options.skillSources,
     }
   }
   for (const name of options.omit ?? []) delete result[name]

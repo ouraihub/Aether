@@ -16,6 +16,10 @@
     title,
     current = null,
     confirmLabel,
+    busy = false,
+    error = null,
+    origin,
+    ignored = [],
     onconfirm,
   }: {
     open: boolean
@@ -24,12 +28,17 @@
     /** The installed skill a confirm would replace; confirming then needs the "replace" box. */
     current?: PreviewCurrent | null
     confirmLabel?: string
+    busy?: boolean
+    error?: string | null
+    origin?: string
+    ignored?: readonly string[]
     onconfirm?: (replace: boolean) => void
   } = $props()
 
   const { t } = getKitContext().i18n
   let replace = $state(false)
   $effect.pre(() => {
+    void skill
     if (open) replace = false
   })
   const extra = $derived(Object.entries(skill?.extra ?? {}))
@@ -43,6 +52,8 @@
       <Dialog.Title>{title}</Dialog.Title>
       <Dialog.Description>{t('skills.preview_desc')}</Dialog.Description>
     </Dialog.Header>
+    {#if origin}<p class="text-muted-foreground break-all text-xs">{origin}</p>{/if}
+    {#if error}<p role="alert" class="text-destructive text-sm">{error}</p>{/if}
     {#if skill}
       <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
         <dt class="text-muted-foreground">{t('skills.name')}</dt>
@@ -84,6 +95,14 @@
           </ul>
         </section>
       {/if}
+      {#if ignored.length > 0}
+        <section class="flex flex-col gap-1 text-xs" aria-label={t('skills.add.ignored')}>
+          <h3 class="font-medium">{t('skills.add.ignored')}</h3>
+          <ul class="max-h-32 overflow-y-auto break-all font-mono">
+            {#each ignored as path (path)}<li>{path}</li>{/each}
+          </ul>
+        </section>
+      {/if}
       {#if onconfirm && current}
         <label class="flex items-center gap-2 text-sm">
           <input type="checkbox" class="accent-primary" bind:checked={replace} />
@@ -94,7 +113,7 @@
     <Dialog.Footer>
       <Button variant="outline" onclick={() => (open = false)}>{t('common.cancel')}</Button>
       {#if onconfirm}
-        <Button disabled={!skill || (current !== null && !replace)} onclick={() => onconfirm(replace)}>
+        <Button disabled={busy || !skill || (current !== null && !replace)} onclick={() => onconfirm(replace)}>
           {confirmLabel ?? t('skills.install')}
         </Button>
       {/if}

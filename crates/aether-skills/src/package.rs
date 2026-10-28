@@ -8,7 +8,7 @@ use std::io::{self, Cursor, Read};
 use std::path::{Path, PathBuf};
 
 use aether_support::{KitError, mask};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ts_rs::TS;
 use zip::ZipArchive;
@@ -32,7 +32,7 @@ const MAX_DEPTH: usize = 4;
 
 /// Where a skill package comes from. JSON: `{ "path": "C:\\…" }` or
 /// `{ "bytes": { "fileName": "x.zip", "bytes": [80, 75, …] } }`.
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum Source {

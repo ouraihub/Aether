@@ -79,8 +79,14 @@ export async function execute<T>(
         const onAbort = () =>
           reject(controller.signal.aborted ? aborted() : new KitFailure('timeout', 'Search connection timed out'))
         connection.signal.addEventListener('abort', onAbort, { once: true })
+        const request: RequestInit & { credentials: 'omit' } = {
+          ...init,
+          redirect: 'manual',
+          credentials: 'omit',
+          signal: connection.signal,
+        }
         outbound
-          .fetch(url, { ...init, redirect: 'manual', credentials: 'omit', signal: connection.signal })
+          .fetch(url, request)
           .then(resolve, reject)
           .finally(() => connection.signal.removeEventListener('abort', onAbort))
           .catch(() => {})

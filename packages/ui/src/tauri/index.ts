@@ -2,7 +2,16 @@
 // Argument names are the camelCase of the Rust command parameters (docs/15 §5).
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { KitClientError } from '../ports'
-import type { DesktopActions, KitError, KitPorts, LogsPort, RunAccepted, RunEvent, SearchPort } from '../ports'
+import type {
+  DesktopActions,
+  KitError,
+  KitPorts,
+  LogsPort,
+  PreparedSkill,
+  RunAccepted,
+  RunEvent,
+  SearchPort,
+} from '../ports'
 
 /** Which feature ports the host enabled; the rest stay absent so their UI areas are hidden. */
 export interface TauriPortsOptions {
@@ -12,6 +21,8 @@ export interface TauriPortsOptions {
   /** Independent conversation storage capability (`aether:chat-history`). */
   conversations?: boolean
   skills?: boolean
+  /** Read-only discovery/pickers; generation additionally requires chat and providers. */
+  skillSources?: boolean
   mcpClient?: boolean
   mcpServer?: boolean
 }
@@ -176,6 +187,69 @@ export function createTauriPorts(
       duplicate: (id, newName) => call('skills_duplicate', { id, newName }),
       reorder: (ids) => call('skills_reorder', { ids }),
       remove: (id) => call('skills_delete', { id }),
+    }
+  }
+  if (options.skillSources) {
+    const sourceCall = async <T>(
+      command: string,
+      args: Record<string, unknown>,
+      o?: { signal?: AbortSignal },
+    ): Promise<T> => {
+      if (o?.signal?.aborted) throw new KitClientError(CANCELLED)
+      const result = await call<T>(command, args)
+      if (o?.signal?.aborted) throw new KitClientError(CANCELLED)
+      return result
+    }
+    ports.skillSources = {
+      search: (query, o) => sourceCall('skills_source_search', { query }, o),
+      prepare: (url, o) => sourceCall('skills_source_prepare', { url }, o),
+      discover: (o) => sourceCall('skills_system_discover', {}, o),
+      prepareSystem: (path, o) => sourceCall('skills_system_prepare', { path }, o),
+      pickDirectory: (o) => sourceCall('skills_pick_directory', {}, o),
+      pickSearchDirectory: (o) => sourceCall('skills_pick_search_directory', {}, o),
+    }
+    if (options.chat && options.providers) {
+      ports.skillSources.authoring = {
+        create: (o) => sourceCall<string>('skills_authoring_create', {}, o),
+        send: async (sessionId, input, model, onEvent, o) => {
+          const signal = o?.signal
+          if (signal?.aborted) throw new KitClientError(CANCELLED)
+          let accepted: RunAccepted | null = null
+          let ended = false
+          const cancel = () => {
+            if (accepted && !ended)
+              void call('skills_authoring_cancel', { sessionId, runId: accepted.runId }).catch(() => undefined)
+          }
+          signal?.addEventListener('abort', cancel, { once: true })
+          const channel = new Channel<RunEvent>((event) => {
+            if (ended) return
+            if (event.kind === 'end') {
+              ended = true
+              signal?.removeEventListener('abort', cancel)
+            }
+            onEvent(event)
+          })
+          try {
+            accepted = await call<RunAccepted>('skills_authoring_send', { sessionId, input, model, onEvent: channel })
+            if (signal?.aborted) cancel()
+            return accepted
+          } catch (error) {
+            ended = true
+            signal?.removeEventListener('abort', cancel)
+            throw error
+          }
+        },
+        approve: async (sessionId, runId, callId, allow) => {
+          await call('skills_authoring_approve', { sessionId, runId, callId, allow })
+        },
+        cancel: async (sessionId, runId) => {
+          await call('skills_authoring_cancel', { sessionId, runId })
+        },
+        prepare: (sessionId, o) => sourceCall<PreparedSkill>('skills_authoring_prepare', { sessionId }, o),
+        close: async (sessionId) => {
+          await call('skills_authoring_close', { sessionId })
+        },
+      }
     }
   }
   if (options.mcpClient) {

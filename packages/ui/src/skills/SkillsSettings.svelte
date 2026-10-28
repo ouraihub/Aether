@@ -3,11 +3,11 @@
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Empty from '#lib/components/ui/empty/index.js'
   import { getKitContext } from '../context'
-  import { isKitClientError } from '../ports'
-  import type { Preview, SkillDto, SkillMeta, Source } from '../ports'
+  import type { SkillDto, SkillMeta } from '../ports'
   import { errorText } from './error'
   import SkillEditor from './SkillEditor.svelte'
   import SkillPreviewDialog from './SkillPreviewDialog.svelte'
+  import SkillAdd from './SkillAdd.svelte'
 
   const { ports, i18n, notify } = getKitContext()
   const { t } = i18n
@@ -15,10 +15,6 @@
 
   let skills = $state<SkillMeta[]>([])
   let busy = $state(false)
-  let file = $state<HTMLInputElement | null>(null)
-  let source: Source | null = null
-  let preview = $state<Preview | null>(null)
-  let previewOpen = $state(false)
   let viewing = $state<SkillDto | null>(null)
   let viewOpen = $state(false)
   let editing = $state<SkillDto | null>(null)
@@ -36,40 +32,6 @@
   }
 
   if (port) void act(async () => void (skills = await port.list()))
-
-  // A picked SKILL.md or .zip goes over IPC as bytes (docs/14 §6 `Source::Bytes`).
-  function pickFile(input: HTMLInputElement) {
-    const picked = input.files?.[0]
-    input.value = ''
-    if (!picked || !port) return
-    void act(async () => {
-      const next: Source = { bytes: { fileName: picked.name, bytes: [...new Uint8Array(await picked.arrayBuffer())] } }
-      preview = await port.preview(next)
-      source = next
-      previewOpen = true
-    })
-  }
-
-  function install(replace: boolean) {
-    const confirmed = preview
-    if (!port || !source || !confirmed) return
-    const from = source
-    void act(async () => {
-      try {
-        skills = await port.install(from, confirmed.digest, replace)
-        previewOpen = false
-        notify.toast('success', t('skills.installed', { name: confirmed.name }))
-      } catch (error) {
-        // The package changed after the preview: show the new text and confirm again (docs/14 §4).
-        if (isKitClientError(error) && error.details.reason === 'content_changed') {
-          preview = await port.preview(from)
-          notify.toast('info', t('skills.content_changed'))
-          return
-        }
-        throw error
-      }
-    })
-  }
 
   function view(id: string) {
     if (!port) return
@@ -114,18 +76,7 @@
 
 {#if port}
   <section class="flex flex-col gap-4" aria-label={t('skills.title')}>
-    <div class="flex gap-2">
-      <Button disabled={busy} onclick={() => file?.click()}>{t('skills.import')}</Button>
-      <Button variant="outline" disabled={busy} onclick={() => edit(null)}>{t('skills.new')}</Button>
-      <input
-        bind:this={file}
-        type="file"
-        accept=".md,.zip"
-        class="hidden"
-        aria-label={t('skills.import')}
-        onchange={(e) => pickFile(e.currentTarget)}
-      />
-    </div>
+    <SkillAdd disabled={busy} oninstalled={(next) => (skills = next)} onmanual={() => edit(null)} />
     {#if skills.length === 0}
       <Empty.Root>
         <Empty.Header>
@@ -184,13 +135,6 @@
       </ul>
     {/if}
   </section>
-  <SkillPreviewDialog
-    bind:open={previewOpen}
-    skill={preview}
-    title={t('skills.preview_title')}
-    current={preview?.current ?? null}
-    onconfirm={install}
-  />
   <SkillPreviewDialog bind:open={viewOpen} skill={viewing} title={viewing?.name ?? ''} />
   <SkillEditor bind:open={editOpen} {port} skill={editing} onsaved={(next) => (skills = next)} />
 {/if}

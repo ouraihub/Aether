@@ -187,7 +187,7 @@ export async function streamRound(
       if (!decoder.done) throw new KitFailure('network', 'Upstream stream ended early', { reason: 'incomplete_stream' })
       const decoded = decoder.toolCalls(),
         calls: ToolCall[] = []
-      let truncated = decoder.truncated
+      let truncated = decoder.truncated && decoded.length > 0
       for (const call of decoded) {
         if (call.args === null || !call.id || !call.name) truncated = true
         else calls.push({ id: call.id, name: call.name, args: call.args })

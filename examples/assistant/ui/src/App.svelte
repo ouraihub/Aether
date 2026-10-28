@@ -51,7 +51,7 @@
           streamError = `Run ${runId}: connection interrupted (${error.code}). Outcome is not confirmed; check history before retrying.`
         },
       })
-    : createTauriPorts({ providers: true, chat: true, conversations, skills, mcpClient })
+    : createTauriPorts({ providers: true, chat: true, conversations, skills, skillSources: skills, mcpClient })
   const i18n = createI18n(navigator.language)
   const notify = createDefaultNotify()
   // Web has no LogsPort: keep diagnostic event names only, never request data or credentials.
