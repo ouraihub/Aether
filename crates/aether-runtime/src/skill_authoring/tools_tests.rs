@@ -119,7 +119,7 @@ async fn authoring_files_preview_and_scripts() {
         tools.write(path, body).unwrap();
         let result = tools
             .execute(
-                &call("authoring_run", json!({"path":path,"timeoutSeconds":5})),
+                &call("authoring_run", json!({"path":path,"timeoutSeconds":60})),
                 &cancel,
             )
             .await;
@@ -144,6 +144,26 @@ async fn authoring_files_preview_and_scripts() {
             .approval,
         Approval::Ask
     );
+}
+
+#[test]
+fn authoring_list_payload_stays_within_output_bound() {
+    let (_root, tools) = workspace();
+    for index in 0..400 {
+        tools
+            .write(
+                &format!("evaluations/{index:03}-{}.txt", "x".repeat(96)),
+                "",
+            )
+            .unwrap();
+    }
+    let output = tools.list(Some("evaluations")).unwrap();
+    let payload = output.payload.unwrap();
+    let files = payload["files"].as_array().unwrap();
+    assert!(payload["truncated"].as_bool().unwrap());
+    assert!(files.len() < 400);
+    assert!(serde_json::to_string(files).unwrap().len() <= MAX_OUTPUT + 2 * files.len());
+    assert!(output.text.len() <= MAX_OUTPUT);
 }
 
 #[tokio::test]

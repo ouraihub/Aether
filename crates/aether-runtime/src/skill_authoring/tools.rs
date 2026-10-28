@@ -158,11 +158,24 @@ impl AuthoringTools {
         let mut rows = Vec::new();
         visit(&dir, &self.root, &mut rows, 0)?;
         rows.sort();
+        // Text and payload share one byte budget; rows past it are dropped from both.
+        let mut used = 0;
+        let kept = rows
+            .iter()
+            .take_while(|row| {
+                used += row.len() + 1;
+                used <= MAX_OUTPUT - 4
+            })
+            .count();
+        let truncated = kept < rows.len();
+        rows.truncate(kept);
         let mut text = rows.join("\n");
-        truncate(&mut text, MAX_OUTPUT);
+        if truncated {
+            text.push_str("\n…");
+        }
         Ok(ToolOutput {
             text,
-            payload: Some(json!({"files": rows})),
+            payload: Some(json!({"files": rows, "truncated": truncated})),
         })
     }
 
