@@ -7,6 +7,7 @@ Use package exports, not internal file paths:
 ```ts
 import { setKitContext, createDefaultNotify } from '@ouraihub/aether-ui'
 import { createTauriPorts } from '@ouraihub/aether-ui/tauri'
+import { createWebPorts } from '@ouraihub/aether-ui/web'
 import { ChatPanel } from '@ouraihub/aether-ui/chat'
 import { ProvidersSettings, ModelSelect } from '@ouraihub/aether-ui/providers'
 import { SkillsSettings } from '@ouraihub/aether-ui/skills'
@@ -21,22 +22,22 @@ The host root creates the context once:
 
 ```ts
 setKitContext({
-  ports: createTauriPorts({ providers: true, chat: true, chatHistory: true }),
+  ports: createTauriPorts({ providers: true, chat: true, conversations: true }),
   i18n: createI18n('en'),
   notify: createDefaultNotify(),
   logger,
 })
 ```
 
-Use `createTauriPorts` only for a desktop Tauri adapter. Use `createFakePorts` in tests. Optional ports are deliberate: when a feature or history store is absent, the corresponding UI area must be absent or disabled without probing an unavailable command.
+Use `createTauriPorts` only for desktop; browser hosts inject `createWebPorts({baseURL,fetch,csrf,...capabilityFlags})` with real authentication/fresh-verification behavior in their fetch/identity integration. Use `createFakePorts` in tests. Optional absent capabilities stay hidden/disabled; do not probe unavailable commands or fabricate MCP Server management ports.
 
 Only `@ouraihub/aether-ui/tauri` may import `@tauri-apps/api`. Components and state classes use `KitPorts`, `KitClientError`, and `AbortSignal`.
 
 ## DTO and cancellation
 
-Import DTO types from `@ouraihub/aether-ui/ports`. They are generated from Rust with `ts-rs`; do not recreate them by hand. After Rust DTO changes, run the repository DTO generation/check command and commit the generated result.
+Import public DTOs from `@ouraihub/aether-contracts`; the canonical ts-rs output is `packages/contracts/src/generated`. UI ports consume these bindings rather than owning a second generated directory. After Rust DTO changes, use `pnpm kit:dto`, contracts `generate` and the repository checks; commit bindings plus generated index/validators. Never hand-write parallel DTOs.
 
-`ChatPort.run` resolves when the run is accepted, not when it finishes. Render `RunEvent` values, especially `end`, for the terminal state. Pass an `AbortSignal`; the Tauri adapter maps abort to `chat_cancel` or the feature-specific cancel command and reports `cancelled`.
+`RunClient.start` resolves when accepted, not when finished; events may arrive first. Render the single final `end`, pass an AbortSignal, and use `cancel`/`getSnapshot` for explicit control. Cancellation acknowledgement is not proof of a cancelled terminal state. ConversationClient is independent at `ports.conversations`, not nested under chat.
 
 ## Component boundaries
 
@@ -46,7 +47,7 @@ Import DTO types from `@ouraihub/aether-ui/ports`. They are generated from Rust 
 - Use existing Aether components before recreating provider, chat, Skills, MCP, or logs UI.
 - For base controls, follow the repository's shadcn-svelte skill and existing `components/ui` implementation.
 
-A one-shot generation flow can call `ChatPort.run` directly and consume `text_delta`; use `ChatPanel` for a full conversation surface.
+A one-shot generation flow can call `ports.chat.start` directly and consume `text_delta`; use `ChatPanel` for a full conversation surface. Logs do not require local filesystem actions; only offer opening the log directory when `ports.desktop?.openLogsDirectory` exists.
 
 ## UI checks
 

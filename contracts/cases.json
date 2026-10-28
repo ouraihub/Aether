@@ -1,0 +1,1714 @@
+{
+  "contractVersion": 1,
+  "cases": [
+    {
+      "id": "request-minimal",
+      "contract": "RunRequest",
+      "valid": true,
+      "value": { "purpose": "chat", "skills": [], "input": "你好 🌍", "regenerate": false, "language": "zh-CN" }
+    },
+    {
+      "id": "request-explicit-null",
+      "contract": "RunRequest",
+      "valid": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "model": null,
+        "context": null,
+        "conversationId": null,
+        "scope": null,
+        "replyToId": null,
+        "retryTurnId": null,
+        "translateTurnId": null,
+        "targetLanguage": null
+      }
+    },
+    {
+      "id": "request-all-fields",
+      "contract": "RunRequest",
+      "valid": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [{ "id": "skill-1", "revision": 3 }],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "model": { "endpointId": "endpoint-1", "modelId": "model-1" },
+        "context": { "kind": "document", "id": "document-1" },
+        "images": [{ "mime": "image/png", "data": "AQ==" }],
+        "conversationId": "conversation-1",
+        "scope": "workspace",
+        "webSearch": false,
+        "replyToId": "turn-1",
+        "reasoningEffort": "high",
+        "permissionMode": "accept_edits",
+        "generateImage": false
+      }
+    },
+    {
+      "id": "request-mode-default",
+      "contract": "RunRequest",
+      "valid": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "permissionMode": "default"
+      }
+    },
+    {
+      "id": "request-mode-plan",
+      "contract": "RunRequest",
+      "valid": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "permissionMode": "plan"
+      }
+    },
+    {
+      "id": "request-mode-accept_edits",
+      "contract": "RunRequest",
+      "valid": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "permissionMode": "accept_edits"
+      }
+    },
+    {
+      "id": "request-mode-auto",
+      "contract": "RunRequest",
+      "valid": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "permissionMode": "auto"
+      }
+    },
+    {
+      "id": "request-mode-full_access",
+      "contract": "RunRequest",
+      "valid": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "permissionMode": "full_access"
+      }
+    },
+    {
+      "id": "request-missing-purpose",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": { "skills": [], "input": "你好 🌍", "regenerate": false, "language": "zh-CN" }
+    },
+    {
+      "id": "request-missing-skills",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": { "purpose": "chat", "input": "你好 🌍", "regenerate": false, "language": "zh-CN" }
+    },
+    {
+      "id": "request-missing-input",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": { "purpose": "chat", "skills": [], "regenerate": false, "language": "zh-CN" }
+    },
+    {
+      "id": "request-missing-regenerate",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": { "purpose": "chat", "skills": [], "input": "你好 🌍", "language": "zh-CN" }
+    },
+    {
+      "id": "request-missing-language",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": { "purpose": "chat", "skills": [], "input": "你好 🌍", "regenerate": false }
+    },
+    {
+      "id": "request-null-images",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "images": null
+      }
+    },
+    {
+      "id": "request-null-webSearch",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "webSearch": null
+      }
+    },
+    {
+      "id": "request-null-regenerate",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": { "purpose": "chat", "skills": [], "input": "你好 🌍", "regenerate": null, "language": "zh-CN" }
+    },
+    {
+      "id": "request-null-language",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": { "purpose": "chat", "skills": [], "input": "你好 🌍", "regenerate": false, "language": null }
+    },
+    {
+      "id": "request-null-reasoningEffort",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "reasoningEffort": null
+      }
+    },
+    {
+      "id": "request-null-permissionMode",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "permissionMode": null
+      }
+    },
+    {
+      "id": "request-null-generateImage",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "generateImage": null
+      }
+    },
+    {
+      "id": "request-null-skills",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": { "purpose": "chat", "skills": null, "input": "你好 🌍", "regenerate": false, "language": "zh-CN" }
+    },
+    {
+      "id": "request-unknown-owner",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "owner": "window-1"
+      }
+    },
+    {
+      "id": "request-unknown-principal",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "principal": "user-1"
+      }
+    },
+    {
+      "id": "request-unknown-token",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "token": "not-a-real-secret"
+      }
+    },
+    {
+      "id": "request-unknown-providerId",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "providerId": "provider-1"
+      }
+    },
+    {
+      "id": "request-unknown-events",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "events": "transport"
+      }
+    },
+    {
+      "id": "request-unknown-endpoint",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "endpoint": "https://example.test"
+      }
+    },
+    {
+      "id": "request-unknown-cause",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "cause": {}
+      }
+    },
+    {
+      "id": "request-context-array",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "context": []
+      }
+    },
+    {
+      "id": "request-model-provider",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "model": { "endpointId": "ep", "modelId": "m", "providerId": "p" }
+      }
+    },
+    {
+      "id": "request-context-unknown",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "context": { "kind": "doc", "id": "doc-1", "token": "not-a-real-secret" }
+      }
+    },
+    {
+      "id": "request-skill-unknown",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [{ "id": "skill-1", "revision": 1, "body": "not public" }],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN"
+      }
+    },
+    {
+      "id": "request-language-empty",
+      "contract": "RunRequest",
+      "valid": false,
+      "value": { "purpose": "chat", "skills": [], "input": "你好 🌍", "regenerate": false, "language": "" }
+    },
+    {
+      "id": "request-id-empty",
+      "contract": "RunRequest",
+      "valid": false,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "replyToId": ""
+      }
+    },
+    {
+      "id": "request-mode-legacy",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "permissionMode": "ask"
+      }
+    },
+    {
+      "id": "request-reasoning-unknown",
+      "contract": "RunRequest",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "reasoningEffort": "extreme"
+      }
+    },
+    {
+      "id": "request-images-too-many",
+      "contract": "RunRequest",
+      "valid": false,
+      "value": {
+        "purpose": "chat",
+        "skills": [],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN",
+        "images": [
+          { "mime": "image/png", "data": "AQ==" },
+          { "mime": "image/png", "data": "AQ==" },
+          { "mime": "image/png", "data": "AQ==" },
+          { "mime": "image/png", "data": "AQ==" },
+          { "mime": "image/png", "data": "AQ==" }
+        ]
+      }
+    },
+    {
+      "id": "request-skills-too-many",
+      "contract": "RunRequest",
+      "valid": false,
+      "value": {
+        "purpose": "chat",
+        "skills": [
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 },
+          { "id": "skill-1", "revision": 1 }
+        ],
+        "input": "你好 🌍",
+        "regenerate": false,
+        "language": "zh-CN"
+      }
+    },
+    {
+      "id": "accepted-without-history",
+      "contract": "RunAccepted",
+      "valid": true,
+      "value": { "runId": "run-1", "conversationId": null, "turnId": null }
+    },
+    {
+      "id": "accepted-with-history",
+      "contract": "RunAccepted",
+      "valid": true,
+      "value": { "runId": "run-2", "conversationId": "conversation-1", "turnId": "turn-1" }
+    },
+    {
+      "id": "accepted-nullable-required",
+      "contract": "RunAccepted",
+      "valid": false,
+      "tsReject": true,
+      "value": { "runId": "run-1", "conversationId": null }
+    },
+    {
+      "id": "accepted-transport-secret",
+      "contract": "RunAccepted",
+      "valid": false,
+      "tsReject": true,
+      "value": { "runId": "run-1", "conversationId": null, "turnId": null, "token": "not-a-real-secret" }
+    },
+    { "id": "ack", "contract": "Ack", "valid": true, "value": { "ok": true } },
+    { "id": "ack-false", "contract": "Ack", "valid": false, "tsReject": true, "value": { "ok": false } },
+    {
+      "id": "snapshot-running",
+      "contract": "RunSnapshot",
+      "valid": true,
+      "value": {
+        "runId": "run-1",
+        "conversationId": null,
+        "turnId": null,
+        "status": "running",
+        "cancelRequested": false
+      }
+    },
+    {
+      "id": "snapshot-completed",
+      "contract": "RunSnapshot",
+      "valid": true,
+      "value": {
+        "runId": "run-1",
+        "conversationId": null,
+        "turnId": null,
+        "status": "completed",
+        "cancelRequested": false
+      }
+    },
+    {
+      "id": "snapshot-failed",
+      "contract": "RunSnapshot",
+      "valid": true,
+      "value": {
+        "runId": "run-1",
+        "conversationId": null,
+        "turnId": null,
+        "status": "failed",
+        "cancelRequested": false,
+        "error": { "code": "internal", "message": "Operation failed", "details": { "errorId": "error-1" } }
+      }
+    },
+    {
+      "id": "snapshot-cancelled",
+      "contract": "RunSnapshot",
+      "valid": true,
+      "value": {
+        "runId": "run-1",
+        "conversationId": null,
+        "turnId": null,
+        "status": "cancelled",
+        "cancelRequested": false
+      }
+    },
+    {
+      "id": "snapshot-cancel-intent",
+      "contract": "RunSnapshot",
+      "valid": true,
+      "value": {
+        "runId": "run-1",
+        "conversationId": null,
+        "turnId": null,
+        "status": "running",
+        "cancelRequested": true
+      }
+    },
+    {
+      "id": "snapshot-exhausted",
+      "contract": "RunSnapshot",
+      "valid": true,
+      "value": {
+        "runId": "run-1",
+        "conversationId": null,
+        "turnId": null,
+        "status": "completed",
+        "cancelRequested": false,
+        "exhausted": true
+      }
+    },
+    {
+      "id": "snapshot-error-null",
+      "contract": "RunSnapshot",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "runId": "run-1",
+        "conversationId": null,
+        "turnId": null,
+        "status": "running",
+        "cancelRequested": false,
+        "error": null
+      }
+    },
+    {
+      "id": "snapshot-running-with-error",
+      "contract": "RunSnapshot",
+      "valid": false,
+      "value": {
+        "runId": "run-1",
+        "conversationId": null,
+        "turnId": null,
+        "status": "running",
+        "cancelRequested": false,
+        "error": { "code": "internal", "message": "Operation failed", "details": { "errorId": "error-1" } }
+      }
+    },
+    {
+      "id": "snapshot-body-forbidden",
+      "contract": "RunSnapshot",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "runId": "run-1",
+        "conversationId": null,
+        "turnId": null,
+        "status": "running",
+        "cancelRequested": false,
+        "text": "transcript"
+      }
+    },
+    {
+      "id": "snapshot-token-forbidden",
+      "contract": "RunSnapshot",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "runId": "run-1",
+        "conversationId": null,
+        "turnId": null,
+        "status": "running",
+        "cancelRequested": false,
+        "token": "not-a-real-secret"
+      }
+    },
+    {
+      "id": "snapshot-status-unknown",
+      "contract": "RunSnapshot",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "runId": "run-1",
+        "conversationId": null,
+        "turnId": null,
+        "status": "pending",
+        "cancelRequested": false
+      }
+    },
+    { "id": "event-0-search_start", "contract": "RunEvent", "valid": true, "value": { "kind": "search_start" } },
+    {
+      "id": "event-1-search_result",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": {
+        "kind": "search_result",
+        "query": "aether",
+        "provider": "test",
+        "hits": [{ "title": "Reference", "url": "https://example.test/a", "snippet": "Untrusted result" }]
+      }
+    },
+    {
+      "id": "event-2-round_start",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": { "kind": "round_start", "round": 1 }
+    },
+    {
+      "id": "event-3-text_delta",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": { "kind": "text_delta", "text": "Hello" }
+    },
+    {
+      "id": "event-4-reasoning_delta",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": { "kind": "reasoning_delta", "text": "Visible summary" }
+    },
+    {
+      "id": "event-5-tool_call",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": { "kind": "tool_call", "callId": "call-1", "name": "read", "source": "host" }
+    },
+    {
+      "id": "event-6-tool_call",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": { "kind": "tool_call", "callId": "call-2", "name": "lookup", "source": "mcp", "server": "reference" }
+    },
+    {
+      "id": "event-7-approval_required",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": {
+        "kind": "approval_required",
+        "callId": "call-1",
+        "name": "edit",
+        "argsPreview": "Edit selected document"
+      }
+    },
+    {
+      "id": "event-8-tool_result",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": {
+        "kind": "tool_result",
+        "callId": "call-1",
+        "outcome": "ok",
+        "summary": "Saved",
+        "payload": { "documentId": "doc-1", "lines": [1, 2] }
+      }
+    },
+    {
+      "id": "event-9-usage",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": {
+        "kind": "usage",
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null,
+        "reasoningTokens": null,
+        "cost": null
+      }
+    },
+    {
+      "id": "event-10-context",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": {
+        "kind": "context",
+        "usage": { "tokens": null, "contextWindow": null, "source": "unknown", "endpointId": null, "modelId": null }
+      }
+    },
+    { "id": "event-11-end", "contract": "RunEvent", "valid": true, "value": { "kind": "end", "status": "completed" } },
+    {
+      "id": "event-tool-error",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": { "kind": "tool_result", "callId": "call-1", "outcome": "error", "summary": "No replay" }
+    },
+    {
+      "id": "event-tool-denied",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": { "kind": "tool_result", "callId": "call-1", "outcome": "denied", "summary": "No replay" }
+    },
+    {
+      "id": "event-tool-unknown",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": { "kind": "tool_result", "callId": "call-1", "outcome": "unknown", "summary": "No replay" }
+    },
+    {
+      "id": "event-payload-null",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": { "kind": "tool_result", "callId": "call-1", "outcome": "ok", "summary": "Empty", "payload": null }
+    },
+    {
+      "id": "event-end-failed",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": {
+        "kind": "end",
+        "status": "failed",
+        "error": { "code": "internal", "message": "Operation failed", "details": { "errorId": "error-1" } }
+      }
+    },
+    {
+      "id": "event-end-cancelled",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": { "kind": "end", "status": "cancelled" }
+    },
+    {
+      "id": "event-end-exhausted",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": { "kind": "end", "status": "completed", "exhausted": true }
+    },
+    {
+      "id": "event-usage-known",
+      "contract": "RunEvent",
+      "valid": true,
+      "value": {
+        "kind": "usage",
+        "inputTokens": 12,
+        "outputTokens": 3,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 2,
+        "reasoningTokens": 1,
+        "cost": { "amount": 0.001, "currency": "USD" }
+      }
+    },
+    {
+      "id": "event-unknown",
+      "contract": "RunEvent",
+      "valid": false,
+      "tsReject": true,
+      "value": { "kind": "run_started" }
+    },
+    {
+      "id": "event-text-null",
+      "contract": "RunEvent",
+      "valid": false,
+      "tsReject": true,
+      "value": { "kind": "text_delta", "text": null }
+    },
+    {
+      "id": "event-round-negative",
+      "contract": "RunEvent",
+      "valid": false,
+      "value": { "kind": "round_start", "round": -1 }
+    },
+    {
+      "id": "event-round-fraction",
+      "contract": "RunEvent",
+      "valid": false,
+      "value": { "kind": "round_start", "round": 1.5 }
+    },
+    {
+      "id": "event-raw-args",
+      "contract": "RunEvent",
+      "valid": false,
+      "tsReject": true,
+      "value": { "kind": "tool_call", "callId": "call-1", "name": "read", "source": "host", "args": {} }
+    },
+    {
+      "id": "event-server-null",
+      "contract": "RunEvent",
+      "valid": false,
+      "tsReject": true,
+      "value": { "kind": "tool_call", "callId": "call-1", "name": "read", "source": "mcp", "server": null }
+    },
+    {
+      "id": "event-source-unknown",
+      "contract": "RunEvent",
+      "valid": false,
+      "tsReject": true,
+      "value": { "kind": "tool_call", "callId": "call-1", "name": "read", "source": "external" }
+    },
+    {
+      "id": "event-outcome-unknown",
+      "contract": "RunEvent",
+      "valid": false,
+      "tsReject": true,
+      "value": { "kind": "tool_result", "callId": "call-1", "outcome": "failed", "summary": "" }
+    },
+    {
+      "id": "event-end-error-null",
+      "contract": "RunEvent",
+      "valid": false,
+      "tsReject": true,
+      "value": { "kind": "end", "status": "failed", "error": null }
+    },
+    {
+      "id": "event-end-completed-error",
+      "contract": "RunEvent",
+      "valid": false,
+      "value": {
+        "kind": "end",
+        "status": "completed",
+        "error": { "code": "internal", "message": "Operation failed", "details": { "errorId": "error-1" } }
+      }
+    },
+    {
+      "id": "event-end-running",
+      "contract": "RunEvent",
+      "valid": false,
+      "tsReject": true,
+      "value": { "kind": "end", "status": "running" }
+    },
+    {
+      "id": "event-secret",
+      "contract": "RunEvent",
+      "valid": false,
+      "tsReject": true,
+      "value": { "kind": "search_start", "authorization": "not-a-real-secret" }
+    },
+    {
+      "id": "event-usage-count-missing",
+      "contract": "RunEvent",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "kind": "usage",
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null,
+        "cost": null
+      }
+    },
+    {
+      "id": "event-usage-negative",
+      "contract": "RunEvent",
+      "valid": false,
+      "value": {
+        "kind": "usage",
+        "inputTokens": -1,
+        "outputTokens": null,
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null,
+        "reasoningTokens": null,
+        "cost": null
+      }
+    },
+    {
+      "id": "event-usage-u32-overflow",
+      "contract": "RunEvent",
+      "valid": false,
+      "value": {
+        "kind": "usage",
+        "inputTokens": 4294967296,
+        "outputTokens": null,
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null,
+        "reasoningTokens": null,
+        "cost": null
+      }
+    },
+    {
+      "id": "event-usage-cost-extension",
+      "contract": "RunEvent",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "kind": "usage",
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null,
+        "reasoningTokens": null,
+        "cost": { "amount": 1, "currency": "USD", "reported_price": 1 }
+      }
+    },
+    {
+      "id": "safe-error",
+      "contract": "KitError",
+      "valid": true,
+      "value": { "code": "internal", "message": "Operation failed", "details": { "errorId": "error-1" } }
+    },
+    {
+      "id": "safe-error-minimal",
+      "contract": "KitError",
+      "valid": true,
+      "value": { "code": "bad_request", "message": "Invalid input" }
+    },
+    {
+      "id": "details-all",
+      "contract": "Details",
+      "valid": true,
+      "value": {
+        "field": "input",
+        "reason": "too_long",
+        "status": 400,
+        "limit": 100000,
+        "entity": "turn",
+        "port": 43210,
+        "errorId": "error-1"
+      }
+    },
+    {
+      "id": "error-forbidden-cause",
+      "contract": "KitError",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "code": "internal",
+        "message": "Operation failed",
+        "details": { "errorId": "error-1" },
+        "cause": { "message": "underlying" }
+      }
+    },
+    {
+      "id": "error-forbidden-stack",
+      "contract": "KitError",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "code": "internal",
+        "message": "Operation failed",
+        "details": { "errorId": "error-1" },
+        "stack": "private stack"
+      }
+    },
+    {
+      "id": "error-forbidden-token",
+      "contract": "KitError",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "code": "internal",
+        "message": "Operation failed",
+        "details": { "errorId": "error-1" },
+        "token": "not-a-real-secret"
+      }
+    },
+    {
+      "id": "error-forbidden-sql",
+      "contract": "KitError",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "code": "internal",
+        "message": "Operation failed",
+        "details": { "errorId": "error-1" },
+        "sql": "private SQL"
+      }
+    },
+    {
+      "id": "error-details-null",
+      "contract": "KitError",
+      "valid": false,
+      "tsReject": true,
+      "value": { "code": "internal", "message": "Operation failed", "details": null }
+    },
+    {
+      "id": "error-code-unknown",
+      "contract": "KitError",
+      "valid": false,
+      "tsReject": true,
+      "value": { "code": "unknown", "message": "Operation failed", "details": { "errorId": "error-1" } }
+    },
+    {
+      "id": "error-details-secret",
+      "contract": "KitError",
+      "valid": false,
+      "tsReject": true,
+      "value": { "code": "internal", "message": "Operation failed", "details": { "token": "not-a-real-secret" } }
+    },
+    {
+      "id": "details-null-reason",
+      "contract": "Details",
+      "valid": false,
+      "tsReject": true,
+      "value": { "reason": null }
+    },
+    { "id": "details-port-overflow", "contract": "Details", "valid": false, "value": { "port": 65536 } },
+    { "id": "details-limit-negative", "contract": "Details", "valid": false, "value": { "limit": -1 } },
+    {
+      "id": "conversation-summary",
+      "contract": "ConversationSummary",
+      "valid": true,
+      "value": {
+        "id": "conversation-1",
+        "title": "First question",
+        "scope": null,
+        "selectedTurnId": "turn-1",
+        "createdAt": 0,
+        "updatedAt": 1793145600000
+      }
+    },
+    {
+      "id": "conversation",
+      "contract": "Conversation",
+      "valid": true,
+      "value": {
+        "summary": {
+          "id": "conversation-1",
+          "title": "First question",
+          "scope": null,
+          "selectedTurnId": "turn-1",
+          "createdAt": 0,
+          "updatedAt": 1793145600000
+        },
+        "turns": [
+          {
+            "id": "turn-1",
+            "parentId": null,
+            "questionId": "turn-1",
+            "supersedesId": null,
+            "kind": "reply",
+            "status": "completed",
+            "input": "Hello",
+            "text": "World",
+            "modelId": null,
+            "endpointId": null,
+            "errorCode": null,
+            "reasoningText": null,
+            "images": [{ "mime": "image/png", "url": null }],
+            "generated": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "conversation-empty",
+      "contract": "Conversation",
+      "valid": true,
+      "value": {
+        "summary": {
+          "id": "conversation-1",
+          "title": "First question",
+          "scope": null,
+          "selectedTurnId": null,
+          "createdAt": 0,
+          "updatedAt": 1793145600000
+        },
+        "turns": []
+      }
+    },
+    {
+      "id": "turn-minimal",
+      "contract": "Turn",
+      "valid": true,
+      "value": {
+        "id": "turn-1",
+        "parentId": null,
+        "questionId": "turn-1",
+        "supersedesId": null,
+        "kind": "reply",
+        "status": "completed",
+        "input": "Hello",
+        "text": "World",
+        "modelId": null,
+        "endpointId": null,
+        "errorCode": null,
+        "reasoningText": null,
+        "images": [{ "mime": "image/png", "url": null }],
+        "generated": []
+      }
+    },
+    {
+      "id": "turn-statistics-null",
+      "contract": "Turn",
+      "valid": true,
+      "value": {
+        "id": "turn-1",
+        "parentId": null,
+        "questionId": "turn-1",
+        "supersedesId": null,
+        "kind": "reply",
+        "status": "completed",
+        "input": "Hello",
+        "text": "World",
+        "modelId": null,
+        "endpointId": null,
+        "errorCode": null,
+        "reasoningText": null,
+        "images": [{ "mime": "image/png", "url": null }],
+        "generated": [],
+        "usage": null,
+        "contextUsage": null,
+        "reasoningEffort": null,
+        "cost": null
+      }
+    },
+    {
+      "id": "turn-statistics-known",
+      "contract": "Turn",
+      "valid": true,
+      "value": {
+        "id": "turn-1",
+        "parentId": null,
+        "questionId": "turn-1",
+        "supersedesId": null,
+        "kind": "reply",
+        "status": "completed",
+        "input": "Hello",
+        "text": "World",
+        "modelId": null,
+        "endpointId": null,
+        "errorCode": null,
+        "reasoningText": null,
+        "images": [{ "mime": "image/png", "url": null }],
+        "generated": [{ "mime": "image/webp", "url": "/images/image-1" }],
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": null,
+          "cacheReadTokens": null,
+          "cacheWriteTokens": null,
+          "reasoningTokens": null
+        },
+        "contextUsage": {
+          "tokens": null,
+          "contextWindow": null,
+          "source": "unknown",
+          "endpointId": null,
+          "modelId": null
+        },
+        "reasoningEffort": "default",
+        "cost": { "amount": 0, "currency": "CNY" }
+      }
+    },
+    {
+      "id": "turn-translation",
+      "contract": "Turn",
+      "valid": true,
+      "value": {
+        "id": "turn-1",
+        "parentId": "source-1",
+        "questionId": "turn-2",
+        "supersedesId": null,
+        "kind": "translation",
+        "status": "completed",
+        "input": "Hello",
+        "text": "World",
+        "modelId": null,
+        "endpointId": null,
+        "errorCode": null,
+        "reasoningText": null,
+        "images": [],
+        "generated": []
+      }
+    },
+    {
+      "id": "turn-no-domain-messages",
+      "contract": "Turn",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "id": "turn-1",
+        "parentId": null,
+        "questionId": "turn-1",
+        "supersedesId": null,
+        "kind": "reply",
+        "status": "completed",
+        "input": "Hello",
+        "text": "World",
+        "modelId": null,
+        "endpointId": null,
+        "errorCode": null,
+        "reasoningText": null,
+        "images": [{ "mime": "image/png", "url": null }],
+        "generated": [],
+        "messages": []
+      }
+    },
+    {
+      "id": "turn-no-native-reasoning",
+      "contract": "Turn",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "id": "turn-1",
+        "parentId": null,
+        "questionId": "turn-1",
+        "supersedesId": null,
+        "kind": "reply",
+        "status": "completed",
+        "input": "Hello",
+        "text": "World",
+        "modelId": null,
+        "endpointId": null,
+        "errorCode": null,
+        "reasoningText": null,
+        "images": [{ "mime": "image/png", "url": null }],
+        "generated": [],
+        "reasoning": { "signature": "private" }
+      }
+    },
+    {
+      "id": "turn-required-nullable",
+      "contract": "Turn",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "id": "turn-1",
+        "questionId": "turn-1",
+        "supersedesId": null,
+        "kind": "reply",
+        "status": "completed",
+        "input": "Hello",
+        "text": "World",
+        "modelId": null,
+        "endpointId": null,
+        "errorCode": null,
+        "reasoningText": null,
+        "images": [{ "mime": "image/png", "url": null }],
+        "generated": []
+      }
+    },
+    {
+      "id": "turn-kind-unknown",
+      "contract": "Turn",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "id": "turn-1",
+        "parentId": null,
+        "questionId": "turn-1",
+        "supersedesId": null,
+        "kind": "retry",
+        "status": "completed",
+        "input": "Hello",
+        "text": "World",
+        "modelId": null,
+        "endpointId": null,
+        "errorCode": null,
+        "reasoningText": null,
+        "images": [{ "mime": "image/png", "url": null }],
+        "generated": []
+      }
+    },
+    {
+      "id": "summary-unsafe-time",
+      "contract": "ConversationSummary",
+      "valid": false,
+      "value": {
+        "id": "conversation-1",
+        "title": "First question",
+        "scope": null,
+        "selectedTurnId": "turn-1",
+        "createdAt": 9007199254740992,
+        "updatedAt": 1793145600000
+      }
+    },
+    {
+      "id": "summary-fraction-time",
+      "contract": "ConversationSummary",
+      "valid": false,
+      "value": {
+        "id": "conversation-1",
+        "title": "First question",
+        "scope": null,
+        "selectedTurnId": "turn-1",
+        "createdAt": 0,
+        "updatedAt": 0.5
+      }
+    },
+    {
+      "id": "summary-unknown",
+      "contract": "ConversationSummary",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "id": "conversation-1",
+        "title": "First question",
+        "scope": null,
+        "selectedTurnId": "turn-1",
+        "createdAt": 0,
+        "updatedAt": 1793145600000,
+        "owner": "user-1"
+      }
+    },
+    {
+      "id": "dependency-ModelRef",
+      "contract": "ModelRef",
+      "valid": true,
+      "value": { "endpointId": "ep", "modelId": "m" }
+    },
+    {
+      "id": "dependency-ContextRef",
+      "contract": "ContextRef",
+      "valid": true,
+      "value": { "kind": "host-kind", "id": "opaque-id" }
+    },
+    { "id": "dependency-SkillRef", "contract": "SkillRef", "valid": true, "value": { "id": "skill-1", "revision": 0 } },
+    {
+      "id": "dependency-ImagePart",
+      "contract": "ImagePart",
+      "valid": true,
+      "value": { "mime": "image/jpeg", "data": "AQI=" }
+    },
+    {
+      "id": "dependency-ImageRef",
+      "contract": "ImageRef",
+      "valid": true,
+      "value": { "mime": "image/gif", "url": null }
+    },
+    {
+      "id": "dependency-SearchHit",
+      "contract": "SearchHit",
+      "valid": true,
+      "value": { "title": "Title", "url": "http://example.test/", "snippet": "" }
+    },
+    {
+      "id": "dependency-TokenUsage",
+      "contract": "TokenUsage",
+      "valid": true,
+      "value": {
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null,
+        "reasoningTokens": null
+      }
+    },
+    {
+      "id": "dependency-ContextUsage",
+      "contract": "ContextUsage",
+      "valid": true,
+      "value": { "tokens": null, "contextWindow": null, "source": "unknown", "endpointId": null, "modelId": null }
+    },
+    { "id": "dependency-Cost", "contract": "Cost", "valid": true, "value": { "amount": 0, "currency": "USD" } },
+    {
+      "id": "image-mime",
+      "contract": "ImagePart",
+      "valid": false,
+      "value": { "mime": "image/svg+xml", "data": "AQ==" }
+    },
+    {
+      "id": "image-prefix",
+      "contract": "ImagePart",
+      "valid": false,
+      "value": { "mime": "image/png", "data": "data:image/png;base64,AQ==" }
+    },
+    { "id": "image-padding", "contract": "ImagePart", "valid": false, "value": { "mime": "image/png", "data": "AQ" } },
+    {
+      "id": "image-noncanonical",
+      "contract": "ImagePart",
+      "valid": false,
+      "value": { "mime": "image/png", "data": "AR==" }
+    },
+    {
+      "id": "image-whitespace",
+      "contract": "ImagePart",
+      "valid": false,
+      "value": { "mime": "image/png", "data": "AQ==\n" }
+    },
+    {
+      "id": "image-secret",
+      "contract": "ImagePart",
+      "valid": false,
+      "tsReject": true,
+      "value": { "mime": "image/png", "data": "AQ==", "token": "not-a-real-secret" }
+    },
+    {
+      "id": "image-ref-url-required",
+      "contract": "ImageRef",
+      "valid": false,
+      "tsReject": true,
+      "value": { "mime": "image/png" }
+    },
+    {
+      "id": "image-ref-no-bytes",
+      "contract": "ImageRef",
+      "valid": false,
+      "tsReject": true,
+      "value": { "mime": "image/png", "url": null, "data": "AQ==" }
+    },
+    {
+      "id": "search-hit-scheme",
+      "contract": "SearchHit",
+      "valid": false,
+      "value": { "title": "x", "url": "file:///private", "snippet": "" }
+    },
+    {
+      "id": "token-count-fraction",
+      "contract": "TokenUsage",
+      "valid": false,
+      "value": {
+        "inputTokens": 0.5,
+        "outputTokens": null,
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null,
+        "reasoningTokens": null
+      }
+    },
+    {
+      "id": "context-source-unknown",
+      "contract": "ContextUsage",
+      "valid": false,
+      "tsReject": true,
+      "value": { "tokens": null, "contextWindow": null, "source": "native", "endpointId": null, "modelId": null }
+    },
+    { "id": "cost-negative", "contract": "Cost", "valid": false, "value": { "amount": -0.01, "currency": "USD" } },
+    {
+      "id": "cost-currency",
+      "contract": "Cost",
+      "valid": false,
+      "tsReject": true,
+      "value": { "amount": 1, "currency": "EUR" }
+    },
+    {
+      "id": "skill-negative-revision",
+      "contract": "SkillRef",
+      "valid": false,
+      "value": { "id": "skill-1", "revision": -1 }
+    },
+    { "id": "enum-PermissionMode-default", "contract": "PermissionMode", "valid": true, "value": "default" },
+    { "id": "enum-PermissionMode-plan", "contract": "PermissionMode", "valid": true, "value": "plan" },
+    { "id": "enum-PermissionMode-accept_edits", "contract": "PermissionMode", "valid": true, "value": "accept_edits" },
+    { "id": "enum-PermissionMode-auto", "contract": "PermissionMode", "valid": true, "value": "auto" },
+    { "id": "enum-PermissionMode-full_access", "contract": "PermissionMode", "valid": true, "value": "full_access" },
+    {
+      "id": "enum-PermissionMode-reject",
+      "contract": "PermissionMode",
+      "valid": false,
+      "tsReject": true,
+      "value": "__unknown__"
+    },
+    { "id": "enum-ToolEffect-read", "contract": "ToolEffect", "valid": true, "value": "read" },
+    { "id": "enum-ToolEffect-edit", "contract": "ToolEffect", "valid": true, "value": "edit" },
+    { "id": "enum-ToolEffect-exec", "contract": "ToolEffect", "valid": true, "value": "exec" },
+    { "id": "enum-ToolEffect-other", "contract": "ToolEffect", "valid": true, "value": "other" },
+    {
+      "id": "enum-ToolEffect-reject",
+      "contract": "ToolEffect",
+      "valid": false,
+      "tsReject": true,
+      "value": "__unknown__"
+    },
+    { "id": "enum-Approval-auto", "contract": "Approval", "valid": true, "value": "auto" },
+    { "id": "enum-Approval-ask", "contract": "Approval", "valid": true, "value": "ask" },
+    { "id": "enum-Approval-deny", "contract": "Approval", "valid": true, "value": "deny" },
+    { "id": "enum-Approval-reject", "contract": "Approval", "valid": false, "tsReject": true, "value": "__unknown__" },
+    { "id": "enum-ReasoningEffort-default", "contract": "ReasoningEffort", "valid": true, "value": "default" },
+    { "id": "enum-ReasoningEffort-none", "contract": "ReasoningEffort", "valid": true, "value": "none" },
+    { "id": "enum-ReasoningEffort-auto", "contract": "ReasoningEffort", "valid": true, "value": "auto" },
+    { "id": "enum-ReasoningEffort-minimal", "contract": "ReasoningEffort", "valid": true, "value": "minimal" },
+    { "id": "enum-ReasoningEffort-low", "contract": "ReasoningEffort", "valid": true, "value": "low" },
+    { "id": "enum-ReasoningEffort-medium", "contract": "ReasoningEffort", "valid": true, "value": "medium" },
+    { "id": "enum-ReasoningEffort-high", "contract": "ReasoningEffort", "valid": true, "value": "high" },
+    { "id": "enum-ReasoningEffort-xhigh", "contract": "ReasoningEffort", "valid": true, "value": "xhigh" },
+    { "id": "enum-ReasoningEffort-max", "contract": "ReasoningEffort", "valid": true, "value": "max" },
+    {
+      "id": "enum-ReasoningEffort-reject",
+      "contract": "ReasoningEffort",
+      "valid": false,
+      "tsReject": true,
+      "value": "__unknown__"
+    },
+    { "id": "enum-Currency-USD", "contract": "Currency", "valid": true, "value": "USD" },
+    { "id": "enum-Currency-CNY", "contract": "Currency", "valid": true, "value": "CNY" },
+    { "id": "enum-Currency-reject", "contract": "Currency", "valid": false, "tsReject": true, "value": "__unknown__" },
+    { "id": "enum-ContextSource-reported", "contract": "ContextSource", "valid": true, "value": "reported" },
+    { "id": "enum-ContextSource-estimated", "contract": "ContextSource", "valid": true, "value": "estimated" },
+    { "id": "enum-ContextSource-unknown", "contract": "ContextSource", "valid": true, "value": "unknown" },
+    {
+      "id": "enum-ContextSource-reject",
+      "contract": "ContextSource",
+      "valid": false,
+      "tsReject": true,
+      "value": "__unknown__"
+    },
+    { "id": "enum-KitErrorCode-bad_request", "contract": "KitErrorCode", "valid": true, "value": "bad_request" },
+    { "id": "enum-KitErrorCode-not_found", "contract": "KitErrorCode", "valid": true, "value": "not_found" },
+    { "id": "enum-KitErrorCode-conflict", "contract": "KitErrorCode", "valid": true, "value": "conflict" },
+    { "id": "enum-KitErrorCode-unsupported", "contract": "KitErrorCode", "valid": true, "value": "unsupported" },
+    { "id": "enum-KitErrorCode-cancelled", "contract": "KitErrorCode", "valid": true, "value": "cancelled" },
+    { "id": "enum-KitErrorCode-unauthorized", "contract": "KitErrorCode", "valid": true, "value": "unauthorized" },
+    { "id": "enum-KitErrorCode-forbidden", "contract": "KitErrorCode", "valid": true, "value": "forbidden" },
+    { "id": "enum-KitErrorCode-rate_limited", "contract": "KitErrorCode", "valid": true, "value": "rate_limited" },
+    { "id": "enum-KitErrorCode-upstream", "contract": "KitErrorCode", "valid": true, "value": "upstream" },
+    { "id": "enum-KitErrorCode-timeout", "contract": "KitErrorCode", "valid": true, "value": "timeout" },
+    { "id": "enum-KitErrorCode-network", "contract": "KitErrorCode", "valid": true, "value": "network" },
+    { "id": "enum-KitErrorCode-needs_config", "contract": "KitErrorCode", "valid": true, "value": "needs_config" },
+    {
+      "id": "enum-KitErrorCode-budget_exceeded",
+      "contract": "KitErrorCode",
+      "valid": true,
+      "value": "budget_exceeded"
+    },
+    {
+      "id": "enum-KitErrorCode-incompatible_db",
+      "contract": "KitErrorCode",
+      "valid": true,
+      "value": "incompatible_db"
+    },
+    { "id": "enum-KitErrorCode-internal", "contract": "KitErrorCode", "valid": true, "value": "internal" },
+    {
+      "id": "enum-KitErrorCode-reject",
+      "contract": "KitErrorCode",
+      "valid": false,
+      "tsReject": true,
+      "value": "__unknown__"
+    },
+    { "id": "enum-EndStatus-completed", "contract": "EndStatus", "valid": true, "value": "completed" },
+    { "id": "enum-EndStatus-failed", "contract": "EndStatus", "valid": true, "value": "failed" },
+    { "id": "enum-EndStatus-cancelled", "contract": "EndStatus", "valid": true, "value": "cancelled" },
+    {
+      "id": "enum-EndStatus-reject",
+      "contract": "EndStatus",
+      "valid": false,
+      "tsReject": true,
+      "value": "__unknown__"
+    },
+    { "id": "enum-RunStatus-running", "contract": "RunStatus", "valid": true, "value": "running" },
+    { "id": "enum-RunStatus-completed", "contract": "RunStatus", "valid": true, "value": "completed" },
+    { "id": "enum-RunStatus-failed", "contract": "RunStatus", "valid": true, "value": "failed" },
+    { "id": "enum-RunStatus-cancelled", "contract": "RunStatus", "valid": true, "value": "cancelled" },
+    {
+      "id": "enum-RunStatus-reject",
+      "contract": "RunStatus",
+      "valid": false,
+      "tsReject": true,
+      "value": "__unknown__"
+    },
+    { "id": "enum-TurnStatus-running", "contract": "TurnStatus", "valid": true, "value": "running" },
+    { "id": "enum-TurnStatus-completed", "contract": "TurnStatus", "valid": true, "value": "completed" },
+    { "id": "enum-TurnStatus-failed", "contract": "TurnStatus", "valid": true, "value": "failed" },
+    { "id": "enum-TurnStatus-cancelled", "contract": "TurnStatus", "valid": true, "value": "cancelled" },
+    {
+      "id": "enum-TurnStatus-reject",
+      "contract": "TurnStatus",
+      "valid": false,
+      "tsReject": true,
+      "value": "__unknown__"
+    },
+    { "id": "enum-ToolOutcome-ok", "contract": "ToolOutcome", "valid": true, "value": "ok" },
+    { "id": "enum-ToolOutcome-error", "contract": "ToolOutcome", "valid": true, "value": "error" },
+    { "id": "enum-ToolOutcome-denied", "contract": "ToolOutcome", "valid": true, "value": "denied" },
+    { "id": "enum-ToolOutcome-unknown", "contract": "ToolOutcome", "valid": true, "value": "unknown" },
+    {
+      "id": "conversation-domain-forbidden",
+      "contract": "Conversation",
+      "valid": false,
+      "tsReject": true,
+      "value": {
+        "summary": {
+          "id": "conversation-1",
+          "title": "Question",
+          "scope": null,
+          "selectedTurnId": null,
+          "createdAt": 0,
+          "updatedAt": 0
+        },
+        "turns": [],
+        "owner": "private-owner"
+      }
+    },
+    {
+      "id": "model-ref-provider-forbidden",
+      "contract": "ModelRef",
+      "valid": false,
+      "tsReject": true,
+      "value": { "endpointId": "ep", "modelId": "m", "providerId": "p" }
+    },
+    {
+      "id": "context-ref-missing-kind",
+      "contract": "ContextRef",
+      "valid": false,
+      "tsReject": true,
+      "value": { "id": "opaque-id" }
+    },
+    {
+      "id": "enum-ToolOutcome-reject",
+      "contract": "ToolOutcome",
+      "valid": false,
+      "tsReject": true,
+      "value": "__unknown__"
+    }
+  ],
+  "boundaries": [
+    {
+      "id": "input-unicode",
+      "contract": "RunRequest",
+      "base": "request-minimal",
+      "path": ["input"],
+      "unit": "🌍",
+      "limit": 100000
+    },
+    {
+      "id": "language-unicode",
+      "contract": "RunRequest",
+      "base": "request-minimal",
+      "path": ["language"],
+      "unit": "中",
+      "limit": 80
+    },
+    {
+      "id": "scope-unicode",
+      "contract": "RunRequest",
+      "base": "request-minimal",
+      "path": ["scope"],
+      "unit": "界",
+      "limit": 200
+    },
+    {
+      "id": "action-id",
+      "contract": "RunRequest",
+      "base": "request-minimal",
+      "path": ["replyToId"],
+      "unit": "x",
+      "limit": 128
+    },
+    {
+      "id": "target-language",
+      "contract": "RunRequest",
+      "base": "request-minimal",
+      "path": ["targetLanguage"],
+      "unit": "x",
+      "limit": 80
+    },
+    {
+      "id": "title-unicode",
+      "contract": "ConversationSummary",
+      "base": "conversation-summary",
+      "path": ["title"],
+      "unit": "界",
+      "limit": 200
+    },
+    {
+      "id": "approval-preview",
+      "contract": "RunEvent",
+      "base": "event-7-approval_required",
+      "path": ["argsPreview"],
+      "unit": "🌍",
+      "limit": 2000
+    }
+  ]
+}

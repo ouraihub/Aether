@@ -19,6 +19,16 @@ impl Search {
             jobs: std::sync::Mutex::new(HashMap::new()),
         }
     }
+
+    pub(crate) fn cancel_all(&self) {
+        let jobs = self
+            .jobs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for cancel in jobs.values() {
+            cancel.cancel();
+        }
+    }
 }
 fn start<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<CancellationToken, KitError> {
     if id.len() > 64 {

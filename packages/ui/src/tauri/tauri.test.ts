@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { isKitClientError } from '../ports'
-import type { Conversation, RunRequest } from '../ports'
+import type { Conversation, RunEvent, RunRequest } from '../ports'
 import { createTauriPorts } from './index'
 
 function required<T>(value: T | null | undefined): T {
@@ -23,8 +23,13 @@ beforeEach(() => invokeMock.mockReset())
 
 describe('createTauriPorts', () => {
   it('creates only the declared ports', () => {
-    expect(Object.keys(createTauriPorts())).toEqual(['logs'])
-    expect(Object.keys(createTauriPorts({ providers: true, chat: true })).sort()).toEqual(['chat', 'logs', 'providers'])
+    expect(Object.keys(createTauriPorts())).toEqual(['logs', 'desktop'])
+    expect(Object.keys(createTauriPorts({ providers: true, chat: true })).sort()).toEqual([
+      'chat',
+      'desktop',
+      'logs',
+      'providers',
+    ])
   })
 
   it('turns a KitError rejection into KitClientError', async () => {
@@ -45,7 +50,7 @@ describe('createTauriPorts', () => {
       turns: [],
     }
     invokeMock.mockResolvedValue(conversation)
-    const history = createTauriPorts({ chat: true, chatHistory: true }).chat?.history
+    const history = createTauriPorts({ conversations: true }).conversations
     await history?.editTurn('c1', 't1', 'new', 'old')
     await history?.removeTurn('c1', 't1')
     await history?.fork('c1', 't1')
@@ -59,7 +64,7 @@ describe('createTauriPorts', () => {
   })
 
   it('propagates every history mutation KitError unchanged', async () => {
-    const history = required(createTauriPorts({ chat: true, chatHistory: true }).chat?.history)
+    const history = required(createTauriPorts({ conversations: true }).conversations)
     const actions = [
       () => history.editTurn('c1', 't1', 'new', 'old'),
       () => history.removeTurn('c1', 't1'),
@@ -86,7 +91,7 @@ describe('createTauriPorts', () => {
       retryTurnId: 'original',
       model: { endpointId: 'endpoint', modelId: 'model' },
     }
-    expect(await required(createTauriPorts({ chat: true }).chat).run(request, () => undefined)).toEqual(accepted)
+    expect(await required(createTauriPorts({ chat: true }).chat).start(request, () => undefined)).toEqual(accepted)
     expect(invokeMock.mock.calls[0]?.[0]).toBe('plugin:aether|chat_run')
     expect(invokeMock.mock.calls[0]?.[1]).toMatchObject({ request })
   })
@@ -123,7 +128,7 @@ describe('createTauriPorts', () => {
     invokeMock.mockResolvedValue({ runId: 'r1', conversationId: null, turnId: null })
     const controller = new AbortController()
     const chat = createTauriPorts({ chat: true }).chat
-    expect(await chat?.run(REQUEST, () => undefined, { signal: controller.signal })).toEqual({
+    expect(await chat?.start(REQUEST, () => undefined, { signal: controller.signal })).toEqual({
       runId: 'r1',
       conversationId: null,
       turnId: null,
@@ -139,9 +144,76 @@ describe('createTauriPorts', () => {
 
   it('an already aborted run never reaches the backend', async () => {
     const error: unknown = await createTauriPorts({ chat: true })
-      .chat?.run(REQUEST, () => undefined, { signal: AbortSignal.abort() })
+      .chat?.start(REQUEST, () => undefined, { signal: AbortSignal.abort() })
       .catch((caught: unknown) => caught)
     expect(isKitClientError(error) && error.code).toBe('cancelled')
     expect(invokeMock).not.toHaveBeenCalled()
+  })
+
+  it('cancels a late acceptance after abort without manufacturing a terminal event', async () => {
+    const pending = Promise.withResolvers<{ runId: string; conversationId: null; turnId: null }>()
+    invokeMock.mockReturnValueOnce(pending.promise).mockResolvedValue(undefined)
+    const controller = new AbortController()
+    const events: RunEvent[] = []
+    const started = required(createTauriPorts({ chat: true }).chat).start(REQUEST, (event) => events.push(event), {
+      signal: controller.signal,
+    })
+    controller.abort()
+    expect(events).toEqual([])
+    pending.resolve({ runId: 'late', conversationId: null, turnId: null })
+    expect(await started).toEqual({ runId: 'late', conversationId: null, turnId: null })
+    expect(invokeMock).toHaveBeenLastCalledWith('plugin:aether|chat_cancel', { runId: 'late' })
+    expect(events).toEqual([])
+  })
+
+  it('cleans the abort listener before delivering an end that precedes acceptance', async () => {
+    const pending = Promise.withResolvers<{ runId: string; conversationId: null; turnId: null }>()
+    invokeMock.mockReturnValueOnce(pending.promise)
+    const controller = new AbortController()
+    const events: RunEvent[] = []
+    const started = required(createTauriPorts({ chat: true }).chat).start(
+      REQUEST,
+      (event) => {
+        events.push(event)
+        controller.abort()
+      },
+      { signal: controller.signal },
+    )
+    const args = invokeMock.mock.calls[0]?.[1] as { onEvent: { onmessage: (event: RunEvent) => void } }
+    args.onEvent.onmessage({ kind: 'end', status: 'completed' })
+    pending.resolve({ runId: 'ended', conversationId: null, turnId: null })
+    await started
+    args.onEvent.onmessage({ kind: 'text_delta', text: 'too late' })
+    expect(events).toEqual([{ kind: 'end', status: 'completed' }])
+    expect(invokeMock.mock.calls.map(([command]) => command)).toEqual(['plugin:aether|chat_run'])
+  })
+
+  it('removes abort handling when start rejects without emitting another failure', async () => {
+    const pending = Promise.withResolvers<never>()
+    invokeMock.mockReturnValueOnce(pending.promise)
+    const controller = new AbortController()
+    const events: RunEvent[] = []
+    const started = required(createTauriPorts({ chat: true }).chat).start(REQUEST, (event) => events.push(event), {
+      signal: controller.signal,
+    })
+    pending.reject({ code: 'network', message: 'offline' })
+    await expect(started).rejects.toMatchObject({ code: 'network' })
+    controller.abort()
+    expect(events).toEqual([])
+    expect(invokeMock.mock.calls).toHaveLength(1)
+  })
+
+  it('returns snapshot status and propagates unknown runs instead of treating them as finished', async () => {
+    const chat = required(createTauriPorts({ chat: true }).chat)
+    invokeMock.mockResolvedValueOnce({
+      runId: 'r',
+      conversationId: null,
+      turnId: null,
+      status: 'running',
+      cancelRequested: true,
+    })
+    expect(await chat.getSnapshot('r')).toMatchObject({ status: 'running', cancelRequested: true })
+    invokeMock.mockRejectedValueOnce({ code: 'not_found', message: 'unknown run' })
+    await expect(chat.getSnapshot('missing')).rejects.toMatchObject({ code: 'not_found' })
   })
 })

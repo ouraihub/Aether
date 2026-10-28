@@ -7,39 +7,11 @@ use ts_rs::TS;
 pub use aether_support::{Approval, PermissionMode, ToolEffect};
 use aether_support::{Connection, KitError, ReasoningBlock, ReasoningEffort};
 
+use aether_images::ImagePart;
 /// Images per user input (docs/19 §2).
 pub const MAX_IMAGES: usize = 4;
-/// Decoded bytes per image.
-pub const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
-/// Accepted image MIME types.
-pub const IMAGE_MIMES: &[&str] = &["image/png", "image/jpeg", "image/webp", "image/gif"];
-/// Days stored image bytes are kept before `purge_images` clears them.
-pub const IMAGE_TTL_DAYS: i64 = 7;
-
-/// One user image: standard base64 without a `data:` prefix.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export)]
-pub struct ImagePart {
-    /// One of [`IMAGE_MIMES`].
-    pub mime: String,
-    /// Base64 bytes.
-    pub data: String,
-}
-
-/// An image as shown in history; `url = None` once its bytes expired.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export)]
-pub struct ImageRef {
-    /// MIME type.
-    pub mime: String,
-    /// Host URL (desktop `data:` URL, web same-origin route).
-    pub url: Option<String>,
-}
 
 /// Everything one run needs, assembled by the integration layer before the run starts.
-#[derive(Debug)]
 pub struct RunInput {
     /// Run id reported to the UI.
     pub run_id: String,
@@ -191,6 +163,8 @@ pub enum ToolExecution {
         code: String,
         /// Message fed back to the model.
         message: String,
+        /// Structured data for the UI only; never model instructions.
+        payload: Option<Value>,
     },
     /// Started but the outcome is unknown; side effects may have happened.
     Unknown {
@@ -388,6 +362,65 @@ pub enum RunEvent {
     },
 }
 
+/// Token usage reported by the upstream; `None` when not reported (never estimated).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Usage {
+    /// Input tokens.
+    pub input_tokens: Option<u32>,
+    /// Output tokens.
+    pub output_tokens: Option<u32>,
+    /// Cached input tokens.
+    pub cache_read_tokens: Option<u32>,
+    /// Cached write tokens.
+    pub cache_write_tokens: Option<u32>,
+    /// Reasoning tokens.
+    pub reasoning_tokens: Option<u32>,
+}
+
+#[cfg(feature = "native")]
+impl Usage {
+    /// Sums rounds; a side stays `None` only if no round reported it.
+    pub(crate) fn add(&mut self, round: Self) {
+        let sum = |a: Option<u32>, b: Option<u32>| match (a, b) {
+            (Some(a), Some(b)) => Some(a.saturating_add(b)),
+            (a, b) => a.or(b),
+        };
+        self.input_tokens = sum(self.input_tokens, round.input_tokens);
+        self.output_tokens = sum(self.output_tokens, round.output_tokens);
+        self.cache_read_tokens = sum(self.cache_read_tokens, round.cache_read_tokens);
+        self.cache_write_tokens = sum(self.cache_write_tokens, round.cache_write_tokens);
+        self.reasoning_tokens = sum(self.reasoning_tokens, round.reasoning_tokens);
+    }
+}
+
+impl From<Usage> for aether_support::TokenUsage {
+    fn from(u: Usage) -> Self {
+        Self {
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            cache_read_tokens: u.cache_read_tokens,
+            cache_write_tokens: u.cache_write_tokens,
+            reasoning_tokens: u.reasoning_tokens,
+        }
+    }
+}
+
+/// Outcome and known usage of a completed or interrupted run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunSummary {
+    /// Terminal status.
+    pub status: EndStatus,
+    /// Produced messages, including partial output.
+    pub messages: Vec<Message>,
+    /// Known provider-reported token counts.
+    pub usage: Usage,
+    /// Cost summed per round from the connection's pricing; `None` = unknown (docs/41 §4).
+    pub cost: Option<aether_support::Cost>,
+    /// Last request context estimate or report.
+    pub context_usage: Option<aether_support::ContextUsage>,
+    /// Tool loop stopped at its configured round limit.
+    pub exhausted: bool,
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -458,7 +458,7 @@ export const en: Messages = {
   'mcp.server.issue': 'Issue token',
   'mcp.server.issuedTitle': 'Token “{name}” issued',
   'mcp.server.issuedOnce': 'Copy it now: it is shown only once.',
-  'mcp.server.copyClaude': 'Copy Claude Code config',
+  'mcp.server.copyClaude': 'Copy Claude Code command (POSIX shell)',
   'mcp.server.copyJson': 'Copy JSON config',
   'mcp.server.copied': 'Copied',
   'mcp.server.dismiss': 'Done',

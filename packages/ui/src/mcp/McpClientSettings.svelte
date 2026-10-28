@@ -3,6 +3,7 @@
   // write-only credentials, test connection, trust/enable/private-network switches, and each
   // tool's approval default. Only enabled + trusted servers' tools reach a run. A server is
   // reached over Streamable HTTP or as a local stdio command.
+  import { onDestroy } from 'svelte'
   import { Alert, AlertDescription } from '#lib/components/ui/alert/index.js'
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Dialog from '#lib/components/ui/dialog/index.js'
@@ -15,7 +16,9 @@
   import { Textarea } from '#lib/components/ui/textarea/index.js'
   import { getKitContext } from '../context'
   import { isKitClientError } from '../ports'
-  import type { Approval, McpTransport, ServerDto, ServerSave, ServerSecret } from '../ports'
+  import type { Approval, McpTransport, ServerDto, ServerSave } from '../ports'
+  import { createClientSession } from '../session'
+  import { mapMcpInput } from './input'
 
   const APPROVALS: Approval[] = ['auto', 'ask', 'deny']
   const KINDS: McpTransport['kind'][] = ['http', 'stdio']
@@ -44,6 +47,45 @@
   let query = $state('')
   let env = $state('')
   let currentKeys = $state<string[]>([])
+  const editSession = createClientSession()
+  let editTarget: ServerDto | null = null
+  let editorSaving = $state(false)
+  let editRevision = 0
+  let secretRevision = 0
+
+  function clearSecrets() {
+    headers = ''
+    query = ''
+    env = ''
+    secretRevision++
+  }
+
+  function invalidateEditor() {
+    editSession.invalidate()
+    editorSaving = false
+    clearSecrets()
+  }
+
+  function closeEditor() {
+    invalidateEditor()
+    editing = false
+    editTarget = null
+  }
+
+  function changeKind(next: McpTransport['kind']) {
+    if (next === kind) return
+    invalidateEditor()
+    editRevision++
+    kind = next
+  }
+
+  function changeReplacement(next: boolean) {
+    invalidateEditor()
+    editRevision++
+    replaceSecret = next
+  }
+
+  onDestroy(closeEditor)
 
   // Actions only render when the port exists; the throw marks a host wiring bug.
   function need() {
@@ -144,6 +186,9 @@
     })
 
   function edit(server: ServerDto | null) {
+    invalidateEditor()
+    editTarget = server
+    editRevision++
     const transport = server?.transport
     editId = server?.id ?? null
     name = server?.name ?? ''
@@ -155,68 +200,57 @@
     cwd = transport?.kind === 'stdio' ? (transport.cwd ?? '') : ''
     currentKeys = server?.secretKeys ?? []
     replaceSecret = server === null
-    headers = ''
-    query = ''
-    env = ''
     editing = true
   }
 
-  // Args are one per line and passed as is (no shell), so blank lines are the only thing
-  // dropped; cwd empty means inherited.
-  function transportInput(): McpTransport {
-    if (kind === 'http') return { kind, url: url.trim() }
-    const list = args.split('\n').filter((arg) => arg.trim() !== '')
-    return cwd.trim()
-      ? { kind, command: command.trim(), args: list, cwd: cwd.trim() }
-      : { kind, command: command.trim(), args: list }
-  }
-
-  /** `Name: value` (headers) or `name=value` (query, env) lines; null on a malformed line. */
-  function pairs(text: string, separator: string): Record<string, string> | null {
-    const out: Record<string, string> = {}
-    for (const line of text.split('\n').map((l) => l.trim())) {
-      if (!line) continue
-      const at = line.indexOf(separator)
-      if (at <= 0) return null
-      out[line.slice(0, at).trim()] = line.slice(at + 1).trim()
-    }
-    return out
-  }
-
-  function save() {
-    const current = servers.find((s) => s.id === editId)
-    const transport = transportInput()
-    // allowPrivate only means something for http; the store forces it off for stdio.
-    const input: ServerSave = current
-      ? { ...base(current), name: name.trim(), slug: slug.trim(), transport }
-      : { slug: slug.trim(), name: name.trim(), transport, enabled: false, trusted: false, allowPrivate: false }
-    if (transport.kind === 'stdio') input.allowPrivate = false
-    if (replaceSecret) {
-      const secret: ServerSecret = {}
-      if (kind === 'http') {
-        const h = pairs(headers, ':')
-        const q = pairs(query, '=')
-        if (!h || !q) {
-          notify.toast('error', t('mcp.client.err.secretLine'))
-          return
-        }
-        if (Object.keys(h).length) secret.headers = h
-        if (Object.keys(q).length) secret.query = q
-      } else {
-        const e = pairs(env, '=')
-        if (!e) {
-          notify.toast('error', t('mcp.client.err.secretLine'))
-          return
-        }
-        if (Object.keys(e).length) secret.env = e
-      }
-      // A new server without credentials sends none; an edit with nothing typed clears them.
-      if (current || secret.headers || secret.query || secret.env) input.secret = secret
-    }
-    void act(async () => {
-      servers = await need().save(input)
-      editing = false
+  async function save() {
+    const mapped = mapMcpInput(editTarget, {
+      name,
+      slug,
+      kind,
+      url,
+      command,
+      args,
+      cwd,
+      replaceSecret,
+      headers,
+      query,
+      env,
     })
+    if (!mapped.ok) {
+      notify.toast('error', t(`mcp.client.err.${mapped.error}`))
+      return
+    }
+    const token = editSession.capture()
+    const revision = editRevision
+    const sentSecretRevision = secretRevision
+    editorSaving = true
+    try {
+      const next = await need().save(mapped.value)
+      if (!editSession.isCurrent(token)) return
+      servers = next
+      if (editRevision === revision) {
+        closeEditor()
+      } else {
+        // Preserve edits made while saving, but do not retain successfully sent secrets.
+        const stored = editTarget
+          ? next.find((server) => server.id === editTarget?.id)
+          : next.find((server) => server.slug === mapped.value.slug)
+        if (stored) {
+          editTarget = stored
+          editId = stored.id
+          currentKeys = stored.secretKeys
+        }
+        if (sentSecretRevision === secretRevision) {
+          clearSecrets()
+          replaceSecret = false
+        }
+      }
+    } catch (error) {
+      if (editSession.isCurrent(token)) fail(error)
+    } finally {
+      if (editSession.isCurrent(token)) editorSaving = false
+    }
   }
 </script>
 
@@ -339,8 +373,13 @@
     </ul>
   </section>
 
-  <Dialog.Root bind:open={editing}>
-    <Dialog.Content class="sm:max-w-xl">
+  <Dialog.Root
+    open={editing}
+    onOpenChange={(open) => {
+      if (!open) closeEditor()
+    }}
+  >
+    <Dialog.Content class="sm:max-w-xl" oninput={() => editRevision++}>
       <Dialog.Header>
         <Dialog.Title>{editId ? t('mcp.client.editTitle') : t('mcp.client.add')}</Dialog.Title>
       </Dialog.Header>
@@ -357,7 +396,7 @@
         </div>
         <Field.Field>
           <Field.Label for="kit-mcp-transport">{t('mcp.client.transport')}</Field.Label>
-          <Select.Root type="single" bind:value={kind}>
+          <Select.Root type="single" value={kind} onValueChange={(value) => changeKind(value as McpTransport['kind'])}>
             <Select.Trigger id="kit-mcp-transport" class="w-full">
               {t(`mcp.client.transport.${kind}`)}
             </Select.Trigger>
@@ -394,7 +433,7 @@
         {/if}
         {#if editId}
           <Field.Field orientation="horizontal">
-            <Switch id="kit-mcp-replace" bind:checked={replaceSecret} />
+            <Switch id="kit-mcp-replace" checked={replaceSecret} onCheckedChange={changeReplacement} />
             <Field.Label for="kit-mcp-replace">
               {t('mcp.client.replaceSecret', { keys: currentKeys.join(', ') || '—' })}
             </Field.Label>
@@ -408,25 +447,42 @@
               class="font-mono text-xs"
               placeholder="Authorization: Bearer …"
               bind:value={headers}
+              oninput={() => secretRevision++}
             />
           </Field.Field>
           <Field.Field>
             <Field.Label for="kit-mcp-query">{t('mcp.client.query')}</Field.Label>
-            <Textarea id="kit-mcp-query" class="font-mono text-xs" placeholder="ak=…" bind:value={query} />
+            <Textarea
+              id="kit-mcp-query"
+              class="font-mono text-xs"
+              placeholder="ak=…"
+              bind:value={query}
+              oninput={() => secretRevision++}
+            />
             <Field.Description>{t('mcp.client.secretHint')}</Field.Description>
           </Field.Field>
         {:else if replaceSecret}
           <Field.Field>
             <Field.Label for="kit-mcp-env">{t('mcp.client.env')}</Field.Label>
-            <Textarea id="kit-mcp-env" class="font-mono text-xs" placeholder="GITHUB_TOKEN=…" bind:value={env} />
+            <Textarea
+              id="kit-mcp-env"
+              class="font-mono text-xs"
+              placeholder="GITHUB_TOKEN=…"
+              bind:value={env}
+              oninput={() => secretRevision++}
+            />
             <Field.Description>{t('mcp.client.envHint')}</Field.Description>
           </Field.Field>
         {/if}
       </Field.Group>
       <Dialog.Footer>
-        <Button variant="outline" onclick={() => (editing = false)}>{t('common.cancel')}</Button>
+        <Button variant="outline" onclick={closeEditor}>{t('common.cancel')}</Button>
         <Button
-          disabled={busy || !name.trim() || !slug.trim() || !(kind === 'http' ? url.trim() : command.trim())}
+          disabled={busy ||
+            editorSaving ||
+            !name.trim() ||
+            !slug.trim() ||
+            !(kind === 'http' ? url.trim() : command.trim())}
           onclick={save}>{t('mcp.client.save')}</Button
         >
       </Dialog.Footer>

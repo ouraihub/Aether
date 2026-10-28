@@ -23,12 +23,19 @@ const steps =
           ...common,
           ...frontend,
           // tauri::generate_context! in the examples needs each frontendDist to exist.
+          'pnpm --filter @ouraihub/aether-contracts check-generated',
+          'pnpm --filter @ouraihub/aether-worker-example build',
           'pnpm run kit:check-deps',
           'pnpm run kit:dto-check',
+          'node scripts/contracts-check.mjs',
+          cargo('check -p aether-support --no-default-features'),
+          cargo('check -p aether-chat --no-default-features'),
+          cargo('check -p aether-images --no-default-features'),
+          cargo('check -p aether-runtime --no-default-features --features conversations'),
           cargo('fmt --all -- --check'),
           cargo('clippy --workspace --all-targets --all-features -- -D warnings'),
           cargo('test --workspace --all-features'),
-          ...['providers', 'chat', 'skills', 'mcp-client', 'mcp-server'].map((feature) =>
+          ...['providers', 'chat', 'conversations', 'skills', 'search', 'mcp-client', 'mcp-server'].map((feature) =>
             cargo(`check -p tauri-plugin-aether --no-default-features --features ${feature}`),
           ),
         ]

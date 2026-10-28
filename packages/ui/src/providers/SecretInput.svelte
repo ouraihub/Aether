@@ -1,5 +1,7 @@
 <script lang="ts">
   // API key row: primary key masked with `+N`, show/copy/edit/delete; 🔑 opens key management.
+  import { onDestroy, untrack } from 'svelte'
+  import { createClientSession } from '../session'
   import CopyIcon from '@lucide/svelte/icons/copy'
   import EditIcon from '@lucide/svelte/icons/pencil'
   import EyeIcon from '@lucide/svelte/icons/eye'
@@ -36,6 +38,30 @@
   const keys = $derived(endpoint?.keys ?? [])
   const primary = $derived(primaryKey(keys))
   const plain = $derived(revealed && revealed.id === primary?.id ? revealed.text : null)
+  const session = createClientSession()
+  let passwordRevision = 0
+  let textRevision = 0
+  function clear() {
+    session.invalidate()
+    password = ''
+    passwordRevision++
+    text = ''
+    textRevision++
+    revealed = null
+    askingPassword = false
+    copyAfterReveal = false
+    busy = false
+  }
+  $effect.pre(() => {
+    const target = `${endpoint?.id ?? ''}:${JSON.stringify(keys)}`
+    const managing = dialogOpen
+    untrack(() => {
+      void target
+      void managing
+      clear()
+    })
+  })
+  onDestroy(clear)
 
   async function reveal() {
     const port = ports.providers
@@ -45,58 +71,87 @@
       askingPassword = true
       return
     }
+    const token = session.capture()
+    const revision = passwordRevision
+    const copying = copyAfterReveal
     busy = true
     try {
-      revealed = { id: key.id, text: await port.revealKey(key.id, password) }
+      const value = await port.revealKey(key.id, password)
+      if (!session.isCurrent(token)) return
+      revealed = { id: key.id, text: value }
       askingPassword = false
-      if (copyAfterReveal) await copy()
+      if (copying) await copy()
     } catch (error) {
-      notify.toast('error', error instanceof Error ? error.message : t('providers.key_reveal_failed'))
+      if (session.isCurrent(token))
+        notify.toast('error', error instanceof Error ? error.message : t('providers.key_reveal_failed'))
     } finally {
-      busy = false
-      password = ''
-      copyAfterReveal = false
+      if (session.isCurrent(token)) {
+        busy = false
+        if (passwordRevision === revision) password = ''
+        copyAfterReveal = false
+      }
     }
   }
-  /** Copy needs the plaintext; without it the reveal (and its password prompt on the web) runs first. */
+  /** Check the generation again immediately before the irreversible clipboard write. */
   async function copy() {
     if (plain === null) {
       copyAfterReveal = true
       return reveal()
     }
+    const token = session.capture()
+    const value = plain
     try {
-      await navigator.clipboard.writeText(plain)
-      notify.toast('success', t('providers.key_copied'))
+      if (!session.isCurrent(token)) return
+      await navigator.clipboard.writeText(value)
+      if (session.isCurrent(token)) notify.toast('success', t('providers.key_copied'))
     } catch {
-      notify.toast('error', t('providers.key_copy_failed'))
+      if (session.isCurrent(token)) notify.toast('error', t('providers.key_copy_failed'))
     }
   }
   async function run(action: (port: ProvidersPort) => Promise<Provider[]>) {
-    if (!ports.providers || busy) return
+    if (!ports.providers || busy) return false
+    const token = session.capture()
     busy = true
     try {
-      onchanged(await action(ports.providers))
+      const next = await action(ports.providers)
+      if (!session.isCurrent(token)) return false
+      onchanged(next)
+      return true
     } catch (error) {
-      notify.toast('error', keyError(error, t))
+      if (session.isCurrent(token)) notify.toast('error', keyError(error, t))
+      return false
     } finally {
-      busy = false
+      if (session.isCurrent(token)) busy = false
     }
   }
-  function commit() {
+  async function commit() {
     const key = text.trim()
-    text = ''
     const endpointId = endpoint?.id
-    if (key && endpointId) void run((port) => port.saveKey({ endpointId, key }))
+    if (!key || !endpointId || busy) return
+    const revision = textRevision
+    session.invalidate()
+    revealed = null
+    password = ''
+    askingPassword = false
+    if (await run((port) => port.saveKey({ endpointId, key }))) {
+      if (textRevision === revision) text = ''
+    }
   }
   async function remove() {
     const endpointId = endpoint?.id
     const keyId = primary?.id
     if (!endpointId || !keyId) return
-    if (!(await notify.confirm({ title: t('providers.key_delete'), body: t('providers.key_delete_confirm') }))) return
-    revealed = null
+    const token = session.capture()
+    if (
+      !(await notify.confirm({ title: t('providers.key_delete'), body: t('providers.key_delete_confirm') })) ||
+      !session.isCurrent(token)
+    )
+      return
+    clear()
     await run((port) => port.removeKey(endpointId, keyId))
   }
   function manage(keyId: string | null) {
+    clear()
     editKeyId = keyId
     dialogOpen = true
   }
@@ -116,6 +171,7 @@
         placeholder={t('providers.key_placeholder')}
         disabled={!endpoint || busy}
         bind:value={text}
+        oninput={() => textRevision++}
         onblur={commit}
         onkeydown={(event) => {
           if (event.key === 'Enter') event.currentTarget.blur()
@@ -177,7 +233,7 @@
             onclick={() => {
               copyAfterReveal = false
               if (plain === null) void reveal()
-              else revealed = null
+              else clear()
             }}
             >{#if plain === null}<EyeIcon />{:else}<EyeOffIcon />{/if}</Button
           >{/if}
@@ -201,11 +257,20 @@
       placeholder={t('providers.key_current_password')}
       aria-label={t('providers.key_current_password')}
       bind:value={password}
+      oninput={() => passwordRevision++}
       onkeydown={(event) => event.key === 'Enter' && void reveal()}
     />
   {/if}
 </div>
 
 {#if endpoint}
-  <EndpointKeysDialog bind:open={dialogOpen} {endpoint} {editKeyId} {onchanged} />
+  <EndpointKeysDialog
+    bind:open={dialogOpen}
+    {endpoint}
+    {editKeyId}
+    onchanged={(next) => {
+      clear()
+      onchanged(next)
+    }}
+  />
 {/if}

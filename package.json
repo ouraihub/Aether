@@ -7,8 +7,8 @@
     "node": ">=24.15.0"
   },
   "scripts": {
-    "lint": "eslint packages/ui/src",
-    "format:check": "prettier --check \"packages/ui/src/**/*.{ts,svelte}\" eslint.config.js scripts/*.mjs",
+    "lint": "eslint packages/ui/src packages/core/src packages/worker/src packages/contracts/src",
+    "format:check": "prettier --check \"packages/{ui,core,worker,contracts}/src/**/*.{ts,svelte}\" eslint.config.js scripts/*.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test",
@@ -25,6 +25,8 @@
     "@eslint/js": "10.0.1",
     "@ouraihub/desktop-kit": "github:ouraihub/desktop-kit#c7c8281885dc0e88293abda4f67fd5570dee37db",
     "@ouraihub/release-kit": "github:ouraihub/release-kit#f5703e5ee7c348e91d22178a3ba1a106da5fa0aa",
+    "@types/node": "26.6.5",
+    "ajv": "8.20.0",
     "eslint": "10.11.0",
     "eslint-plugin-import-x": "4.17.1",
     "eslint-plugin-svelte": "3.23.0",
@@ -32,6 +34,8 @@
     "prettier": "3.9.9",
     "prettier-plugin-svelte": "4.1.1",
     "svelte": "5.57.1",
+    "tsx": "4.23.15",
+    "wrangler": "4.154.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.0"
   }

@@ -2,6 +2,7 @@
 //!
 //! 设计：`docs/14-详细设计-kit-skills.md`。实现按 `docs/90-开发任务清单.md` 领取任务后填充。
 
+pub mod content;
 mod dto;
 mod frontmatter;
 mod package;

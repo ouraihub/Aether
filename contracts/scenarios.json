@@ -1,0 +1,295 @@
+{
+  "contractVersion": 1,
+  "description": "Language-neutral backend acceptance scenarios from docs/22, 25 and 26. A runner must drive real services with controlled model/tool/store dependencies, record observations and assert these outcomes; merely parsing this file or echoing fixtures is not a pass. No TS backend execution is claimed.",
+  "observationRules": [
+    "Collect accepted/rejected responses, emitted RunEvent values, snapshots, model requests, tool dispatches and committed conversation state.",
+    "Validate all public values against manifest schemas. Compare concatenated text/reasoning and observable action/state order, not token chunk boundaries or internal SQL.",
+    "Use synchronization barriers for races, not sleeps. Owner comes from the trusted adapter, never RunRequest.",
+    "A normal connected accepted run has exactly one end event and no later event. Event-send failure may prevent end delivery, but must cancel work without replay.",
+    "Use synthetic credential sentinels only. Inspect errors, snapshots and captured diagnostics for leaks; feature text and explicitly allowed payload are not diagnostic logs."
+  ],
+  "scenarios": [
+    {
+      "id": "acceptance-response-race",
+      "requestCase": "request-minimal",
+      "given": [
+        "No history store",
+        "Hold delivery of the accepted response after backend acceptance",
+        "Controlled model produces visible text and reasoning"
+      ],
+      "when": ["Start the run", "Release model output before accepted-response delivery", "Deliver accepted response"],
+      "expect": [
+        "Events may precede the caller's accepted response, but never backend acceptance",
+        "Accepted conversationId and turnId are null",
+        "Text and reasoning each preserve observable order",
+        "Snapshot becomes completed",
+        "One completed end is last"
+      ]
+    },
+    {
+      "id": "preaccept-validation-atomicity",
+      "given": [
+        "Persisted conversation with a completed selected turn",
+        "Observe conversation rows, active registry and model dispatch count"
+      ],
+      "when": [
+        "Independently reject missing model configuration, stale pinned skill revision, unsupported vision input and unauthorized capability"
+      ],
+      "expect": [
+        "Each start returns KitError before acceptance",
+        "No active run, new half-turn or selection change remains",
+        "No model request or tool dispatch occurs",
+        "Existing turns and image rows remain unchanged"
+      ]
+    },
+    {
+      "id": "source-action-validation",
+      "given": [
+        "Completed source has input text, input images and endpoint/model identity",
+        "Host preparation records the effective input"
+      ],
+      "when": [
+        "Retry source while supplying unrelated client input",
+        "Repeat with source model unavailable and no explicit replacement",
+        "Repeat with explicit supported replacement",
+        "Try conflicting retry/translation/regenerate/replyTo combinations, source without conversationId and client images on source actions"
+      ],
+      "expect": [
+        "Host and model see the same authoritative source text/images, never unrelated client input",
+        "Missing source model returns source_model_unavailable before reservation",
+        "Explicit replacement changes model only",
+        "Conflicting actions reject with bad_request and leave no half-turn"
+      ]
+    },
+    {
+      "id": "tool-approval-allow",
+      "given": ["Pinned tool catalog contains an Ask tool", "Tool dispatch is observable"],
+      "when": [
+        "Model requests the tool",
+        "Pause on approval_required",
+        "Approve once as matching owner",
+        "Approve again"
+      ],
+      "expect": [
+        "tool_call precedes approval_required",
+        "Preview has at most 2000 Unicode characters",
+        "No dispatch before approval",
+        "Exactly one dispatch occurs",
+        "Duplicate approval returns conflict/not_found, never dispatches again",
+        "tool_result reflects actual result"
+      ]
+    },
+    {
+      "id": "tool-approval-deny-cancel-expire",
+      "given": ["Three independent runs paused at Ask approval"],
+      "when": [
+        "Deny the first approval",
+        "Cancel the second before tool dispatch",
+        "Let the third approval expire then approve late"
+      ],
+      "expect": [
+        "Denied tool has outcome denied and is not dispatched",
+        "Cancelled undispatched work never executes",
+        "Late approval returns conflict/not_found and never executes",
+        "Each run reaches at most one terminal state"
+      ]
+    },
+    {
+      "id": "tool-call-id-reuse",
+      "given": ["One run with a counting tool and stable catalog"],
+      "when": [
+        "Request identical callId/tool/arguments twice",
+        "Reuse that callId with different arguments or tool name"
+      ],
+      "expect": [
+        "Identical request reuses the known result and dispatch count stays one",
+        "Conflicting reuse is rejected",
+        "A new run does not inherit this run-local deduplication guarantee"
+      ]
+    },
+    {
+      "id": "unknown-dispatch-no-replay",
+      "given": ["Side-effecting tool acknowledges dispatch but its result becomes unobservable"],
+      "when": ["Cancel or break the tool transport after dispatch", "Allow the engine to observe the uncertain result"],
+      "expect": [
+        "Tool outcome is unknown, not ordinary error or an invented successful result",
+        "Unknown is not an EndStatus",
+        "No automatic retry or side-effect replay occurs",
+        "Snapshot cancellation intent does not claim the effect was rolled back"
+      ]
+    },
+    {
+      "id": "confirmed-tool-error-can-continue",
+      "given": ["First tool produces a confirmed error", "Controlled model can consume the tool result and answer"],
+      "when": ["Run to completion"],
+      "expect": [
+        "tool_result outcome is error",
+        "Actual result is fed back once",
+        "The run may finish completed; a tool error is not automatically a failed end"
+      ]
+    },
+    {
+      "id": "round-exhaustion",
+      "given": ["Controlled model repeatedly requests permitted tools until configured round limit"],
+      "when": ["Run reaches the existing limit"],
+      "expect": [
+        "End is completed with exhausted true",
+        "Snapshot has completed and exhausted true",
+        "No additional model round or tool dispatch occurs"
+      ]
+    },
+    {
+      "id": "partial-output-failure",
+      "given": ["Controlled upstream emits text and then a network failure"],
+      "when": ["Run consumes the partial stream"],
+      "expect": [
+        "Already visible text is preserved in order",
+        "Exactly one failed end carries safe KitError",
+        "Snapshot is failed and does not contain transcript or credentials"
+      ]
+    },
+    {
+      "id": "save-before-success-end",
+      "given": ["Persisted run completes model output", "Hold finish_turn commit at a barrier"],
+      "when": ["Inspect snapshot and event stream before releasing commit", "Release successful commit"],
+      "expect": [
+        "Snapshot stays running while saving",
+        "No completed end appears before commit",
+        "Committed turn and selection are visible before completed end",
+        "Snapshot then becomes completed"
+      ]
+    },
+    {
+      "id": "save-failure-visible",
+      "given": ["Persisted run completes model output", "finish_turn deterministically fails"],
+      "when": ["Finalization attempts to save"],
+      "expect": [
+        "Exactly one failed end, not completed",
+        "Snapshot is failed with safe persistence error",
+        "No false completed turn or selection is committed",
+        "No model/tool replay attempts to hide persistence failure"
+      ]
+    },
+    {
+      "id": "cancel-intent-and-finalization-race",
+      "given": ["Run has a barrier-controlled dispatched side effect or pending save"],
+      "when": [
+        "Cancel as owner",
+        "Read snapshot before work resolves",
+        "Release barrier and race repeated cancellation with finalization"
+      ],
+      "expect": [
+        "Cancel returns Ack ok true",
+        "Before resolution snapshot remains running with cancelRequested true",
+        "Cancellation does not immediately invent cancelled or undo dispatched effects",
+        "Final terminal transition occurs at most once",
+        "Repeated terminal cancellation returns identical Ack"
+      ]
+    },
+    {
+      "id": "owner-isolation",
+      "given": ["Owner A has a running approval and a completed run", "Owner B and an unknown runId are available"],
+      "when": [
+        "B calls snapshot/approve/cancel on A's run",
+        "Compare with each operation on unknown runId",
+        "A approves its own pending request"
+      ],
+      "expect": [
+        "Snapshot and approve return not_found for both cross-owner and unknown IDs",
+        "Cancel returns Ack ok true for cross-owner, unknown and terminal IDs",
+        "Cross-owner cancellation does not affect A's work",
+        "Only A's approval may dispatch"
+      ]
+    },
+    {
+      "id": "terminal-cache-completion-order",
+      "given": [
+        "Keep one long-running run active",
+        "Start terminal candidates in a different order from completion order"
+      ],
+      "when": [
+        "Finish 129 candidates in controlled order",
+        "Query all snapshots",
+        "Restart the service and query a previous runId"
+      ],
+      "expect": [
+        "Only the latest 128 terminal completions remain queryable",
+        "The oldest completed candidate is not_found regardless of start order",
+        "The still-active run is not evicted",
+        "Restarted service returns not_found; durable history is queried separately"
+      ]
+    },
+    {
+      "id": "receiver-send-failure",
+      "given": [
+        "Model/tool stream is paused after one observable event",
+        "Event receiver can be closed deterministically"
+      ],
+      "when": ["Close receiver", "Allow next send and release remaining work"],
+      "expect": [
+        "Send failure requests cancellation of subsequent work",
+        "No tool side effect is replayed",
+        "Backend reaches at most one terminal state without requiring end network delivery"
+      ]
+    },
+    {
+      "id": "projection-and-secret-boundary",
+      "given": [
+        "Credential/cause/SQL/header sentinels exist only in backend connection and error source",
+        "Stored reasoning includes visible text and native signatures",
+        "One input image reference is expired"
+      ],
+      "when": ["Trigger upstream and internal errors", "Read snapshot and conversation", "Capture diagnostics"],
+      "expect": [
+        "No credential, cause, stack, SQL or authentication header sentinel occurs in public error/snapshot/log",
+        "Internal errorId links to diagnostics without exposing cause",
+        "Turn exposes visible reasoningText, not native reasoning JSON/messages",
+        "Expired image remains as ImageRef with url null",
+        "Allowed payload is host-approved and budgeted, not arbitrary protocol forwarding"
+      ]
+    },
+    {
+      "id": "effective-request-reservation-cas",
+      "given": ["Prepare source text/images/model and history fingerprint", "Pause before transactional reservation"],
+      "when": ["Modify source, selection or purge source image bytes", "Resume reservation"],
+      "expect": [
+        "Reservation detects changed basis and returns conflict",
+        "No half-turn is committed",
+        "The model never receives an effective request different from the one host authorized"
+      ]
+    },
+    {
+      "id": "conversation-branch-actions",
+      "given": ["Conversation has completed branch A/B and a non-running source candidate"],
+      "when": [
+        "Reply to explicit completed head",
+        "Retry the source",
+        "Translate its visible answer",
+        "Delete a branch parent and fork a surviving branch"
+      ],
+      "expect": [
+        "Reply history contains only selected ancestry",
+        "Retry preserves source input/images/parent/question/kind and supersedes source without deleting it",
+        "Translation uses visible assistant text only, new question identity and no source images",
+        "Delete reattachment and fork preserve valid branch/image ownership per docs/26",
+        "Foreign/missing/cyclic references are never accepted as valid history"
+      ]
+    },
+    {
+      "id": "permission-mode-host-terminal-authority",
+      "given": ["Host allows only a subset of permission modes and declares read/edit/exec/other tools"],
+      "when": [
+        "Request each public permission mode",
+        "Request a mode not offered by this host",
+        "Try to lower a Deny using full_access or a tool's read-only hint"
+      ],
+      "expect": [
+        "Wire values are default/plan/accept_edits/auto/full_access",
+        "Unsupported host selection rejects before model dispatch",
+        "Plan does not expose non-read tools",
+        "Host authorization remains terminal",
+        "Full access never overrides Deny; MCP hints do not grant host authority"
+      ]
+    }
+  ]
+}

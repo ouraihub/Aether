@@ -1,17 +1,15 @@
-//! `mcp_client_*` commands (docs/15 §5, docs/13 §4). The run's MCP tools are composed in
-//! `tools.rs`.
+//! MCP configuration commands and refresh transport; lifecycle belongs to McpRuntime.
 
 use std::sync::Arc;
 
-use aether_mcp_client::{Approval, ServerDto, ServerSave, Store, ToolDto};
+use aether_mcp_client::{Approval, McpRuntime, ServerDto, ServerSave, Store, ToolDto};
 use aether_support::KitError;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio_util::sync::CancellationToken;
 
-/// The store, managed as Tauri state; `chat_run` opens a session from it. `cancel` fires on
-/// exit and stops in-flight "test connection" requests (docs/15 §6).
+/// One shared runtime, including its configuration store, and adapter request cancellation.
 pub(crate) struct McpClient {
-    pub(crate) store: Arc<Store>,
+    pub(crate) runtime: Arc<McpRuntime>,
     pub(crate) cancel: CancellationToken,
 }
 
@@ -20,7 +18,7 @@ async fn blocking<R: Runtime, T: Send + 'static>(
     app: &AppHandle<R>,
     f: impl FnOnce(&Store) -> Result<T, KitError> + Send + 'static,
 ) -> Result<T, KitError> {
-    let store = Arc::clone(&app.state::<McpClient>().store);
+    let store = Arc::clone(app.state::<McpClient>().runtime.store());
     tauri::async_runtime::spawn_blocking(move || f(&store))
         .await
         .map_err(KitError::internal)?
@@ -60,7 +58,7 @@ pub(crate) async fn mcp_client_refresh<R: Runtime>(
     server_id: String,
 ) -> Result<Vec<ToolDto>, KitError> {
     let client = app.state::<McpClient>();
-    client.store.refresh(&server_id, &client.cancel).await
+    client.runtime.refresh(&server_id, &client.cancel).await
 }
 
 #[tauri::command]

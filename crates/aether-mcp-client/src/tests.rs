@@ -12,9 +12,11 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
 use crate::{
-    Approval, CancellationToken, McpCallResult, McpTransport, ServerSave, ServerSecret, Store,
+    Approval, CancellationToken, McpCallResult, McpRuntime, McpTransport, ServerSave, ServerSecret,
+    Store,
 };
 
+mod behavior;
 mod stdio;
 
 /// What the fake server saw.
@@ -40,6 +42,7 @@ enum Reply {
     Sse(String),
     Status(u16),
     Hang,
+    Gated(Arc<tokio::sync::Notify>, Value),
 }
 
 type Handler = Arc<dyn Fn(&Seen) -> Reply + Send + Sync>;
@@ -111,6 +114,10 @@ async fn serve(mut stream: TcpStream, handler: Handler, log: Arc<Mutex<Vec<Seen>
         ),
         Reply::Sse(body) => (200, String::new(), "text/event-stream", body),
         Reply::Status(status) => (status, String::new(), "text/plain", String::new()),
+        Reply::Gated(release, body) => {
+            release.notified().await;
+            (200, String::new(), "application/json", body.to_string())
+        }
         Reply::Hang => {
             tokio::time::sleep(Duration::from_secs(30)).await;
             return;
@@ -162,6 +169,13 @@ fn store() -> (tempfile::TempDir, Store) {
     (dir, store)
 }
 
+fn runtime() -> (tempfile::TempDir, Arc<Store>, McpRuntime) {
+    let (dir, store) = store();
+    let store = Arc::new(store);
+    let runtime = McpRuntime::new(Arc::clone(&store));
+    (dir, store, runtime)
+}
+
 /// initialize (session `s1`) → initialized → tools/list page 1 (JSON) → page 2 (SSE with an
 /// unrelated message first) → tools/call by prefixed name.
 #[tokio::test]
@@ -191,10 +205,13 @@ async fn discovers_pages_over_json_and_sse_and_reuses_the_session() {
         )),
     })
     .await;
-    let (_dir, store) = store();
+    let (_dir, store, runtime) = runtime();
     let id = store.save(save("fake", &fake.url)).unwrap()[0].id.clone();
 
-    let tools = store.refresh(&id, &CancellationToken::new()).await.unwrap();
+    let tools = runtime
+        .refresh(&id, &CancellationToken::new())
+        .await
+        .unwrap();
     let names: Vec<_> = tools.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(names, ["alpha", "beta"], "schema > 32 KiB is dropped");
     assert!(tools[1].read_only);
@@ -220,7 +237,7 @@ async fn discovers_pages_over_json_and_sse_and_reuses_the_session() {
         "application/json, text/event-stream"
     );
 
-    let mut session = store.session(&CancellationToken::new(), None).await;
+    let mut session = runtime.session(&CancellationToken::new(), None).await;
     let prefixed: Vec<_> = session.tools().into_iter().map(|t| t.prefixed).collect();
     assert_eq!(prefixed, ["mcp_fake_alpha", "mcp_fake_beta"]);
     let out = session
@@ -232,8 +249,10 @@ async fn discovers_pages_over_json_and_sse_and_reuses_the_session() {
         .await;
     assert_eq!(
         out,
-        McpCallResult::Ok {
-            text: "hi".to_owned()
+        McpCallResult::Completed {
+            content: vec![json!({ "type": "text", "text": "hi" })],
+            structured_content: None,
+            is_error: false,
         }
     );
     let call = fake.seen().await.pop().unwrap();
@@ -245,7 +264,7 @@ async fn discovers_pages_over_json_and_sse_and_reuses_the_session() {
 
 /// A 404 on a request with a session id re-handshakes once and retries.
 #[tokio::test]
-async fn expired_session_rehandshakes_and_maps_content() {
+async fn expired_session_rehandshakes_and_preserves_content() {
     let inits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let counter = Arc::clone(&inits);
     let fake = Fake::start(move |seen| match seen.method() {
@@ -260,22 +279,28 @@ async fn expired_session_rehandshakes_and_maps_content() {
             seen,
             json!({ "isError": true, "content": [
                 { "type": "text", "text": "bad arg" },
-                { "type": "image", "data": "..." }
-            ] }),
+                { "type": "image", "data": "...", "mimeType": "image/png" },
+                { "type": "vendor-extension", "payload": { "nested": [1, true] } }
+            ], "structuredContent": { "details": { "retryable": false }, "count": 3 } }),
         )),
     })
     .await;
-    let (_dir, store) = store();
+    let (_dir, store, runtime) = runtime();
     store.save(save("svc", &fake.url)).unwrap();
     let cancel = CancellationToken::new();
     // No cache yet: session() discovers now and keeps that connection (session s1).
-    let mut session = store.session(&cancel, None).await;
+    let mut session = runtime.session(&cancel, None).await;
     let out = session.call("mcp_svc_t", json!({}), &cancel).await;
     assert_eq!(
         out,
-        McpCallResult::Error {
-            code: "tool_error".to_owned(),
-            message: "bad arg\n[unsupported content: image]".to_owned()
+        McpCallResult::Completed {
+            content: vec![
+                json!({ "type": "text", "text": "bad arg" }),
+                json!({ "type": "image", "data": "...", "mimeType": "image/png" }),
+                json!({ "type": "vendor-extension", "payload": { "nested": [1, true] } }),
+            ],
+            structured_content: Some(json!({ "details": { "retryable": false }, "count": 3 })),
+            is_error: true,
         }
     );
     let seen = fake.seen().await;
@@ -293,15 +318,15 @@ async fn expired_session_rehandshakes_and_maps_content() {
         ]
     );
     let unknown = session.call("mcp_other_x", json!({}), &cancel).await;
-    assert!(matches!(unknown, McpCallResult::Error { code, .. } if code == "unknown_tool"));
+    assert!(matches!(unknown, McpCallResult::Failed { code, .. } if code == "unknown_tool"));
 }
 
 #[tokio::test]
 async fn unsupported_protocol_version_is_rejected() {
     let fake = Fake::start(|seen| Reply::Json(initialized(seen, "1999-01-01"))).await;
-    let (_dir, store) = store();
+    let (_dir, store, runtime) = runtime();
     let id = store.save(save("old", &fake.url)).unwrap()[0].id.clone();
-    let error = store
+    let error = runtime
         .refresh(&id, &CancellationToken::new())
         .await
         .unwrap_err();
@@ -318,11 +343,11 @@ async fn timeout_after_send_is_unknown() {
         _ => Reply::Hang,
     })
     .await;
-    let (_dir, mut store) = store();
-    store.timeouts.request = Duration::from_millis(300);
+    let (_dir, store, mut runtime) = runtime();
+    runtime.timeouts.request = Duration::from_millis(300);
     store.save(save("slow", &fake.url)).unwrap();
     let cancel = CancellationToken::new();
-    let mut session = store.session(&cancel, None).await;
+    let mut session = runtime.session(&cancel, None).await;
     let out = session.call("mcp_slow_slow", json!({}), &cancel).await;
     assert_eq!(
         out,
@@ -345,15 +370,15 @@ async fn unreachable_server_is_left_out_of_the_catalogue() {
         _ => Reply::Json(result(seen, json!({ "tools": [tool("ok")] }))),
     })
     .await;
-    let (_dir, store) = store();
+    let (_dir, store, runtime) = runtime();
     store.save(save("down", &url)).unwrap();
     store.save(save("up", &fake.url)).unwrap();
-    let session = store.session(&CancellationToken::new(), None).await;
+    let session = runtime.session(&CancellationToken::new(), None).await;
     let names: Vec<_> = session.tools().into_iter().map(|t| t.prefixed).collect();
     assert_eq!(names, ["mcp_up_ok"]);
 }
 
-/// docs/13 §9.2: a server on this process's own MCP Server port is never contacted.
+/// docs/27 §3.2: a server on this process's own MCP Server port is never contacted.
 #[tokio::test]
 async fn own_server_port_is_skipped() {
     let fake = Fake::start(|seen| match seen.method() {
@@ -362,13 +387,13 @@ async fn own_server_port_is_skipped() {
         _ => Reply::Json(result(seen, json!({ "tools": [tool("ok")] }))),
     })
     .await;
-    let (_dir, store) = store();
+    let (_dir, store, runtime) = runtime();
     store.save(save("own", &fake.url)).unwrap();
     let port = url::Url::parse(&fake.url).unwrap().port();
-    let session = store.session(&CancellationToken::new(), port).await;
+    let session = runtime.session(&CancellationToken::new(), port).await;
     assert!(session.tools().is_empty());
     assert!(fake.seen().await.is_empty());
-    let session = store.session(&CancellationToken::new(), Some(1)).await;
+    let session = runtime.session(&CancellationToken::new(), Some(1)).await;
     assert_eq!(session.tools().len(), 1);
 }
 
@@ -413,7 +438,7 @@ async fn credential_query_is_sent_but_never_stored_in_url() {
         _ => Reply::Json(result(seen, json!({ "tools": [tool("t")] }))),
     })
     .await;
-    let (dir, store) = store();
+    let (dir, store, runtime) = runtime();
     let url = format!("{}?region=cn", fake.url);
     let mut input = save("map", &url);
     input.secret = Some(ServerSecret {
@@ -429,7 +454,10 @@ async fn credential_query_is_sent_but_never_stored_in_url() {
     assert_eq!(listed[0].secret_keys, ["Authorization", "ak"]);
     let id = listed[0].id.clone();
 
-    store.refresh(&id, &CancellationToken::new()).await.unwrap();
+    runtime
+        .refresh(&id, &CancellationToken::new())
+        .await
+        .unwrap();
     let seen = fake.seen().await;
     assert!(seen.iter().all(|s| s.target == "/mcp?region=cn&ak=qry-456"));
     assert!(
@@ -443,6 +471,7 @@ async fn credential_query_is_sent_but_never_stored_in_url() {
         .unwrap();
     assert_eq!(stored, url);
     drop(raw);
+    drop(runtime);
     drop(store);
     for entry in std::fs::read_dir(dir.path()).unwrap() {
         let bytes = std::fs::read(entry.unwrap().path()).unwrap();
@@ -473,14 +502,14 @@ async fn approvals_survive_refresh_and_untrusted_servers_stay_out() {
         _ => Reply::Json(result(seen, json!({ "tools": [tool("a"), tool("b")] }))),
     })
     .await;
-    let (_dir, store) = store();
+    let (_dir, store, runtime) = runtime();
     let id = store.save(save("one", &fake.url)).unwrap()[0].id.clone();
     let mut untrusted = save("two", &fake.url);
     untrusted.trusted = false;
     let other = store.save(untrusted).unwrap()[1].id.clone();
     let cancel = CancellationToken::new();
-    store.refresh(&id, &cancel).await.unwrap();
-    store.refresh(&other, &cancel).await.unwrap();
+    runtime.refresh(&id, &cancel).await.unwrap();
+    runtime.refresh(&other, &cancel).await.unwrap();
     store.set_tool_approval(&id, "a", Approval::Auto).unwrap();
     assert_eq!(
         store
@@ -489,11 +518,11 @@ async fn approvals_survive_refresh_and_untrusted_servers_stay_out() {
             .code(),
         KitErrorCode::NotFound
     );
-    let tools = store.refresh(&id, &cancel).await.unwrap();
+    let tools = runtime.refresh(&id, &cancel).await.unwrap();
     assert_eq!(tools[0].approval, Approval::Auto);
     assert_eq!(tools[1].approval, Approval::Ask);
 
-    let session = store.session(&cancel, None).await;
+    let session = runtime.session(&cancel, None).await;
     let names: Vec<_> = session
         .tools()
         .into_iter()

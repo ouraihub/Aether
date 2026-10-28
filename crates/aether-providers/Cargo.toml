@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-aether-support.workspace = true
+aether-support = { workspace = true, features = ["native"] }
 reqwest.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

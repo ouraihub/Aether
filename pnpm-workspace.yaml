@@ -3,8 +3,15 @@ packages:
   - examples/mcp-server-only/ui
   - examples/providers-only/ui
   - examples/assistant/ui
+  - examples/worker
 
 allowBuilds:
+  esbuild: true
   unrs-resolver: false
+  workerd: true
+
+minimumReleaseAgeExclude:
+  - miniflare@5.20261023.1-beta
+  - wrangler@4.154.0
 
 nodeLinker: hoisted

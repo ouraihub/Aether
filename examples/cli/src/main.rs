@@ -4,52 +4,68 @@
 //! `AETHER_BASE_URL`（必填）、`AETHER_MODEL`（必填）、`AETHER_PROTOCOL`（默认 `openai-chat`）、`AETHER_API_KEY`（可选；回环地址可省）、
 //! `AETHER_TOOL=1`（提供只读工具 `get_secret_word`，自动执行，用于验证工具调用）。
 
-use std::io::Write;
-
-use aether_chat::{
-    AddressPolicy, Approval, Approver, AuthorizeContext, BoxFuture, Budget, CancellationToken,
-    EndStatus, PermissionMode, RunEvent, RunInput, Runner, ToolCall, ToolEffect, ToolExecution,
-    ToolExecutor, ToolSource, ToolSpec,
-};
 use aether_observability::LogConfig;
 use aether_providers::{
-    EndpointKeySave, EndpointSave, ModelRef, ModelSave, ModelType, Protocol, ProviderSave,
-    ReasoningEffort, Store, TypeSource,
+    EndpointKeySave, EndpointSave, ModelRef, ModelSave, ModelType, Protocol, ProviderSave, Store,
+    TypeSource,
 };
+use aether_runtime::AddressPolicy;
+use aether_runtime::{
+    Approval, AuthorizeContext, CancellationToken, EndStatus, HostTool, KitHost, RunConfig,
+    RunContext, RunDependencies, RunEvent, RunOwner, RunRequest, RunService, ToolCall, ToolEffect,
+    ToolError, ToolOutput, ToolSource, ToolSpec,
+};
+use std::io::Write;
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// The only tool: read-only, so `Auto`. Its answer is not guessable, which proves the model
 /// really received the result.
 const TOOL: &str = "get_secret_word";
 const WORD: &str = "pelican-42";
 
-/// Runs [`TOOL`]; anything else is denied, and nothing ever waits for approval.
-struct CliTools;
+/// The same host-policy seam used by the desktop adapter.
+struct CliHost {
+    with_tool: bool,
+}
 
 #[async_trait::async_trait]
-impl ToolExecutor for CliTools {
-    fn authorize(&self, call: &ToolCall, ctx: &AuthorizeContext<'_>) -> Approval {
+impl KitHost for CliHost {
+    fn tools(&self, _request: &RunRequest, _run_id: &str) -> Vec<HostTool> {
+        if !self.with_tool {
+            return Vec::new();
+        }
+        vec![HostTool {
+            spec: ToolSpec {
+                name: TOOL.to_owned(),
+                description: "Returns today's secret word.".to_owned(),
+                parameters: serde_json::json!({ "type": "object", "properties": {} }),
+                approval: Approval::Auto,
+                effect: ToolEffect::Read,
+                source: ToolSource::Host,
+            },
+        }]
+    }
+
+    fn authorize(&self, call: &ToolCall, context: &AuthorizeContext<'_>) -> Approval {
         if call.name == TOOL {
-            ctx.proposed
+            context.proposed
         } else {
             Approval::Deny
         }
     }
-    async fn execute(&self, _call: &ToolCall, _cancel: &CancellationToken) -> ToolExecution {
-        ToolExecution::Ok {
+
+    async fn call_tool(
+        &self,
+        call: &ToolCall,
+        _cancel: &CancellationToken,
+    ) -> Result<ToolOutput, ToolError> {
+        if call.name != TOOL {
+            return Err(ToolError::not_found());
+        }
+        Ok(ToolOutput {
             text: WORD.to_owned(),
             payload: None,
-        }
-    }
-}
-
-impl Approver for CliTools {
-    fn wait(
-        &self,
-        _run: &str,
-        _call: &ToolCall,
-        _cancel: &CancellationToken,
-    ) -> BoxFuture<'_, bool> {
-        Box::pin(async { false })
+        })
     }
 }
 
@@ -141,62 +157,62 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
             restore: None,
         })?;
     }
-    let connection = store.resolve(&ModelRef {
-        endpoint_id,
-        model_id,
-    })?;
-
-    // Chat: one run, text streamed to stdout, tool calls reported on their own lines.
-    let tools = if with_tool {
-        vec![ToolSpec {
-            name: TOOL.to_owned(),
-            description: "Returns today's secret word.".to_owned(),
-            parameters: serde_json::json!({ "type": "object", "properties": {} }),
-            approval: Approval::Auto,
-            effect: ToolEffect::Read,
-            source: ToolSource::Host,
-        }]
-    } else {
-        Vec::new()
-    };
-    let input = RunInput {
-        run_id: "cli".to_owned(),
-        purpose: "chat".to_owned(),
-        permission_mode: PermissionMode::Default,
-        budget: Budget::default().for_connection(&connection),
-        connection,
-        system: Vec::new(),
-        history: Vec::new(),
-        input: message,
-        images: Vec::new(),
-        tools,
-        reasoning_effort: ReasoningEffort::Default,
-        native_web_search: false,
-    };
-    let runner = Runner::new(AddressPolicy::default())?;
-    let tokio = tokio::runtime::Runtime::new()?;
-    let mut out = std::io::stdout();
-    let summary = tokio.block_on(runner.run(
-        input,
-        &CliTools,
-        &CliTools,
-        &CancellationToken::new(),
-        |event| {
-            // A closed stdout only loses the echo; the run itself goes on.
-            let written = if let RunEvent::TextDelta { text } = &event {
-                out.write_all(text.as_bytes())
-            } else if let RunEvent::ToolResult {
-                call_id, outcome, ..
-            } = &event
-            {
-                writeln!(out, "\n[tool {call_id}: {outcome:?}]")
-            } else {
-                Ok(())
-            };
-            let _ = written.and_then(|()| out.flush());
-        },
-    ));
-    let _ = writeln!(out);
+    let request: RunRequest = serde_json::from_value(serde_json::json!({
+        "purpose": "chat", "model": ModelRef { endpoint_id, model_id },
+        "skills": [], "input": message, "regenerate": false, "language": "en"
+    }))?;
+    let executor = tokio::runtime::Runtime::new()?;
+    let result = executor.block_on(async {
+        let runs = RunService::new(
+            Arc::new(CliHost { with_tool }),
+            RunConfig::default(),
+            RunDependencies::new(Arc::new(store)),
+            AddressPolicy::default(),
+        )?;
+        let (end, mut ended) = tokio::sync::mpsc::unbounded_channel();
+        let out = Mutex::new(std::io::stdout());
+        let started = runs
+            .start(
+                RunContext {
+                    owner: RunOwner::new(),
+                    own_mcp_port: None,
+                },
+                request,
+                Arc::new(move |event| {
+                    let mut out = out.lock().unwrap_or_else(PoisonError::into_inner);
+                    let written = match &event {
+                        RunEvent::TextDelta { text } => out.write_all(text.as_bytes()),
+                        RunEvent::ToolResult {
+                            call_id, outcome, ..
+                        } => writeln!(out, "\n[tool {call_id}: {outcome:?}]"),
+                        RunEvent::End { status, .. } => {
+                            let _ = end.send(*status);
+                            writeln!(out)
+                        }
+                        RunEvent::SearchStart
+                        | RunEvent::SearchResult { .. }
+                        | RunEvent::RoundStart { .. }
+                        | RunEvent::ToolCall { .. }
+                        | RunEvent::ApprovalRequired { .. }
+                        | RunEvent::Usage { .. }
+                        | RunEvent::Context { .. }
+                        | RunEvent::ReasoningDelta { .. } => Ok(()),
+                    };
+                    // CLI policy: stdout closure loses the echo, not the run or its result.
+                    let _ = written.and_then(|()| out.flush());
+                    Ok(())
+                }),
+            )
+            .await;
+        let status = match started {
+            Ok(_) => ended.recv().await.ok_or_else(|| {
+                aether_runtime::KitError::internal(std::io::Error::other("run closed without End"))
+            }),
+            Err(error) => Err(error),
+        };
+        runs.shutdown(std::time::Duration::from_secs(3)).await;
+        status
+    });
     logs.flush()?;
-    Ok(summary.status)
+    Ok(result?)
 }

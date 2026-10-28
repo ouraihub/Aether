@@ -302,6 +302,18 @@ impl KitError {
     pub fn details(&self) -> &Details {
         &self.0.details
     }
+
+    /// Copies only the public error projection, retaining safe details and error identity.
+    /// The diagnostic cause chain is intentionally not copied into status caches.
+    #[must_use]
+    pub fn public_copy(&self) -> Self {
+        Self(Box::new(Inner {
+            code: self.0.code,
+            message: self.0.message.clone(),
+            details: self.0.details.clone(),
+            cause: None,
+        }))
+    }
 }
 
 impl fmt::Display for KitError {
@@ -335,12 +347,6 @@ impl Serialize for KitError {
 
 impl From<std::io::Error> for KitError {
     fn from(error: std::io::Error) -> Self {
-        Self::internal(error)
-    }
-}
-
-impl From<rusqlite::Error> for KitError {
-    fn from(error: rusqlite::Error) -> Self {
         Self::internal(error)
     }
 }
@@ -396,6 +402,29 @@ mod tests {
         assert_eq!(error.code(), KitErrorCode::Internal);
         assert_eq!(error.message(), format!("internal error {id}"));
         assert!(!serde_json::to_string(&error).unwrap().contains("private"));
+    }
+
+    #[test]
+    fn public_copy_preserves_wire_identity_but_drops_diagnostic_cause() {
+        let error = KitError::internal(std::io::Error::other("private diagnostic path"))
+            .with_field("model")
+            .with_reason("unavailable")
+            .with_status(503)
+            .with_limit(4096)
+            .with_entity("run")
+            .with_port(1234);
+        let public = error.public_copy();
+        assert!(error.source().is_some());
+        assert!(public.source().is_none());
+        assert_eq!(public.details().error_id(), error.details().error_id());
+        assert_eq!(public.details(), error.details());
+        assert_eq!(public.code(), error.code());
+        assert_eq!(public.message(), error.message());
+        assert_eq!(
+            serde_json::to_value(&public).unwrap(),
+            serde_json::to_value(&error).unwrap()
+        );
+        assert!(!format!("{public:?}").contains("private diagnostic path"));
     }
 
     #[test]

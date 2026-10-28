@@ -20,7 +20,8 @@
   import { getKitContext } from '../context'
   import { isKitClientError, type ProbeResult, type Provider, type ProviderPreset } from '../ports'
   import { cn } from '../utils'
-  import { adopt, newEndpoint, probeTarget, savable, toDraft, toSave, validateModel, type ProviderDraft } from './draft'
+  import { newEndpoint, savable, toDraft, validateModel, type ProviderDraft } from './draft'
+  import { createProviderEditSession, type ProviderEditSession } from './edit-session'
   import EndpointPanel, { type CheckOutcome, type CheckState } from './EndpointPanel.svelte'
   import ModelPickerDialog from './ModelPickerDialog.svelte'
   import { providersRevision, settingsTarget } from './revision.svelte'
@@ -62,9 +63,8 @@
   let editNotes = $state('')
   /** Provider whose row menu is open (hover ⋯ or right-click). */
   let menuFor = $state<string | null>(null)
-  let abort: AbortController | null = null
-  let saving = false
-  let again = false
+  let editSession: ProviderEditSession | null = null
+  let probeGeneration = 0
 
   const visible = $derived(
     providers.filter(
@@ -122,7 +122,10 @@
   }
 
   function load(next: ProviderDraft | null) {
-    abort?.abort()
+    editSession?.invalidate()
+    editSession = null
+    probeGeneration++
+    pickerOpen = false
     check = null
     probe = null
     failed = false
@@ -130,6 +133,21 @@
     draft = next
     active = 0
     token++
+    if (next && port)
+      editSession = createProviderEditSession(port, {
+        readDraft: () => {
+          if (!draft) throw new Error('Provider edit session has no draft')
+          return draft
+        },
+        writeDraft: (next) => {
+          draft = next
+        },
+        readProviders: () => providers,
+        onSaved: (next) => {
+          providers = next
+          notifyChanged()
+        },
+      })
   }
   async function select(p: Provider) {
     if (p.id === draft?.id) return
@@ -170,37 +188,27 @@
   )
   $effect(() => {
     if (port) void refresh()
-    return () => abort?.abort()
+    return () => {
+      editSession?.invalidate()
+      probeGeneration++
+    }
   })
 
-  /** Saves the whole draft; calls during a save coalesce into one more save of the latest draft. */
+  /** Presentation only; the ordinary TS session owns the queue and its save barrier. */
   async function commit() {
-    if (!draft || !port) return
-    if (saving) {
-      again = true
-      return
-    }
-    saving = true
-    let last: ProviderDraft | null = null
+    const session = editSession
+    if (!session || !draft) return
+    const sent = $state.snapshot(savable(draft)) as ProviderDraft
     try {
-      do {
-        again = false
-        const sent = $state.snapshot(savable(draft)) as ProviderDraft
-        last = sent
-        const before = new Set(providers.map((p) => p.id))
-        providers = await port.save(toSave(sent))
-        const stored = providers.find((p) => (sent.id === null ? !before.has(p.id) : p.id === sent.id))
-        if (stored && draft && draft.id === sent.id) draft = adopt(draft, sent, stored)
-        failed = false
-        invalid = null
-        notifyChanged()
-      } while (again && draft)
+      await session.commit()
+      if (editSession !== session) return
+      failed = false
+      invalid = null
     } catch (error) {
+      if (editSession !== session || (isKitClientError(error) && error.code === 'cancelled')) return
       failed = true
-      invalid = last && modelError(error, last)
+      invalid = modelError(error, sent)
       if (!invalid) notify.toast('error', errorText(error))
-    } finally {
-      saving = false
     }
   }
 
@@ -255,16 +263,25 @@
   }
   async function remove() {
     const current = draft
+    const session = editSession
     if (!current || !port) return
     infoOpen = false
     if (current.id === null) return load(providers[0] ? toDraft(providers[0]) : null)
     const body = t('providers.delete_confirm', { name: current.name })
     if (!(await notify.confirm({ title: t('providers.delete'), body, danger: true }))) return
+    if (editSession !== session) return
+    session?.invalidate()
+    probeGeneration++
+    pickerOpen = false
     try {
-      providers = await port.remove(current.id)
+      const next = await port.remove(current.id)
+      if (editSession !== session) return
+      providers = next
       load(providers[0] ? toDraft(providers[0]) : null)
       notifyChanged()
     } catch (error) {
+      if (editSession !== session) return
+      load(current)
       notify.toast('error', errorText(error))
     }
   }
@@ -307,37 +324,35 @@
   }
   async function runProbe(index: number, openPicker: boolean) {
     const target = draft?.endpoints[index]
-    if (!target || !port) return
-    abort?.abort()
-    const controller = new AbortController()
-    abort = controller
+    const session = editSession
+    if (!target || !session) return
+    const generation = ++probeGeneration
     const slug = target.slug
     check = { slug, value: { state: 'running' } }
-    const enabled = target.saved?.keys.filter((k) => k.enabled) ?? []
     try {
-      if (enabled.length >= 2) {
-        // "All keys" check: one probe per enabled key, in order.
-        const results = []
-        let usable: ProbeResult | null = null
-        for (const key of enabled) {
-          const result = await port.probe(probeTarget(target, key.id), { signal: controller.signal })
-          if (!result.error) usable ??= result
-          results.push({ keyId: key.id, value: outcome(result) })
-        }
-        check = { slug, value: { state: 'keys', results } }
-        if (openPicker && usable) {
-          probe = { slug, result: usable }
-          pickerOpen = true
-        }
-        return
+      const batch = await session.probe(slug)
+      if (session !== editSession || generation !== probeGeneration) return
+      failed = false
+      invalid = null
+      const first = batch.results[0]
+      check = {
+        slug,
+        value:
+          first?.keyId === null
+            ? outcome(first.result)
+            : {
+                state: 'keys',
+                results: batch.results.flatMap(({ keyId, result }) =>
+                  keyId === null ? [] : [{ keyId, value: outcome(result) }],
+                ),
+              },
       }
-      const result = await port.probe(probeTarget(target), { signal: controller.signal })
-      check = { slug, value: outcome(result) }
-      if (!result.error && openPicker) {
-        probe = { slug, result }
+      if (openPicker && batch.usable) {
+        probe = { slug, result: batch.usable }
         pickerOpen = true
       }
     } catch (error) {
+      if (session !== editSession || generation !== probeGeneration) return
       check =
         isKitClientError(error) && error.code === 'cancelled'
           ? null

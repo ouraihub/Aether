@@ -117,6 +117,73 @@ function setup(
   return { saves, notify }
 }
 
+describe('provider credential sessions', () => {
+  it('ignores a row reveal after target unmount without copying or showing an old error', async () => {
+    const pending = Promise.withResolvers<string>()
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const { notify } = setup({ revealKey: () => pending.promise })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Copy key' }))
+    cleanup()
+    pending.reject(new Error('old secret failure'))
+    await pending.promise.catch(() => {})
+    await Promise.resolve()
+    expect(writeText).not.toHaveBeenCalled()
+    expect(notify.toast).not.toHaveBeenCalled()
+  })
+
+  it('does not copy or refill a closed and reopened key dialog from its old reveal', async () => {
+    const pending = Promise.withResolvers<string>()
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const { notify } = setup({ revealKey: () => pending.promise })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Manage API keys' }))
+    let dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    await fireEvent.click(dialog.getByRole('button', { name: 'Copy key' }))
+    await fireEvent.click(dialog.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await fireEvent.click(screen.getByRole('button', { name: 'Manage API keys' }))
+    dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    pending.resolve('late-plaintext')
+    await pending.promise
+    await Promise.resolve()
+    expect(writeText).not.toHaveBeenCalled()
+    expect(dialog.queryByRole('textbox', { name: 'API key' })).toBeNull()
+    expect(notify.toast).not.toHaveBeenCalled()
+  })
+
+  it('clears the password after reveal but preserves a newer password revision', async () => {
+    const pending = Promise.withResolvers<string>()
+    const revealKey = vi.fn(() => pending.promise)
+    setup({ revealNeedsPassword: true, revealKey })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Show key' }))
+    const password = screen.getByLabelText('Current password') as HTMLInputElement
+    await fireEvent.input(password, { target: { value: 'first-password' } })
+    await fireEvent.keyDown(password, { key: 'Enter' })
+    await fireEvent.input(password, { target: { value: 'new-password' } })
+    pending.reject(new Error('current reveal failed'))
+    await pending.promise.catch(() => {})
+    await waitFor(() => expect(password.value).toBe('new-password'))
+    expect(revealKey).toHaveBeenCalledWith('k1', 'first-password')
+  })
+
+  it('clears a successful reveal password before a later copy asks again', async () => {
+    setup({ revealNeedsPassword: true, revealKey: async () => 'temporary-plaintext' })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Manage API keys' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    await fireEvent.click(dialog.getByRole('button', { name: 'Edit key' }))
+    const password = dialog.getByLabelText('Current password') as HTMLInputElement
+    await fireEvent.input(password, { target: { value: 'one-use-password' } })
+    await fireEvent.keyDown(password, { key: 'Enter' })
+    await waitFor(() =>
+      expect((dialog.getByRole('textbox', { name: 'API key' }) as HTMLInputElement).value).toBe('temporary-plaintext'),
+    )
+    await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
+    await fireEvent.click(dialog.getByRole('button', { name: 'Copy key' }))
+    expect((dialog.getByLabelText('Current password') as HTMLInputElement).value).toBe('')
+  })
+})
+
 describe('provider presets (docs/39)', () => {
   it('seeds only presets not yet in the list and links the selected one to its key page', async () => {
     const seeded: Provider = {
@@ -192,13 +259,43 @@ async function openPicker() {
 }
 
 describe('ProvidersSettings', () => {
+  it('does not apply a previous provider save or error after selecting a different provider', async () => {
+    const pending = Promise.withResolvers<Provider[]>()
+    const other: Provider = { ...stored, id: 'p2', name: 'Other', endpoints: [{ ...endpoint, id: 'e2' }] }
+    const { notify } = setup({ list: async () => [stored, other], save: () => pending.promise })
+    const url = await screen.findByRole('textbox', { name: 'API URL' })
+    await fireEvent.input(url, { target: { value: 'https://old-edit.example' } })
+    await fireEvent.blur(url)
+    await fireEvent.click(screen.getByText('Other'))
+    pending.reject(new Error('old provider save failure'))
+    await pending.promise.catch(() => {})
+    await Promise.resolve()
+    expect((screen.getByRole('textbox', { name: 'API URL' }) as HTMLInputElement).value).toBe(endpoint.baseUrl)
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+    expect(notify.toast).not.toHaveBeenCalled()
+  })
+
+  it('never probes or opens a picker when its prerequisite save fails', async () => {
+    const probe = vi.fn()
+    const { notify } = setup({
+      save: async () => {
+        throw new Error('save barrier failed')
+      },
+      probe,
+    })
+    await fireEvent.click(await screen.findByRole('button', { name: 'Sync models' }))
+    await waitFor(() => expect(screen.getByText('Error: save barrier failed')).toBeTruthy())
+    expect(probe).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Pick models' })).toBeNull()
+    expect(notify.toast).not.toHaveBeenCalled()
+  })
   it('saves each +/- at once with the endpoint id and ', async () => {
     const { saves } = setup()
     const picker = await openPicker()
     await fireEvent.click(picker.getByRole('button', { name: 'Add gpt-4o' }))
-    await waitFor(() => expect(saves).toHaveLength(1))
+    await waitFor(() => expect(saves).toHaveLength(2))
     expect(screen.queryByRole('button', { name: /Use \d+ models/ })).toBeNull()
-    const saved = saves[0]?.endpoints[0]
+    const saved = saves.at(-1)?.endpoints[0]
     expect(saved?.id).toBe('e1')
     expect(saved?.models.map((m) => m.id)).toEqual(['gpt-4o'])
   })
@@ -372,8 +469,8 @@ describe('ProvidersSettings', () => {
     const { saves } = setup({ probe })
     await fireEvent.click(await screen.findByRole('button', { name: 'Check' }))
     await fireEvent.click(await screen.findByRole('button', { name: 'Use Anthropic protocol' }))
-    await waitFor(() => expect(saves).toHaveLength(1))
-    expect(saves[0]?.endpoints[0]).toMatchObject({ id: 'e1', protocol: 'anthropic-messages' })
+    await waitFor(() => expect(saves).toHaveLength(2))
+    expect(saves.at(-1)?.endpoints[0]).toMatchObject({ id: 'e1', protocol: 'anthropic-messages' })
     expect(screen.queryByRole('button', { name: 'Use Anthropic protocol' })).toBeNull()
   })
 
@@ -540,8 +637,8 @@ describe('ProvidersSettings', () => {
     const { saves } = setup({}, { ...stored, endpoints: [{ ...endpoint, models: [mine] }] })
     const picker = await openPicker()
     await fireEvent.click(picker.getByRole('button', { name: 'Add gpt-4o' }))
-    await waitFor(() => expect(saves).toHaveLength(1))
-    const models = saves[0]?.endpoints[0]?.models ?? []
+    await waitFor(() => expect(saves).toHaveLength(2))
+    const models = saves.at(-1)?.endpoints[0]?.models ?? []
     expect(models.find((m) => m.id === 'text-embedding-3')).toMatchObject({
       supportsTools: false,
       name: 'Mine',

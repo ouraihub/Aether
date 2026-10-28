@@ -3,15 +3,13 @@
 use std::iter;
 
 use aether_support::{Connection, Protocol, ReasoningDialect, ReasoningEffort};
-use reqwest::RequestBuilder;
-use reqwest::header::ACCEPT;
 use serde_json::{Map, Value, json};
 
-use crate::run::Usage;
-use crate::types::{ImagePart, Message, ToolCall, ToolSpec};
+use crate::types::{Message, ToolCall, ToolSpec, Usage};
+use aether_images::ImagePart;
 
 /// Endpoint path below the `/v1` base URL produced by providers.
-pub(crate) const fn path(protocol: Protocol) -> &'static str {
+pub const fn path(protocol: Protocol) -> &'static str {
     match protocol {
         Protocol::AnthropicMessages => "messages",
         Protocol::OpenaiChat => "chat/completions",
@@ -40,32 +38,34 @@ fn official_openai(base_url: &str) -> bool {
 }
 
 /// One round's request: auth headers plus the streaming JSON body.
-pub(crate) struct Request<'a> {
-    pub(crate) connection: &'a Connection,
-    /// The one key of this attempt; `None` = no auth headers.
-    pub(crate) key: Option<&'a str>,
-    pub(crate) model: &'a str,
-    pub(crate) system: &'a str,
-    pub(crate) history: &'a [Message],
-    pub(crate) input: &'a str,
+pub struct Request<'a> {
+    /// Resolved model connection; credentials are not serialized into the description.
+    pub connection: &'a Connection,
+    /// Model identifier.
+    pub model: &'a str,
+    /// Assembled system prompt.
+    pub system: &'a str,
+    /// Prepared prior messages.
+    pub history: &'a [Message],
+    /// Current input text.
+    pub input: &'a str,
     /// Images of `input`; the runner already rejected them for a model without vision.
-    pub(crate) images: &'a [ImagePart],
+    pub images: &'a [ImagePart],
     /// Messages this run produced so far, after `input`.
-    pub(crate) turn: &'a [Message],
-    pub(crate) max_output: u32,
-    pub(crate) tools: &'a [ToolSpec],
-    pub(crate) native_web_search: bool,
-    pub(crate) reasoning_effort: ReasoningEffort,
+    pub turn: &'a [Message],
+    /// Maximum output token budget.
+    pub max_output: u32,
+    /// Fixed tool catalogue.
+    pub tools: &'a [ToolSpec],
+    /// Whether to enable the protocol's native search.
+    pub native_web_search: bool,
+    /// Requested reasoning control.
+    pub reasoning_effort: ReasoningEffort,
 }
 
 impl Request<'_> {
-    pub(crate) fn encode(&self, builder: RequestBuilder) -> RequestBuilder {
-        let key = self.key;
-        let builder = aether_support::connection::custom_headers(builder, &self.connection.headers);
-        let mut builder = builder.header(ACCEPT, "text/event-stream");
-        if let Some(key) = key {
-            builder = builder.bearer_auth(key);
-        }
+    /// Encodes one pure request description without constructing an HTTP request.
+    pub fn encode(&self) -> Description<'_> {
         let protocol = self.connection.protocol;
         let mut messages = Vec::new();
         let vision = self.connection.can_vision;
@@ -75,10 +75,6 @@ impl Request<'_> {
         let has_system = !self.system.is_empty();
         let mut body = match protocol {
             Protocol::AnthropicMessages => {
-                if let Some(key) = key {
-                    builder = builder.header("x-api-key", key);
-                }
-                builder = builder.header("anthropic-version", "2023-06-01");
                 let mut body = json!({
                     "model": self.model, "max_tokens": self.max_output,
                     "stream": true, "messages": messages,
@@ -165,8 +161,22 @@ impl Request<'_> {
         if !tools.is_empty() {
             body["tools"] = tools.into();
         }
-        builder.json(&body)
+        Description {
+            body,
+            headers: &self.connection.headers,
+            protocol,
+        }
     }
+}
+
+/// Pure request body and borrowed header plan; credentials are supplied per attempt.
+pub struct Description<'a> {
+    /// Encoded protocol JSON body.
+    pub body: Value,
+    /// Custom headers, applied before accept and per-attempt authentication.
+    pub headers: &'a [(String, String)],
+    /// Authentication plan: Bearer, plus Anthropic API key/version for Messages.
+    pub protocol: Protocol,
 }
 
 /// `vision = false` strips history images: only their text is sent (docs/19 §3).
@@ -351,10 +361,12 @@ fn tool_json(protocol: Protocol, tool: &ToolSpec) -> Value {
 }
 
 /// What one SSE event's data meant.
-pub(crate) enum Decoded {
+pub enum Decoded {
+    /// Assistant text delta.
     Text(String),
     /// In-stream upstream error with its raw (unsanitized) message.
     Error(String),
+    /// Event does not produce display text.
     Skip,
 }
 
@@ -369,17 +381,18 @@ struct Partial {
 
 /// What a finished stream asked for.
 #[derive(Debug, PartialEq)]
-pub(crate) struct Round {
+pub struct Round {
     /// Calls in stream order; with `truncated`, none may run (unparsable args are `null`).
-    pub(crate) tool_calls: Vec<ToolCall>,
+    pub tool_calls: Vec<ToolCall>,
     /// The output limit cut the reply, or some call's arguments are not a JSON object.
-    pub(crate) truncated: bool,
+    pub truncated: bool,
 }
 
 /// Per-stream state; `done` is set by the protocol's terminal event.
-pub(crate) struct Decoder {
+pub struct Decoder {
     protocol: Protocol,
-    pub(crate) done: bool,
+    /// Whether a protocol terminal event was received.
+    pub done: bool,
     calls: Vec<Partial>,
     truncated: bool,
     /// Anthropic `input_tokens` without cache; `usage.input_tokens` adds cache back.
@@ -387,7 +400,8 @@ pub(crate) struct Decoder {
 }
 
 impl Decoder {
-    pub(crate) const fn new(protocol: Protocol) -> Self {
+    /// Starts one fresh protocol stream.
+    pub const fn new(protocol: Protocol) -> Self {
         Self {
             protocol,
             done: false,
@@ -398,7 +412,7 @@ impl Decoder {
     }
 
     /// Assembles the calls; each one's arguments must parse as a JSON object (docs/12 §3).
-    pub(crate) fn finish(self) -> Round {
+    pub fn finish(self) -> Round {
         let mut truncated = self.truncated;
         let tool_calls = self
             .calls
@@ -461,7 +475,8 @@ impl Decoder {
         }
     }
 
-    pub(crate) fn event(&mut self, data: &str, usage: &mut Usage) -> Decoded {
+    /// Decodes one SSE data field and updates known usage.
+    pub fn event(&mut self, data: &str, usage: &mut Usage) -> Decoded {
         if data == "[DONE]" {
             self.done = true;
             return Decoded::Skip;
@@ -596,7 +611,7 @@ fn citation(value: &Value) -> Decoded {
     let Some(url) = value["url"].as_str() else {
         return Decoded::Skip;
     };
-    let Ok(parsed) = reqwest::Url::parse(url) else {
+    let Ok(parsed) = url::Url::parse(url) else {
         return Decoded::Skip;
     };
     if !matches!(parsed.scheme(), "http" | "https") {

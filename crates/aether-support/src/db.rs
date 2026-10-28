@@ -8,6 +8,11 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 use crate::error::{KitError, KitErrorCode};
+impl From<rusqlite::Error> for KitError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::internal(error)
+    }
+}
 
 /// One schema step. `version` is the `user_version` after `sql` ran.
 #[derive(Debug, Clone, Copy)]

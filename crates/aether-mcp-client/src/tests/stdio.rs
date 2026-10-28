@@ -25,8 +25,8 @@ const FIXTURE_ARGS: [&str; 5] = [
 ];
 /// Configured explicitly, so it reaches the child although its name looks like a secret.
 const CONFIGURED: &str = "FIXTURE_API_TOKEN";
-const PAGE_TWO: [&str; 9] = [
-    "pid", "spawn", "orphan", "quit", "slow", "big", "exit", "env", "pinged",
+const PAGE_TWO: [&str; 10] = [
+    "pid", "spawn", "orphan", "quit", "slow", "big", "exit", "env", "pinged", "invalid",
 ];
 
 #[test]
@@ -110,12 +110,20 @@ fn serve() {
                     "fail" => {
                         let content = json!([
                             { "type": "text", "text": "bad arg" },
-                            { "type": "image", "data": "..." }
+                            { "type": "image", "data": "...", "mimeType": "image/png" }
                         ]);
                         send(
                             &mut out,
-                            &reply(&id, json!({ "isError": true, "content": content })),
+                            &reply(
+                                &id,
+                                json!({ "isError": true, "content": content,
+                                "structuredContent": { "kind": "validation", "fields": ["q"] } }),
+                            ),
                         );
+                        continue;
+                    }
+                    "invalid" => {
+                        send(&mut out, &reply(&id, args["result"].clone()));
                         continue;
                     }
                     "pid" => std::process::id().to_string(),
@@ -219,9 +227,19 @@ fn stdio(slug: &str, mode: &str) -> ServerSave {
 
 fn ok_text(result: McpCallResult) -> String {
     match result {
-        McpCallResult::Ok { text } => text,
-        other @ (McpCallResult::Error { .. } | McpCallResult::Unknown { .. }) => {
-            panic!("expected ok, got {other:?}")
+        McpCallResult::Completed {
+            content,
+            structured_content,
+            is_error,
+        } => {
+            assert_eq!(structured_content, None);
+            assert!(!is_error);
+            assert_eq!(content.len(), 1);
+            assert_eq!(content[0]["type"], "text");
+            content[0]["text"].as_str().unwrap().to_owned()
+        }
+        other @ (McpCallResult::Failed { .. } | McpCallResult::Unknown { .. }) => {
+            panic!("expected completed text, got {other:?}");
         }
     }
 }
@@ -263,8 +281,8 @@ async fn assert_ends(pid: u32) {
 }
 
 #[tokio::test]
-async fn discovers_pages_calls_and_maps_errors_over_stdio() {
-    let (_dir, store) = super::store();
+async fn discovers_pages_calls_and_preserves_error_payloads_over_stdio() {
+    let (_dir, store, runtime) = super::runtime();
     let listed = store.save(stdio("local", "normal")).unwrap();
     assert_eq!(
         listed[0].transport,
@@ -278,12 +296,12 @@ async fn discovers_pages_calls_and_maps_errors_over_stdio() {
     assert!(!listed[0].allow_private, "allow_private is http only");
 
     let cancel = CancellationToken::new();
-    let tools = store.refresh(&listed[0].id, &cancel).await.unwrap();
+    let tools = runtime.refresh(&listed[0].id, &cancel).await.unwrap();
     let names: Vec<_> = tools.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(names[..2], ["echo", "fail"]);
     assert_eq!(names[2..], PAGE_TWO);
 
-    let mut session = store.session(&cancel, None).await;
+    let mut session = runtime.session(&cancel, None).await;
     let echoed = ok_text(
         session
             .call("mcp_local_echo", json!({ "q": 1 }), &cancel)
@@ -292,9 +310,13 @@ async fn discovers_pages_calls_and_maps_errors_over_stdio() {
     assert_eq!(echoed, r#"{"q":1}"#);
     assert_eq!(
         session.call("mcp_local_fail", json!({}), &cancel).await,
-        McpCallResult::Error {
-            code: "tool_error".to_owned(),
-            message: "bad arg\n[unsupported content: image]".to_owned()
+        McpCallResult::Completed {
+            content: vec![
+                json!({ "type": "text", "text": "bad arg" }),
+                json!({ "type": "image", "data": "...", "mimeType": "image/png" }),
+            ],
+            structured_content: Some(json!({ "kind": "validation", "fields": ["q"] })),
+            is_error: true,
         }
     );
     // Cached tools: this session started its own process on the first call. Its parent
@@ -311,11 +333,11 @@ async fn discovers_pages_calls_and_maps_errors_over_stdio() {
 /// have replied before the second page arrived.
 #[tokio::test]
 async fn server_ping_is_answered() {
-    let (_dir, store) = super::store();
+    let (_dir, store, runtime) = super::runtime();
     store.save(stdio("ping", "normal")).unwrap();
     let cancel = CancellationToken::new();
     // No cache yet: discovery and the call share one process.
-    let mut session = store.session(&cancel, None).await;
+    let mut session = runtime.session(&cancel, None).await;
     assert_eq!(
         ok_text(session.call("mcp_ping_pinged", json!({}), &cancel).await),
         "true"
@@ -325,11 +347,11 @@ async fn server_ping_is_answered() {
 /// A timed-out call is `unknown`, and the half-answered process is ended and replaced.
 #[tokio::test]
 async fn call_timeout_is_unknown_and_ends_the_process() {
-    let (_dir, mut store) = super::store();
-    store.timeouts.request = Duration::from_millis(1500);
+    let (_dir, store, mut runtime) = super::runtime();
+    runtime.timeouts.request = Duration::from_millis(1500);
     store.save(stdio("t", "normal")).unwrap();
     let cancel = CancellationToken::new();
-    let mut session = store.session(&cancel, None).await;
+    let mut session = runtime.session(&cancel, None).await;
     let pid: u32 = ok_text(session.call("mcp_t_pid", json!({}), &cancel).await)
         .parse()
         .unwrap();
@@ -347,10 +369,10 @@ async fn call_timeout_is_unknown_and_ends_the_process() {
 /// Cancelling a call ends the server and the processes it started.
 #[tokio::test]
 async fn cancel_ends_the_process_tree() {
-    let (_dir, store) = super::store();
+    let (_dir, store, runtime) = super::runtime();
     store.save(stdio("c", "normal")).unwrap();
     let cancel = CancellationToken::new();
-    let mut session = store.session(&cancel, None).await;
+    let mut session = runtime.session(&cancel, None).await;
     let pids = ok_text(session.call("mcp_c_spawn", json!({}), &cancel).await);
     let pids: Vec<u32> = pids.split(' ').map(|pid| pid.parse().unwrap()).collect();
     assert!(alive(pids[1]));
@@ -372,10 +394,10 @@ async fn cancel_ends_the_process_tree() {
 /// Dropping the session (the run ended) ends its processes.
 #[tokio::test]
 async fn dropping_the_session_ends_the_process() {
-    let (_dir, store) = super::store();
+    let (_dir, store, runtime) = super::runtime();
     store.save(stdio("d", "normal")).unwrap();
     let cancel = CancellationToken::new();
-    let mut session = store.session(&cancel, None).await;
+    let mut session = runtime.session(&cancel, None).await;
     let pid: u32 = ok_text(session.call("mcp_d_pid", json!({}), &cancel).await)
         .parse()
         .unwrap();
@@ -387,10 +409,10 @@ async fn dropping_the_session_ends_the_process() {
 /// session: the tree is owned by a Job Object / process group, not found from the root.
 #[tokio::test]
 async fn dropping_the_session_ends_descendants_of_an_exited_server() {
-    let (_dir, store) = super::store();
+    let (_dir, store, runtime) = super::runtime();
     store.save(stdio("o", "normal")).unwrap();
     let cancel = CancellationToken::new();
-    let mut session = store.session(&cancel, None).await;
+    let mut session = runtime.session(&cancel, None).await;
     let pids = ok_text(session.call("mcp_o_orphan", json!({}), &cancel).await);
     let pids: Vec<u32> = pids.split(' ').map(|pid| pid.parse().unwrap()).collect();
     // The server exits right after answering; its sleeper keeps running.
@@ -404,10 +426,10 @@ async fn dropping_the_session_ends_descendants_of_an_exited_server() {
 /// write or flush may still have delivered the request.
 #[tokio::test]
 async fn request_to_an_exited_server_is_unknown() {
-    let (_dir, store) = super::store();
+    let (_dir, store, runtime) = super::runtime();
     store.save(stdio("q", "normal")).unwrap();
     let cancel = CancellationToken::new();
-    let mut session = store.session(&cancel, None).await;
+    let mut session = runtime.session(&cancel, None).await;
     let pid: u32 = ok_text(session.call("mcp_q_quit", json!({}), &cancel).await)
         .parse()
         .unwrap();
@@ -421,10 +443,10 @@ async fn request_to_an_exited_server_is_unknown() {
 /// A line over 2 MiB disconnects; a server that exits mid-call is `unknown` too.
 #[tokio::test]
 async fn oversized_line_and_exit_disconnect() {
-    let (_dir, store) = super::store();
+    let (_dir, store, runtime) = super::runtime();
     store.save(stdio("b", "normal")).unwrap();
     let cancel = CancellationToken::new();
-    let mut session = store.session(&cancel, None).await;
+    let mut session = runtime.session(&cancel, None).await;
     let pid: u32 = ok_text(session.call("mcp_b_pid", json!({}), &cancel).await)
         .parse()
         .unwrap();
@@ -439,30 +461,82 @@ async fn oversized_line_and_exit_disconnect() {
     );
     assert!(matches!(
         session.call("mcp_b_echo", json!({}), &cancel).await,
-        McpCallResult::Ok { .. }
+        McpCallResult::Completed { .. }
     ));
+}
+
+#[tokio::test]
+async fn invalid_stdio_call_result_is_unknown_without_replaying() {
+    let (_dir, store, runtime) = super::runtime();
+    store.save(stdio("invalid", "normal")).unwrap();
+    let cancel = CancellationToken::new();
+    let mut session = runtime.session(&cancel, None).await;
+    for result in [
+        json!(null),
+        json!({ "content": [] , "structuredContent": null }),
+        json!({ "content": [{ "type": "text", "text": 7 }] }),
+    ] {
+        assert_eq!(
+            session
+                .call("mcp_invalid_invalid", json!({ "result": result }), &cancel)
+                .await,
+            unknown("invalid_response")
+        );
+    }
+    assert_eq!(
+        ok_text(
+            session
+                .call("mcp_invalid_echo", json!({ "ok": true }), &cancel)
+                .await
+        ),
+        r#"{"ok":true}"#
+    );
+}
+
+#[tokio::test]
+async fn shutdown_prevents_stdio_reuse_and_new_processes() {
+    let (_dir, store, runtime) = super::runtime();
+    store.save(stdio("closed", "normal")).unwrap();
+    let cancel = CancellationToken::new();
+    let mut connected = runtime.session(&cancel, None).await;
+    let pid: u32 = ok_text(connected.call("mcp_closed_pid", json!({}), &cancel).await)
+        .parse()
+        .unwrap();
+    let mut lazy = runtime.session(&cancel, None).await;
+    runtime.shutdown().await;
+    for session in [&mut connected, &mut lazy] {
+        assert!(
+            matches!(session.call("mcp_closed_pid", json!({}), &cancel).await,
+            McpCallResult::Failed { code, .. } if code == "cancelled")
+        );
+    }
+    assert!(runtime.session(&cancel, None).await.tools().is_empty());
+    // Sessions own processes; runtime cancellation does not replace that ownership.
+    drop(connected);
+    drop(lazy);
+    assert_ends(pid).await;
 }
 
 /// No answer to `initialize` within the startup deadline: the server is left out.
 #[tokio::test]
 async fn startup_timeout_leaves_the_server_out() {
-    let (_dir, mut store) = super::store();
-    store.timeouts.startup = Duration::from_millis(1500);
+    let (_dir, store, mut runtime) = super::runtime();
+    runtime.timeouts.startup = Duration::from_millis(1500);
     let id = store.save(stdio("h", "hang")).unwrap()[0].id.clone();
     let started = Instant::now();
-    let error = store
+    let error = runtime
         .refresh(&id, &CancellationToken::new())
         .await
         .unwrap_err();
     assert_eq!(error.code(), KitErrorCode::Timeout);
     assert!(started.elapsed() < Duration::from_secs(10));
-    let session = store.session(&CancellationToken::new(), None).await;
+    let session = runtime.session(&CancellationToken::new(), None).await;
     assert!(session.tools().is_empty());
 }
 
 #[tokio::test]
 async fn missing_command_is_a_bad_request() {
-    let (_dir, store) = super::store();
+    let (_dir, store, runtime) = super::runtime();
     let mut input = stdio("m", "normal");
     input.transport = McpTransport::Stdio {
         command: "aether-no-such-command-x".to_owned(),
@@ -470,7 +544,7 @@ async fn missing_command_is_a_bad_request() {
         cwd: None,
     };
     let id = store.save(input).unwrap()[0].id.clone();
-    let error = store
+    let error = runtime
         .refresh(&id, &CancellationToken::new())
         .await
         .unwrap_err();

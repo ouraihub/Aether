@@ -10,6 +10,7 @@
     ".": "./src/index.ts",
     "./ports": "./src/ports/index.ts",
     "./tauri": "./src/tauri/index.ts",
+    "./web": "./src/web/index.ts",
     "./providers": "./src/providers/index.ts",
     "./chat": "./src/chat/index.ts",
     "./search": "./src/search/index.ts",
@@ -29,6 +30,7 @@
     "svelte": "^5.57.1"
   },
   "dependencies": {
+    "@ouraihub/aether-contracts": "workspace:*",
     "@internationalized/date": "3.12.4",
     "@lucide/svelte": "0.561.0",
     "@tauri-apps/api": "2.11.1",

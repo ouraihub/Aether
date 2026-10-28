@@ -1,10 +1,11 @@
 //! 服务商 / 线路 / 模型配置、线路多密钥（轮换 + 失败切换）、模型探测与能力推断、解析后端连接快照。不含角色与回落。
 //!
-//! 设计：`docs/11-详细设计-kit-providers.md`。实现按 `docs/90-开发任务清单.md` 领取任务后填充。
+//! 设计：`docs/11-详细设计-kit-providers.md`；显式连接准备与探测不要求 Store。
 
+pub mod connection;
 mod dto;
 mod infer;
-mod probe;
+pub mod probe;
 mod store;
 mod url;
 

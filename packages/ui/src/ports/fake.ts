@@ -1,19 +1,30 @@
-// Complete in-memory ports for tests and demos. Override any method; omit a port with `omit`.
+// In-memory RunClient, ConversationClient and desktop actions for tests and demos (docs/16, docs/22).
+// Seed storage with initialConversations; override clients independently or omit a capability.
 import { KitClientError } from './contract'
-import type { ChatPort, KitPorts, LogsPort, McpClientPort, McpServerPort, ProvidersPort, SkillsPort } from './contract'
-import type { Conversation } from './generated/Conversation'
-import type { LogLevel } from './generated/LogLevel'
-import type { Turn } from './generated/Turn'
+import type {
+  ConversationClient,
+  DesktopActions,
+  RunClient,
+  KitPorts,
+  LogsPort,
+  McpClientPort,
+  McpServerPort,
+  ProvidersPort,
+  SkillsPort,
+} from './contract'
+import type { Conversation, LogLevel, RunEvent, RunSnapshot, Turn } from '@ouraihub/aether-contracts'
 import type { SearchPort } from './search'
 
 type PortName = keyof KitPorts
 
 export interface FakePortsOptions {
-  /** Initial stored history, copied so tests and demos cannot mutate storage accidentally. */
-  conversations?: readonly Conversation[]
+  /** Initial stored conversations, copied to isolate the caller from fake storage. */
+  initialConversations?: readonly Conversation[]
+  conversations?: Partial<ConversationClient>
+  desktop?: Partial<DesktopActions>
   logs?: Partial<LogsPort>
   providers?: Partial<ProvidersPort>
-  chat?: Partial<ChatPort>
+  chat?: Partial<RunClient>
   search?: Partial<SearchPort>
   skills?: Partial<SkillsPort>
   mcpClient?: Partial<McpClientPort>
@@ -34,7 +45,10 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
   let sequence = 0
   let conversationSequence = 0
   const conversations = new Map<string, Conversation>(
-    (options.conversations ?? []).map((conversation) => [conversation.summary.id, structuredClone(conversation)]),
+    (options.initialConversations ?? []).map((conversation) => [
+      conversation.summary.id,
+      structuredClone(conversation),
+    ]),
   )
   const nextId = (prefix: string): string => {
     let id: string
@@ -46,6 +60,51 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       )
     )
     return id
+  }
+  const storesConversations = !options.omit?.includes('conversations')
+  const runs = new Map<string, RunSnapshot>()
+  const terminals: string[] = []
+  const acceptRun = (
+    conversation: Conversation | null,
+    turn: Turn | null,
+    select: boolean,
+    onEvent: (event: RunEvent) => void,
+    signal?: AbortSignal,
+  ) => {
+    const run: RunSnapshot = {
+      runId: nextId('fake-run'),
+      conversationId: conversation?.summary.id ?? null,
+      turnId: turn?.id ?? null,
+      status: 'running',
+      cancelRequested: false,
+    }
+    runs.set(run.runId, run)
+    const cancel = () => {
+      run.cancelRequested = true
+    }
+    signal?.addEventListener('abort', cancel, { once: true })
+    // Leave an acceptance turn for callers to request cancellation or inspect the active run.
+    queueMicrotask(() =>
+      queueMicrotask(() => {
+        if (signal?.aborted) cancel()
+        if (turn && !run.cancelRequested) onEvent({ kind: 'text_delta', text: turn.text })
+        run.status = run.cancelRequested ? 'cancelled' : 'completed'
+        if (turn && conversation) {
+          turn.status = run.status
+          if (run.status === 'cancelled') turn.text = ''
+          if (select && run.status === 'completed')
+            conversation.summary = { ...conversation.summary, selectedTurnId: turn.id, updatedAt: Date.now() }
+        }
+        signal?.removeEventListener('abort', cancel)
+        terminals.push(run.runId)
+        if (terminals.length > 128) {
+          const expired = terminals.shift()
+          if (expired !== undefined) runs.delete(expired)
+        }
+        onEvent({ kind: 'end', status: run.status })
+      }),
+    )
+    return { runId: run.runId, conversationId: run.conversationId, turnId: run.turnId }
   }
   const snapshot = (conversation: Conversation): Conversation => structuredClone(conversation)
   const getConversation = (id: string) => {
@@ -60,7 +119,7 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     if (!turn) throw clientError('not_found', `turn ${turnId}`, { entity: 'turn' })
     return turn
   }
-  const history = {
+  const conversationClient: ConversationClient = {
     list: (scope?: string) =>
       Promise.resolve(
         [...conversations.values()]
@@ -194,7 +253,6 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     logs: {
       tail: () => Promise.resolve([]),
       ingest: (batch) => Promise.resolve({ accepted: batch.entries.length, rejected: 0 }),
-      openDir: () => Promise.resolve(),
       getLevel: () => Promise.resolve({ level, available: true }),
       setLevel: (next) => {
         level = next
@@ -202,6 +260,11 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       },
       ...options.logs,
     },
+    desktop: {
+      openLogsDirectory: () => Promise.resolve(),
+      ...options.desktop,
+    },
+    conversations: { ...conversationClient, ...options.conversations },
     providers: {
       revealNeedsPassword: false,
       keyStrategies: false,
@@ -217,7 +280,7 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       ...options.providers,
     },
     chat: {
-      run: async (request, onEvent, callOptions) => {
+      start: async (request, onEvent, callOptions) => {
         if (callOptions?.signal?.aborted) throw clientError('cancelled', 'cancelled')
         const retry = request.retryTurnId != null || request.regenerate
         const translation = request.translateTurnId != null
@@ -233,17 +296,15 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
           throw clientError('bad_request', 'images on action', { field: 'images', reason: 'action_conflict' })
         if (request.purpose === 'writing' && (request.replyToId != null || action || request.targetLanguage != null))
           throw clientError('bad_request', 'writing graph fields', { field: 'action' })
-        if ((retry || translation || request.replyToId != null) && (!request.conversationId || !ports.chat.history))
+        if ((retry || translation || request.replyToId != null) && (!request.conversationId || !storesConversations))
           throw clientError('bad_request', 'conversation required', { field: 'conversationId' })
         const language = request.targetLanguage?.trim() ?? ''
         if (translation && (!language || Array.from(language).length > 80))
           throw clientError('bad_request', 'invalid language', { field: 'targetLanguage' })
         if (!retry && !translation && !request.input.trim())
           throw clientError('bad_request', 'empty input', { field: 'input' })
-        if (!ports.chat.history || request.purpose === 'writing') {
-          queueMicrotask(() => onEvent({ kind: 'end', status: 'completed' }))
-          return { runId: 'fake-run', conversationId: null, turnId: null }
-        }
+        if (!storesConversations || request.purpose === 'writing')
+          return acceptRun(null, null, false, onEvent, callOptions?.signal)
         let conversationId = request.conversationId
         if (!conversationId) {
           do {
@@ -329,18 +390,21 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
           },
         }
         conversation.turns.push(turn)
-        queueMicrotask(() => {
-          turn.status = callOptions?.signal?.aborted ? 'cancelled' : 'completed'
-          if (!retry && turn.status === 'completed')
-            conversation.summary = { ...conversation.summary, selectedTurnId: turnId, updatedAt: Date.now() }
-          if (turn.status === 'completed') onEvent({ kind: 'text_delta', text: turn.text })
-          else turn.text = ''
-          onEvent({ kind: 'end', status: turn.status })
-        })
-        return { runId: nextId('fake-run'), conversationId, turnId }
+        return acceptRun(conversation, turn, !retry, onEvent, callOptions?.signal)
       },
-      approve: () => Promise.resolve(),
-      history,
+      cancel: async (runId) => {
+        const run = runs.get(runId)
+        if (run?.status === 'running') run.cancelRequested = true
+      },
+      approve: async (runId) => {
+        if (!runs.has(runId)) throw clientError('not_found', `run ${runId}`, { entity: 'run' })
+        throw clientError('conflict', 'no pending approval', { reason: 'approval_expired' })
+      },
+      getSnapshot: async (runId) => {
+        const run = runs.get(runId)
+        if (!run) throw clientError('not_found', `run ${runId}`, { entity: 'run' })
+        return { ...run }
+      },
       ...options.chat,
     },
     skills: {

@@ -1,4 +1,4 @@
-//! stdio transport (docs/13 §3): a local process per session speaking newline-delimited
+//! stdio transport (docs/27 §4): a local process per session speaking newline-delimited
 //! JSON-RPC. The process starts on demand and its whole tree ends with the link.
 
 use std::collections::BTreeMap;
@@ -18,7 +18,7 @@ use crate::protocol::{MAX_MESSAGE_BYTES, RpcError, Transport, find, too_large};
 /// stderr kept for the log summary; the rest is read and discarded.
 const MAX_STDERR_BYTES: usize = 64 * 1024;
 
-/// What to start; validated when saved (docs/13 §4).
+/// What to start; revalidated when connecting (docs/27 §4).
 pub(crate) struct Launch<'a> {
     /// Server id, for logs only.
     pub(crate) server_id: &'a str,
@@ -39,6 +39,7 @@ pub(crate) struct StdioLink {
     line: Vec<u8>,
     known: Vec<String>,
     alive: bool,
+    stderr: tokio::task::JoinHandle<()>,
 }
 
 impl StdioLink {
@@ -89,7 +90,7 @@ impl StdioLink {
         ) else {
             return Err(KitError::new(KitErrorCode::Internal, "child pipes missing"));
         };
-        tokio::spawn(drain_stderr(
+        let stderr = tokio::spawn(drain_stderr(
             stderr,
             launch.server_id.to_owned(),
             known.clone(),
@@ -102,6 +103,7 @@ impl StdioLink {
             line: Vec::new(),
             known,
             alive: true,
+            stderr,
         })
     }
 
@@ -174,13 +176,10 @@ impl StdioLink {
         if let Err(error) = child.start_kill() {
             tracing::debug!(error = %error, "mcp.client.stdio_kill_tree_failed");
         }
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
-                let _ = child.wait().await;
-            });
-        }
-        // Without a runtime `child` is dropped here; the tree was already killed, and on
-        // Windows closing the kill-on-close job ends it too.
+        // Dropping the killed Tokio child hands reaping to Tokio's process driver;
+        // no detached application task is needed to own a wait future.
+        drop(child);
+        self.stderr.abort();
     }
 }
 

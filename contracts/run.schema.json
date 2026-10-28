@@ -1,0 +1,195 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aether.local/contracts/v1/run.schema.json",
+  "definitions": {
+    "EndStatus": { "enum": ["completed", "failed", "cancelled"] },
+    "RunStatus": { "enum": ["running", "completed", "failed", "cancelled"] },
+    "ToolOutcome": { "enum": ["ok", "error", "denied", "unknown"] },
+    "Ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok"],
+      "properties": { "ok": { "const": true } }
+    },
+    "RunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "skills", "input", "regenerate", "language"],
+      "properties": {
+        "purpose": { "type": "string" },
+        "model": { "anyOf": [{ "$ref": "common.schema.json#/definitions/ModelRef" }, { "type": "null" }] },
+        "skills": { "type": "array", "maxItems": 20, "items": { "$ref": "common.schema.json#/definitions/SkillRef" } },
+        "context": { "anyOf": [{ "$ref": "common.schema.json#/definitions/ContextRef" }, { "type": "null" }] },
+        "input": { "type": "string", "maxLength": 100000 },
+        "images": { "type": "array", "maxItems": 4, "items": { "$ref": "common.schema.json#/definitions/ImagePart" } },
+        "conversationId": { "$ref": "common.schema.json#/definitions/NullableId" },
+        "scope": { "type": ["string", "null"], "maxLength": 200 },
+        "webSearch": { "type": "boolean" },
+        "regenerate": { "type": "boolean" },
+        "replyToId": { "$ref": "common.schema.json#/definitions/NullableId" },
+        "retryTurnId": { "$ref": "common.schema.json#/definitions/NullableId" },
+        "translateTurnId": { "$ref": "common.schema.json#/definitions/NullableId" },
+        "targetLanguage": { "type": ["string", "null"], "minLength": 1, "maxLength": 80, "pattern": "\\S" },
+        "language": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "reasoningEffort": { "$ref": "common.schema.json#/definitions/ReasoningEffort" },
+        "permissionMode": { "$ref": "common.schema.json#/definitions/PermissionMode" },
+        "generateImage": { "type": "boolean" }
+      }
+    },
+    "RunAccepted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "conversationId", "turnId"],
+      "properties": {
+        "runId": { "$ref": "common.schema.json#/definitions/Id" },
+        "conversationId": { "$ref": "common.schema.json#/definitions/NullableId" },
+        "turnId": { "$ref": "common.schema.json#/definitions/NullableId" }
+      }
+    },
+    "RunSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "conversationId", "turnId", "status", "cancelRequested"],
+      "properties": {
+        "runId": { "$ref": "common.schema.json#/definitions/Id" },
+        "conversationId": { "$ref": "common.schema.json#/definitions/NullableId" },
+        "turnId": { "$ref": "common.schema.json#/definitions/NullableId" },
+        "status": { "$ref": "#/definitions/RunStatus" },
+        "cancelRequested": { "type": "boolean" },
+        "error": { "$ref": "error.schema.json#/definitions/KitError" },
+        "exhausted": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["error"], "properties": { "error": true } },
+          "then": { "properties": { "status": { "const": "failed" } } }
+        }
+      ]
+    },
+    "RunEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "search_start" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "query", "provider", "hits"],
+          "properties": {
+            "kind": { "const": "search_result" },
+            "query": { "type": "string" },
+            "provider": { "type": "string" },
+            "hits": { "type": "array", "items": { "$ref": "common.schema.json#/definitions/SearchHit" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "round"],
+          "properties": {
+            "kind": { "const": "round_start" },
+            "round": { "$ref": "common.schema.json#/definitions/U32" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "text"],
+          "properties": { "kind": { "const": "text_delta" }, "text": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "text"],
+          "properties": { "kind": { "const": "reasoning_delta" }, "text": { "type": "string" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "callId", "name", "source"],
+          "properties": {
+            "kind": { "const": "tool_call" },
+            "callId": { "type": "string" },
+            "name": { "type": "string" },
+            "source": { "enum": ["host", "mcp"] },
+            "server": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "callId", "name", "argsPreview"],
+          "properties": {
+            "kind": { "const": "approval_required" },
+            "callId": { "type": "string" },
+            "name": { "type": "string" },
+            "argsPreview": { "type": "string", "maxLength": 2000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "callId", "outcome", "summary"],
+          "properties": {
+            "kind": { "const": "tool_result" },
+            "callId": { "type": "string" },
+            "outcome": { "$ref": "#/definitions/ToolOutcome" },
+            "summary": { "type": "string" },
+            "payload": true
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "inputTokens",
+            "outputTokens",
+            "cacheReadTokens",
+            "cacheWriteTokens",
+            "reasoningTokens",
+            "cost"
+          ],
+          "properties": {
+            "kind": { "const": "usage" },
+            "inputTokens": { "$ref": "common.schema.json#/definitions/TokenCount" },
+            "outputTokens": { "$ref": "common.schema.json#/definitions/TokenCount" },
+            "cacheReadTokens": { "$ref": "common.schema.json#/definitions/TokenCount" },
+            "cacheWriteTokens": { "$ref": "common.schema.json#/definitions/TokenCount" },
+            "reasoningTokens": { "$ref": "common.schema.json#/definitions/TokenCount" },
+            "cost": { "anyOf": [{ "$ref": "common.schema.json#/definitions/Cost" }, { "type": "null" }] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "usage"],
+          "properties": {
+            "kind": { "const": "context" },
+            "usage": { "$ref": "common.schema.json#/definitions/ContextUsage" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "status"],
+          "properties": {
+            "kind": { "const": "end" },
+            "status": { "$ref": "#/definitions/EndStatus" },
+            "error": { "$ref": "error.schema.json#/definitions/KitError" },
+            "exhausted": { "type": "boolean" }
+          },
+          "allOf": [
+            {
+              "if": { "required": ["error"], "properties": { "error": true } },
+              "then": { "properties": { "status": { "const": "failed" } } }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

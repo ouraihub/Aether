@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aether.local/contracts/v1/common.schema.json",
+  "title": "Aether shared wire dependencies (docs/22 and referenced owners)",
+  "definitions": {
+    "Id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "NullableId": { "anyOf": [{ "$ref": "#/definitions/Id" }, { "type": "null" }] },
+    "U32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "TokenCount": { "anyOf": [{ "$ref": "#/definitions/U32" }, { "type": "null" }] },
+    "Timestamp": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+    "PermissionMode": { "enum": ["default", "plan", "accept_edits", "auto", "full_access"] },
+    "ToolEffect": { "enum": ["read", "edit", "exec", "other"] },
+    "Approval": { "enum": ["auto", "ask", "deny"] },
+    "ReasoningEffort": { "enum": ["default", "none", "auto", "minimal", "low", "medium", "high", "xhigh", "max"] },
+    "Currency": { "enum": ["USD", "CNY"] },
+    "ContextSource": { "enum": ["reported", "estimated", "unknown"] },
+    "ModelRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpointId", "modelId"],
+      "properties": { "endpointId": { "type": "string" }, "modelId": { "type": "string" } }
+    },
+    "ContextRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": { "kind": { "type": "string" }, "id": { "type": "string" } }
+    },
+    "SkillRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "revision"],
+      "properties": { "id": { "type": "string" }, "revision": { "$ref": "#/definitions/U32" } }
+    },
+    "ImageMime": { "enum": ["image/png", "image/jpeg", "image/webp", "image/gif"] },
+    "ImagePart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mime", "data"],
+      "properties": {
+        "mime": { "$ref": "#/definitions/ImageMime" },
+        "data": {
+          "type": "string",
+          "maxLength": 5592408,
+          "$comment": "Atomic lookahead/backreference chunks prevent V8 from retaining a backtracking frame for each of up to 5592408 bytes. Both repeated groups are bounded by the encoded maxLength (1365 large chunks and 1023 small chunks). Padding still enforces canonical zero trailing bits.",
+          "pattern": "^(?:(?=([A-Za-z0-9+/]{4096}))\\1)*(?:(?=([A-Za-z0-9+/]{4}))\\2){0,1023}(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$(?![\\s\\S])",
+          "allOf": [
+            {
+              "if": { "minLength": 5592408 },
+              "then": { "pattern": "==$" }
+            }
+          ]
+        }
+      }
+    },
+    "ImageRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mime", "url"],
+      "properties": { "mime": { "$ref": "#/definitions/ImageMime" }, "url": { "type": ["string", "null"] } }
+    },
+    "TokenUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens"],
+      "properties": {
+        "inputTokens": { "$ref": "#/definitions/TokenCount" },
+        "outputTokens": { "$ref": "#/definitions/TokenCount" },
+        "cacheReadTokens": { "$ref": "#/definitions/TokenCount" },
+        "cacheWriteTokens": { "$ref": "#/definitions/TokenCount" },
+        "reasoningTokens": { "$ref": "#/definitions/TokenCount" }
+      }
+    },
+    "ContextUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tokens", "contextWindow", "source", "endpointId", "modelId"],
+      "properties": {
+        "tokens": { "$ref": "#/definitions/TokenCount" },
+        "contextWindow": { "$ref": "#/definitions/TokenCount" },
+        "source": { "$ref": "#/definitions/ContextSource" },
+        "endpointId": { "type": ["string", "null"] },
+        "modelId": { "type": ["string", "null"] }
+      }
+    },
+    "Cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "currency"],
+      "properties": { "amount": { "type": "number", "minimum": 0 }, "currency": { "$ref": "#/definitions/Currency" } }
+    },
+    "SearchHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "url", "snippet"],
+      "properties": {
+        "title": { "type": "string" },
+        "url": { "type": "string", "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://[^\\s/?#]+(?:[/?#][^\\s]*)?$" },
+        "snippet": { "type": "string" }
+      }
+    }
+  }
+}

@@ -5,14 +5,18 @@
 
 pub mod connection;
 pub mod contract;
+#[cfg(feature = "native")]
 pub mod db;
 pub mod error;
 pub mod id;
 pub mod mask;
+#[cfg(feature = "native")]
 pub mod net;
+#[cfg(feature = "native")]
 pub mod paths;
 pub mod pricing;
 pub mod reasoning;
+#[cfg(feature = "native")]
 pub mod secret;
 pub mod sse;
 

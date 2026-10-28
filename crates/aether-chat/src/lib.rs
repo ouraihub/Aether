@@ -2,31 +2,26 @@
 //!
 //! 设计：`docs/12-详细设计-kit-chat.md`。实现按 `docs/90-开发任务清单.md` 领取任务后填充。
 
-mod painting;
-mod protocol;
+#[cfg(feature = "native")]
+mod native;
+pub mod protocol;
 pub mod risk;
+#[cfg(feature = "native")]
 mod run;
-mod store;
 mod tools;
 mod types;
 mod validate;
 
 pub use tokio_util::sync::CancellationToken;
 
-/// Hosts build a [`Runner`] with it without depending on the private `aether-support`.
+/// Address restrictions for the Native engine.
+#[cfg(feature = "native")]
 pub use aether_support::net::AddressPolicy;
-pub use painting::{
-    GENERATE_IMAGE, ImageOrigin, MAX_EDIT_IMAGES, MAX_IMAGE_CHOICES, generate_image,
-    generate_image_spec,
-};
-pub use run::{RunSummary, Runner, Usage};
-pub use store::{
-    Conversation, ConversationStore, ConversationSummary, SqliteStore, Turn, TurnHandle, TurnImage,
-    TurnRecord, TurnStatus, history_path, translation_input, trim_history,
-};
+#[cfg(feature = "native")]
+pub use run::RunEngine;
 pub use tools::{Approver, AuthorizeContext, BoxFuture, ToolExecutor};
 pub use types::*;
-pub use validate::check_images;
+pub use validate::{check_images, validate};
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests;

@@ -3,8 +3,8 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use aether_support::connection::custom_headers;
 use aether_support::error::upstream_excerpt;
+use aether_support::net::custom_headers;
 use aether_support::net::{self, AddressPolicy};
 use aether_support::{KitError, Protocol};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
@@ -13,8 +13,8 @@ use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 use crate::{
-    Model, ProbeError, ProbeErrorKind, ProbeResult, ProbeTarget, ProbedModel, Store, TypeSource,
-    api_base, infer, infer_reasoning,
+    Model, ProbeError, ProbeErrorKind, ProbeResult, ProbedModel, TypeSource, api_base, infer,
+    infer_reasoning,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -23,91 +23,111 @@ const MAX_BODY: usize = 4 * 1024 * 1024;
 
 type Outcome = Result<Vec<ProbedModel>, ProbeError>;
 
-impl Store {
-    /// `GET <api_base>/models` for a saved endpoint or an unsaved draft. Upstream and
-    /// network failures are reported in [`ProbeResult::error`]; an unauthorized or
-    /// rate-limited key falls through to the next enabled key (docs/34 §3.4).
-    ///
-    /// # Errors
-    /// `cancelled` when `cancel` fires; `not_found{entity:"endpoint"|"key"}` or
-    /// `needs_config{reason:"key_unreadable"}` for stored keys; `bad_request`
-    /// for an unusable URL (field `url`) or key (field `apiKey`); `internal`.
-    pub async fn probe(
-        &self,
-        target: ProbeTarget,
-        cancel: &CancellationToken,
-    ) -> Result<ProbeResult, KitError> {
-        let (base_url, protocol, keys, headers) = match target {
-            ProbeTarget::Saved { endpoint_id } => {
-                let row = self.endpoint(&endpoint_id)?;
-                (row.base_url, row.protocol, row.keys, row.headers)
-            }
-            // The address may be edited and unsaved while keys and headers stay stored (docs/11 §4).
-            ProbeTarget::Draft {
-                base_url,
-                protocol,
-                endpoint_id,
-                key_id,
-            } => match (endpoint_id, key_id) {
-                (Some(endpoint), Some(key)) => {
-                    let keys = vec![self.endpoint_key(&endpoint, &key)?];
-                    (base_url, protocol, keys, self.endpoint_headers(&endpoint)?)
-                }
-                (Some(endpoint), None) => {
-                    let row = self.endpoint(&endpoint)?;
-                    (base_url, protocol, row.keys, row.headers)
-                }
-                (None, Some(_)) => return Err(KitError::not_found("key")),
-                (None, None) => (base_url, protocol, Vec::new(), Vec::new()),
-            },
-        };
-        let probe_url = format!("{}/models", api_base(&base_url));
-        let known: Vec<&str> = keys.iter().map(|key| key.as_str()).collect();
-        let attempts = keys.len().max(1);
-        let mut outcome = Ok(Vec::new());
-        let mut used = 0;
-        for attempt in 0..attempts {
-            used = attempt;
-            outcome = cancel
-                .run_until_cancelled(fetch(
-                    &probe_url,
-                    &base_url,
-                    protocol,
-                    keys.get(attempt),
-                    &known,
-                    &headers,
-                ))
-                .await
-                .ok_or_else(KitError::cancelled)??;
-            let next = matches!(&outcome, Err(e) if matches!(e.kind, ProbeErrorKind::Unauthorized | ProbeErrorKind::RateLimited));
-            if !next {
-                break;
-            }
-        }
-        let (models, error) = match outcome {
-            Ok(models) => (models, None),
-            Err(error) => (Vec::new(), Some(error)),
-        };
-        // Relays resolve the model before validating the body, so ask with a listed one.
-        let claude = models
+/// Explicit model-list input; contains plaintext secrets and is never serialized or logged.
+pub struct ProbeInput {
+    /// Raw API address.
+    pub base_url: String,
+    /// Requested wire protocol.
+    pub protocol: Protocol,
+    /// Fixed key attempt order, consumed once without rotation.
+    pub api_keys: Vec<Zeroizing<String>>,
+    /// Sensitive custom request headers.
+    pub headers: Vec<(String, String)>,
+    /// Host-selected network authorization for every request.
+    pub policy: AddressPolicy,
+}
+
+/// Probes an explicit endpoint without storage or native credentials services.
+/// # Errors
+/// Invalid input and cancellation return errors; network/upstream failures are in the result.
+pub async fn probe(input: ProbeInput, cancel: &CancellationToken) -> Result<ProbeResult, KitError> {
+    crate::connection::validate_url("url", &input.base_url)?;
+    crate::connection::validate_headers(
+        input
+            .headers
             .iter()
-            .find(|m| m.group.as_deref() == Some("claude"))
-            .map(|m| m.model.id.as_str());
-        let suggested_protocol = match claude {
-            Some(model) if protocol != Protocol::AnthropicMessages => cancel
-                .run_until_cancelled(speaks_messages(&base_url, model, keys.get(used), &headers))
-                .await
-                .ok_or_else(KitError::cancelled)?
-                .then_some(Protocol::AnthropicMessages),
-            _ => None,
-        };
-        Ok(ProbeResult {
-            probe_url,
-            models,
-            error,
-            suggested_protocol,
-        })
+            .map(|(name, value)| (name.as_str(), value.as_str())),
+    )?;
+    let ProbeInput {
+        base_url,
+        protocol,
+        api_keys: keys,
+        mut headers,
+        policy,
+    } = input;
+    for (name, _) in &mut headers {
+        if name.len() != name.trim().len() {
+            *name = name.trim().to_owned();
+        }
     }
+    for key in &keys {
+        if key.trim().is_empty() {
+            return Err(KitError::bad_request("apiKey", "empty"));
+        }
+        if key.len() > 4096 {
+            return Err(KitError::bad_request("apiKey", "too_long"));
+        }
+        sensitive(key)?;
+    }
+    let probe_url = format!("{}/models", api_base(&base_url));
+    let known: Vec<&str> = keys.iter().map(|key| key.as_str()).collect();
+    let attempts = keys.len().max(1);
+    let mut outcome = Ok(Vec::new());
+    let mut used = 0;
+    for attempt in 0..attempts {
+        if cancel.is_cancelled() {
+            return Err(KitError::cancelled());
+        }
+        used = attempt;
+        outcome = cancel
+            .run_until_cancelled(fetch(
+                &probe_url,
+                &base_url,
+                protocol,
+                keys.get(attempt),
+                &known,
+                &headers,
+                &policy,
+            ))
+            .await
+            .ok_or_else(KitError::cancelled)??;
+        let next = matches!(&outcome, Err(e) if matches!(e.kind, ProbeErrorKind::Unauthorized | ProbeErrorKind::RateLimited));
+        if !next {
+            break;
+        }
+    }
+    let (models, error) = match outcome {
+        Ok(models) => (models, None),
+        Err(error) => (Vec::new(), Some(error)),
+    };
+    // Relays resolve the model before validating the body, so ask with a listed one.
+    let claude = models
+        .iter()
+        .find(|m| m.group.as_deref() == Some("claude"))
+        .map(|m| m.model.id.as_str());
+    if cancel.is_cancelled() {
+        return Err(KitError::cancelled());
+    }
+    let suggested_protocol = match claude {
+        Some(model) if protocol != Protocol::AnthropicMessages => cancel
+            .run_until_cancelled(speaks_messages(
+                &base_url,
+                model,
+                keys.get(used),
+                &headers,
+                &policy,
+            ))
+            .await
+            .ok_or_else(KitError::cancelled)?
+            .then_some(Protocol::AnthropicMessages),
+        _ => None,
+    };
+    Ok(ProbeResult {
+        probe_url,
+        models,
+        error,
+        suggested_protocol,
+    })
 }
 
 /// Whether `POST <api_base>/messages` exists for this key: an empty `messages` list is
@@ -117,12 +137,12 @@ async fn speaks_messages(
     model: &str,
     key: Option<&Zeroizing<String>>,
     headers: &[(String, String)],
+    policy: &AddressPolicy,
 ) -> bool {
-    let policy = AddressPolicy::default();
-    let Ok(url) = net::check_url(&format!("{}/messages", api_base(base_url)), &policy) else {
+    let Ok(url) = net::check_url(&format!("{}/messages", api_base(base_url)), policy) else {
         return false;
     };
-    let Ok(client) = net::client(policy, CONNECT_TIMEOUT) else {
+    let Ok(client) = net::client(policy.clone(), CONNECT_TIMEOUT) else {
         return false;
     };
     let body = serde_json::json!({ "model": model, "max_tokens": 1, "messages": [] });
@@ -141,7 +161,11 @@ async fn speaks_messages(
             .header(AUTHORIZATION, bearer)
             .header("x-api-key", api_key);
     }
-    matches!(request.send().await, Ok(r) if matches!(r.status().as_u16(), 400 | 422))
+    let Ok(mut response) = request.send().await else {
+        return false;
+    };
+    let supported = matches!(response.status().as_u16(), 400 | 422);
+    supported && matches!(read_capped(&mut response).await, Ok(Some(_)))
 }
 
 async fn fetch(
@@ -151,9 +175,9 @@ async fn fetch(
     key: Option<&Zeroizing<String>>,
     known: &[&str],
     headers: &[(String, String)],
+    policy: &AddressPolicy,
 ) -> Result<Outcome, KitError> {
-    let policy = AddressPolicy::default();
-    let url = match net::check_url(probe_url, &policy) {
+    let url = match net::check_url(probe_url, policy) {
         Ok(url) => url,
         Err(e) if e.details().reason() == Some("blocked_address") => {
             return Ok(Err(failure(ProbeErrorKind::BlockedAddress)));
@@ -167,7 +191,7 @@ async fn fetch(
         return Ok(Err(failure(ProbeErrorKind::MissingKey)));
     }
 
-    let request = net::client(policy, CONNECT_TIMEOUT)?
+    let request = net::client(policy.clone(), CONNECT_TIMEOUT)?
         .get(url)
         .timeout(TOTAL_TIMEOUT);
     let mut request = custom_headers(request, headers);

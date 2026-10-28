@@ -1,8 +1,9 @@
 //! 对外 MCP 服务：回环监听、token、作用域，只暴露宿主显式注册的工具。不依赖 chat / mcp-client。
 //!
-//! 设计：`docs/13-详细设计-kit-mcp.md 第二部分`。
+//! 设计：`docs/28-详细设计-MCP服务端.md`。
 
 mod dto;
+mod handler;
 mod http;
 mod store;
 
@@ -22,7 +23,7 @@ pub use tokio_util::sync::CancellationToken;
 
 use crate::store::Store;
 
-/// Default per-tool argument limit (docs/13 §7).
+/// Default per-tool argument limit (docs/28 §5).
 pub const DEFAULT_MAX_REQUEST_BYTES: usize = 64 * 1024;
 
 /// A boxed `Send` future, as returned by [`ToolHandler`].
@@ -39,7 +40,7 @@ pub struct ScopeSpec {
     pub id: &'static str,
     /// i18n key of the label shown in the UI.
     pub label_key: &'static str,
-    /// The UI asks for a second confirmation before enabling it (docs/13 §9.3).
+    /// The UI asks for a second confirmation before enabling it (docs/28 §6).
     pub destructive: bool,
 }
 

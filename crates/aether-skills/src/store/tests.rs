@@ -446,7 +446,10 @@ fn a_changed_file_alone_bumps_the_revision() {
 fn editing_the_text_keeps_files_and_duplicate_copies_them() {
     let dir = TempDir::new().unwrap();
     let store = Store::open(dir.path(), &[]).unwrap();
-    let source = zip_skill("tool", &[("references/guide.md", b"guide\n")]);
+    let source = zip_skill(
+        "tool",
+        &[("references/guide.md", b"guide\n"), ("LICENSE", b"MIT\n")],
+    );
     let id = install(&store, &source, false)[0].id.clone();
 
     let edit = ManualSave {
@@ -456,6 +459,7 @@ fn editing_the_text_keeps_files_and_duplicate_copies_them() {
     };
     let list = store.save_manual(&edit).unwrap();
     assert_eq!((list[0].revision, list[0].file_count), (2, 1));
+    assert_eq!(store.get(&id).unwrap().license.as_deref(), Some("MIT\n"));
     assert_eq!(
         store.file(&id, 2, "references/guide.md").unwrap(),
         b"guide\n"
@@ -464,6 +468,10 @@ fn editing_the_text_keeps_files_and_duplicate_copies_them() {
     let list = store.duplicate(&id, "tool-copy").unwrap();
     let copy = list.iter().find(|s| s.name == "tool-copy").unwrap();
     assert_eq!(copy.file_count, 1);
+    assert_eq!(
+        store.get(&copy.id).unwrap().license.as_deref(),
+        Some("MIT\n")
+    );
     assert_eq!(
         store.file(&copy.id, 1, "references/guide.md").unwrap(),
         b"guide\n"
@@ -509,4 +517,115 @@ fn migration_from_v1_keeps_skills_and_revisions() {
         false,
     );
     assert!(tool.iter().any(|s| s.name == "tool" && s.has_scripts));
+}
+
+#[test]
+fn package_order_and_stored_hashes_share_the_pure_identity() {
+    use crate::content::{ContentIdentity, digest};
+
+    let dir = TempDir::new().unwrap();
+    let store = Store::open(dir.path(), &[]).unwrap();
+    let source = zip_skill("guide", &[("scripts/z.sh", b"abc"), ("assets/a.bin", b"")]);
+    let reordered = zip_skill("guide", &[("assets/a.bin", b""), ("scripts/z.sh", b"abc")]);
+    let preview = store.preview(&source).unwrap();
+    let expected = digest(
+        ContentIdentity {
+            name: &preview.name,
+            description: &preview.description,
+            version: preview.version.as_deref(),
+            body: &preview.body,
+            license: preview.license.as_deref(),
+        },
+        [
+            (
+                "assets/a.bin",
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            ),
+            (
+                "scripts/z.sh",
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            ),
+        ],
+    );
+    assert_eq!(preview.digest, expected);
+    assert_eq!(store.preview(&reordered).unwrap().digest, expected);
+    let installed = store.install(&reordered, &expected, false).unwrap();
+    let id = installed[0].id.clone();
+    let unchanged = ManualSave {
+        id: Some(id.clone()),
+        expected_revision: Some(1),
+        name: preview.name,
+        description: preview.description,
+        version: preview.version,
+        body: preview.body,
+    };
+    // Editing reads the persisted hashes in the transaction; it must agree
+    // with the package's borrowed, path-sorted hashes without a revision bump.
+    assert_eq!(store.save_manual(&unchanged).unwrap()[0].revision, 1);
+    assert_eq!(store.file(&id, 1, "scripts/z.sh").unwrap(), b"abc");
+    assert_eq!(install(&store, &source, true)[0].revision, 1);
+}
+
+#[test]
+fn extra_and_display_order_do_not_change_content_identity_or_revision() {
+    let dir = TempDir::new().unwrap();
+    let store = Store::open(dir.path(), &[]).unwrap();
+    let with_extra = |value: &str| Source::Bytes {
+        file_name: "SKILL.md".into(),
+        bytes: format!("---\nname: guide\ndescription: test skill\naudience: {value}\n---\nbody\n")
+            .into_bytes(),
+    };
+    let first = with_extra("commuters");
+    let second = with_extra("everyone");
+    let preview = store.preview(&first).unwrap();
+    let id = store.install(&first, &preview.digest, false).unwrap()[0]
+        .id
+        .clone();
+    assert_eq!(store.preview(&second).unwrap().digest, preview.digest);
+    let replaced = store.install(&second, &preview.digest, true).unwrap();
+    assert_eq!(
+        (replaced[0].id.as_str(), replaced[0].revision),
+        (id.as_str(), 1)
+    );
+    assert_eq!(
+        store
+            .get(&id)
+            .unwrap()
+            .extra
+            .get("audience")
+            .map(String::as_str),
+        Some("everyone")
+    );
+    let list = store.save_manual(&manual("other", "text")).unwrap();
+    let ids: Vec<_> = list.iter().rev().map(|skill| skill.id.clone()).collect();
+    store.reorder(&ids).unwrap();
+    assert_eq!(store.get(&id).unwrap().meta.revision, 1);
+    assert_eq!(store.preview(&second).unwrap().digest, preview.digest);
+}
+
+#[test]
+fn adding_and_renaming_a_file_changes_identity_and_revision() {
+    let dir = TempDir::new().unwrap();
+    let store = Store::open(dir.path(), &[]).unwrap();
+    let empty = zip_skill("tool", &[]);
+    let added = zip_skill("tool", &[("assets/a.bin", b"abc")]);
+    let renamed = zip_skill("tool", &[("assets/b.bin", b"abc")]);
+    let id = install(&store, &empty, false)[0].id.clone();
+    assert_eq!(install(&store, &added, true)[0].revision, 2);
+    let preview = store.preview(&renamed).unwrap();
+    assert_conflict(
+        store.install(&renamed, &store.preview(&added).unwrap().digest, true),
+        "content_changed",
+    );
+    assert_eq!(store.get(&id).unwrap().meta.revision, 2);
+    assert_eq!(store.file(&id, 2, "assets/a.bin").unwrap(), b"abc");
+    assert_eq!(
+        store.install(&renamed, &preview.digest, true).unwrap()[0].revision,
+        3
+    );
+    assert_eq!(store.file(&id, 3, "assets/b.bin").unwrap(), b"abc");
+    assert_eq!(
+        store.file(&id, 3, "assets/a.bin").unwrap_err().code(),
+        KitErrorCode::NotFound
+    );
 }

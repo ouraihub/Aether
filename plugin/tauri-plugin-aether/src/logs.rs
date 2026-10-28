@@ -1,73 +1,13 @@
 //! `logs_*` commands over the host's `LogHandle` (docs/15 §5, docs/10 §10). Always registered.
 //! `logs_ingest` and `logs_tail` carry no span: span fields would be appended to every line.
 
-use aether_observability::{IngestBatch, IngestReceipt, LogEntry, LogHandle};
+use aether_observability::{
+    DiagnosticLevel, IngestBatch, IngestReceipt, LogEntry, LogHandle, LogStatus,
+};
 use aether_support::KitError;
-use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime, State};
-use ts_rs::TS;
 
 const MAX_TAIL: u16 = 2000;
-
-/// Log level as shown in the panel and stored in `level.json`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "UPPERCASE")]
-#[ts(export)]
-pub(crate) enum LogLevel {
-    /// `ERROR`
-    Error,
-    /// `WARN`
-    Warn,
-    /// `INFO`
-    Info,
-    /// `DEBUG`
-    Debug,
-    /// `TRACE`
-    Trace,
-}
-
-impl From<LogLevel> for tracing::Level {
-    fn from(level: LogLevel) -> Self {
-        match level {
-            LogLevel::Error => Self::ERROR,
-            LogLevel::Warn => Self::WARN,
-            LogLevel::Info => Self::INFO,
-            LogLevel::Debug => Self::DEBUG,
-            LogLevel::Trace => Self::TRACE,
-        }
-    }
-}
-
-impl From<tracing::Level> for LogLevel {
-    fn from(level: tracing::Level) -> Self {
-        // `Level` is a struct of constants, so the match needs a catch-all: the remaining one is TRACE.
-        match level {
-            tracing::Level::ERROR => Self::Error,
-            tracing::Level::WARN => Self::Warn,
-            tracing::Level::INFO => Self::Info,
-            tracing::Level::DEBUG => Self::Debug,
-            _ => Self::Trace,
-        }
-    }
-}
-
-/// Current level and whether the log file is writable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export)]
-pub(crate) struct LogStatus {
-    /// Level in effect.
-    pub level: LogLevel,
-    /// `false` when the most recent write, flush or rotation failed.
-    pub available: bool,
-}
-
-fn status(logs: &LogHandle) -> LogStatus {
-    LogStatus {
-        level: logs.level().into(),
-        available: logs.available(),
-    }
-}
 
 /// The newest `limit` (≤ 2000) entries.
 #[tauri::command]
@@ -87,7 +27,7 @@ pub(crate) async fn logs_tail<R: Runtime>(
 
 #[tauri::command]
 pub(crate) async fn logs_get_level<R: Runtime>(app: AppHandle<R>) -> LogStatus {
-    status(&app.state::<LogHandle>())
+    app.state::<LogHandle>().status()
 }
 
 /// Applies `level` immediately and persists it to `level.json`.
@@ -95,10 +35,10 @@ pub(crate) async fn logs_get_level<R: Runtime>(app: AppHandle<R>) -> LogStatus {
 #[tracing::instrument(skip_all, fields(command = "logs_set_level"), err(level = "warn"))]
 pub(crate) fn logs_set_level(
     logs: State<'_, LogHandle>,
-    level: LogLevel,
+    level: DiagnosticLevel,
 ) -> Result<LogStatus, KitError> {
     logs.set_level(level.into())?;
-    Ok(status(&logs))
+    Ok(logs.status())
 }
 
 #[tauri::command]

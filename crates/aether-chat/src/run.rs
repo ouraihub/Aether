@@ -4,109 +4,43 @@ use std::collections::HashMap;
 use std::mem;
 use std::time::Duration;
 
-use aether_support::net::{self, AddressPolicy};
-use aether_support::sse::SseParser;
+use crate::native::ModelGateway;
+use aether_support::net::AddressPolicy;
 use aether_support::{KitError, KitErrorCode};
-use reqwest::Response;
-use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-use crate::protocol::{Decoded, Decoder, Request, Round, path};
+use crate::protocol::{Decoded, Request, Round};
 use crate::tools::{self, Approver, AuthorizeContext, Settled, TRUNCATED_NOTE, ToolExecutor};
 use crate::types::{
-    Approval, EndStatus, Message, RunEvent, RunInput, ToolCall, ToolSource, ToolSourceKind,
-    ToolSpec,
+    Approval, EndStatus, Message, RunEvent, RunInput, RunSummary, ToolCall, ToolSource,
+    ToolSourceKind, ToolSpec, Usage,
 };
 use crate::validate;
 
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(120);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
-/// Longest upstream error body read for the excerpt.
-const ERROR_BODY_BYTES: usize = 8 * 1024;
-
-/// Token usage reported by the upstream; `None` when not reported (never estimated).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Usage {
-    /// Input tokens.
-    pub input_tokens: Option<u32>,
-    /// Output tokens.
-    pub output_tokens: Option<u32>,
-    /// Cached input tokens.
-    pub cache_read_tokens: Option<u32>,
-    /// Cached write tokens.
-    pub cache_write_tokens: Option<u32>,
-    /// Reasoning tokens.
-    pub reasoning_tokens: Option<u32>,
-}
-
-impl Usage {
-    /// Sums rounds; a side stays `None` only if no round reported it.
-    fn add(&mut self, round: Self) {
-        let sum = |a: Option<u32>, b: Option<u32>| match (a, b) {
-            (Some(a), Some(b)) => Some(a.saturating_add(b)),
-            (a, b) => a.or(b),
-        };
-        self.input_tokens = sum(self.input_tokens, round.input_tokens);
-        self.output_tokens = sum(self.output_tokens, round.output_tokens);
-        self.cache_read_tokens = sum(self.cache_read_tokens, round.cache_read_tokens);
-        self.cache_write_tokens = sum(self.cache_write_tokens, round.cache_write_tokens);
-        self.reasoning_tokens = sum(self.reasoning_tokens, round.reasoning_tokens);
-    }
-}
-
-impl From<Usage> for aether_support::TokenUsage {
-    fn from(u: Usage) -> Self {
-        Self {
-            input_tokens: u.input_tokens,
-            output_tokens: u.output_tokens,
-            cache_read_tokens: u.cache_read_tokens,
-            cache_write_tokens: u.cache_write_tokens,
-            reasoning_tokens: u.reasoning_tokens,
-        }
-    }
-}
-
-/// Outcome and known usage of a completed or interrupted run.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RunSummary {
-    /// Terminal status.
-    pub status: EndStatus,
-    /// Produced messages, including partial output.
-    pub messages: Vec<Message>,
-    /// Known provider-reported token counts.
-    pub usage: Usage,
-    /// Cost summed per round from the connection's pricing; `None` = unknown (docs/41 §4).
-    pub cost: Option<aether_support::Cost>,
-    /// Last request context estimate or report.
-    pub context_usage: Option<aether_support::ContextUsage>,
-    /// Tool loop stopped at its configured round limit.
-    pub exhausted: bool,
-}
 
 /// Runs model requests with the aether HTTP client.
-pub struct Runner {
-    http: reqwest::Client,
-    policy: AddressPolicy,
+pub struct RunEngine {
+    gateway: ModelGateway,
     pub(crate) first_byte: Duration,
     pub(crate) idle: Duration,
 }
 
-impl Runner {
+impl RunEngine {
     /// A runner whose requests obey `policy` (no redirects, no proxy, vetted addresses).
     ///
     /// # Errors
     /// `internal` if the HTTP client cannot be built.
     pub fn new(policy: AddressPolicy) -> Result<Self, KitError> {
         Ok(Self {
-            http: net::client(policy.clone(), CONNECT_TIMEOUT)?,
-            policy,
+            gateway: ModelGateway::new(policy)?,
             first_byte: FIRST_BYTE_TIMEOUT,
             idle: IDLE_TIMEOUT,
         })
     }
 
-    /// Validates `input` and assembles its system prompt ([`Runner::validate`]), then runs
+    /// Validates `input` and assembles its system prompt ([`RunEngine::validate`]), then runs
     /// the tool loop (docs/12 §5). Always emits exactly one `end` as the last event, also
     /// when validation fails or the future is dropped; the return value matches it.
     pub async fn run(
@@ -178,7 +112,7 @@ impl Runner {
         turn: &mut Turn,
     ) -> Result<bool, KitError> {
         // Fed back again for a repeated call id instead of executing twice (docs/12 §5).
-        let mut settled: HashMap<String, String> = HashMap::new();
+        let mut settled: HashMap<String, (String, serde_json::Value, String)> = HashMap::new();
         let boundary = validate::boundary_id()?;
         let mut catalogue = run.input.tools.as_slice();
         for round in 1..=run.input.budget.max_rounds {
@@ -220,11 +154,21 @@ impl Runner {
                 if run.cancel.is_cancelled() {
                     return Err(KitError::cancelled());
                 }
-                let text = if let Some(text) = settled.get(&call.id) {
+                let text = if let Some((name, args, text)) = settled.get(&call.id) {
+                    if name != &call.name || args != &call.args {
+                        return Err(KitError::new(
+                            KitErrorCode::Conflict,
+                            "tool call id reused with different arguments",
+                        )
+                        .with_reason("tool_call_conflict"));
+                    }
                     text.clone()
                 } else {
                     let text = Self::call(run, catalogue, call, &boundary, emitter).await?;
-                    settled.insert(call.id.clone(), text.clone());
+                    settled.insert(
+                        call.id.clone(),
+                        (call.name.clone(), call.args.clone(), text.clone()),
+                    );
                     text
                 };
                 turn.messages.push(Message::Tool {
@@ -277,6 +221,7 @@ impl Runner {
             Approval::Auto => true,
             Approval::Deny => false,
             Approval::Ask => {
+                let wait = run.approver.wait(&run.input.run_id, call, run.cancel);
                 emitter.emit(RunEvent::ApprovalRequired {
                     call_id: call.id.clone(),
                     name: call.name.clone(),
@@ -285,11 +230,14 @@ impl Runner {
                 // Also stops waiting on its own, should an approver ignore `cancel`.
                 tokio::select! {
                     () = run.cancel.cancelled() => return Err(KitError::cancelled()),
-                    allow = run.approver.wait(&run.input.run_id, call, run.cancel) => allow,
+                    allow = wait => allow,
                 }
             }
         };
         let settled = if allowed {
+            if run.cancel.is_cancelled() {
+                return Err(KitError::cancelled());
+            }
             // An in-flight tool is awaited even after a cancel; it reports `unknown` itself.
             let execution = run.tools.execute(call, run.cancel).await;
             Settled::from_execution(
@@ -347,14 +295,8 @@ impl Runner {
             .model_id
             .as_deref()
             .ok_or_else(|| KitError::needs_config("missing_model"))?;
-        let base = connection.base_url.trim_end_matches('/');
-        let url = net::check_url(
-            &format!("{base}/{}", path(connection.protocol)),
-            &self.policy,
-        )?;
-        let mut request = Request {
+        let request = Request {
             connection,
-            key: None,
             model,
             system: run.system,
             history: &input.history,
@@ -367,52 +309,16 @@ impl Runner {
             reasoning_effort: input.reasoning_effort,
         };
         let known: Vec<&str> = connection.api_keys.iter().map(|key| key.as_str()).collect();
-        // Keys in rotation order; an auth/limit reply before the first byte tries the next (docs/34 §3.4).
-        let attempts = known.len().max(1);
-        let mut attempt = 0;
-        let (mut response, mut chunk) = loop {
-            request.key = known.get(attempt).copied();
-            let first_byte = async {
-                let mut response = request
-                    .encode(self.http.post(url.clone()))
-                    .send()
-                    .await
-                    .map_err(transport)?;
-                if !response.status().is_success() {
-                    return Err(upstream(response, &known).await);
-                }
-                let chunk = response.chunk().await.map_err(transport)?;
-                Ok((response, chunk))
-            };
-            match timeout(self.first_byte, first_byte)
-                .await
-                .map_err(|_| timed_out("first_byte"))?
-            {
-                Ok(started) => break started,
-                Err(error) if attempt + 1 < attempts && next_key(&error) => attempt += 1,
-                Err(error) => return Err(error),
-            }
-        };
-        let mut parser = SseParser::new();
-        let mut decoder = Decoder::new(connection.protocol);
-        while let Some(bytes) = chunk {
-            for event in parser.feed(&bytes) {
-                apply(&mut decoder, &event.data, emitter, text, usage, &known)?;
-            }
-            chunk = timeout(self.idle, response.chunk())
-                .await
-                .map_err(|_| timed_out("idle"))?
-                .map_err(transport)?;
-        }
-        for event in parser.finish() {
-            apply(&mut decoder, &event.data, emitter, text, usage, &known)?;
-        }
-        if decoder.done {
-            Ok(decoder.finish())
-        } else {
-            Err(KitError::new(KitErrorCode::Network, "stream ended early")
-                .with_reason("incomplete_stream"))
-        }
+        self.gateway
+            .stream(
+                &connection.base_url,
+                request.encode(),
+                &known,
+                (self.first_byte, self.idle),
+                usage,
+                |decoded| apply(decoded, emitter, text, &known),
+            )
+            .await
     }
 }
 
@@ -454,14 +360,12 @@ fn rejects_tools(error: &KitError) -> bool {
 }
 
 fn apply<F: FnMut(RunEvent)>(
-    decoder: &mut Decoder,
-    data: &str,
+    decoded: Decoded,
     emitter: &mut Emitter<F>,
     text: &mut String,
-    usage: &mut Usage,
     known: &[&str],
 ) -> Result<(), KitError> {
-    match decoder.event(data, usage) {
+    match decoded {
         Decoded::Text(delta) => {
             text.push_str(&delta);
             emitter.emit(RunEvent::TextDelta { text: delta });
@@ -506,40 +410,4 @@ impl<F: FnMut(RunEvent)> Drop for Emitter<F> {
             exhausted: None,
         });
     }
-}
-
-fn timed_out(reason: &str) -> KitError {
-    KitError::new(KitErrorCode::Timeout, format!("upstream {reason} timeout")).with_reason(reason)
-}
-
-/// An upstream reply that another key may fix (docs/34 §3.4).
-pub(crate) fn next_key(error: &KitError) -> bool {
-    matches!(error.details().status(), Some(401 | 403 | 429))
-}
-
-pub(crate) fn transport(error: reqwest::Error) -> KitError {
-    let error = error.without_url();
-    if net::is_blocked(&error) {
-        return KitError::bad_request("url", "blocked_address").with_cause(error);
-    }
-    let code = if error.is_timeout() {
-        KitErrorCode::Timeout
-    } else {
-        KitErrorCode::Network
-    };
-    KitError::new(code, "upstream unreachable").with_cause(error)
-}
-
-async fn upstream(mut response: Response, known: &[&str]) -> KitError {
-    let status = response.status().as_u16();
-    let mut body = Vec::new();
-    // Best effort: a broken error body still yields the status.
-    while body.len() < ERROR_BODY_BYTES {
-        match response.chunk().await {
-            Ok(Some(chunk)) => body.extend_from_slice(&chunk),
-            Ok(None) | Err(_) => break,
-        }
-    }
-    body.truncate(ERROR_BODY_BYTES);
-    KitError::upstream(status, &String::from_utf8_lossy(&body), known)
 }

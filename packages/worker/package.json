@@ -1,0 +1,25 @@
+{
+  "name": "@ouraihub/aether-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./providers": "./src/providers/index.ts",
+    "./search": "./src/search/index.ts",
+    "./images": "./src/images/index.ts",
+    "./skills": "./src/skills/index.ts",
+    "./mcp": "./src/mcp/index.ts",
+    "./conversations": "./src/conversations/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@ouraihub/aether-contracts": "workspace:*",
+    "@ouraihub/aether-core": "workspace:*"
+  },
+  "devDependencies": {}
+}

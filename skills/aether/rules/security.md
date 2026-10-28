@@ -2,9 +2,9 @@
 
 ## Secrets
 
-API keys, MCP headers, query credentials, and issued tokens are backend data. The frontend may submit a new secret or receive `hasKey`/masked metadata, but must not receive or persist plaintext secrets. Never put credentials in URLs, logs, DTO details, screenshots, or error messages.
+API keys, MCP headers/query credentials and issued tokens are backend data. Ordinary lists/runtime DTOs expose masks or presence only. Existing Provider/Search explicit reveal is permitted only after fresh host authentication; keep it transient and clear stale/closed credential sessions. MCP client credentials remain write-only. Never put credentials in URLs, logs, DTO details, screenshots or errors.
 
-Do not add an export-secret, show-plaintext, arbitrary SQL, arbitrary file-write, or arbitrary command-execution path. Use the existing encrypted store and explicit typed commands.
+Do not invent another export-secret, arbitrary SQL/file-write or command-execution path. Reuse encrypted stores and explicit typed operations; UI possession of an identity token is not fresh verification.
 
 ## Tool authorization
 
@@ -27,3 +27,11 @@ Use typed error codes, not message matching. Before a run is accepted, return a 
 ## Tauri boundary
 
 Capabilities are an authorization layer, not a feature detector. Grant only the permissions needed by the compiled feature set and each window. The frontend cannot declare or elevate its own permissions.
+
+## Worker boundary
+
+Use AES-GCM credentials with explicit key ring/current ID and AAD bound to application/tenant/subject/purpose/recordId; retain older keys until explicit rotation. Prepared plaintext stays in memory, never DO metadata. D1 JSON CAS and immutable R2 blobs do not form a distributed transaction; superseded/uncertain blobs intentionally remain until reference-aware GC with a safe retention period.
+
+Remote outbound requires an allowlisted trusted gateway enforcing public-address policy at connect time for every A/AAAA, including rebinding, with no redirects/open proxy. Search target fetching additionally needs trusted all-address DNS preflight; preflight is not connection pinning. A configured binding or a security string is not evidence that the deployed service enforces this. Literal-loopback test switches must not be used in production.
+
+Public MCP/OAuth requires exact HTTPS origin, PKCE, explicit consent/CSRF, scoped grants and host resource authorization. Do not infer host login from MCP bearer credentials, or claim local HTTP proved OAuth. Worker run ownership also binds session; restart fails interrupted and never replays model/tool side effects. Actual UI/HTTPS/restart/CI evidence belongs in docs90.

@@ -1,12 +1,13 @@
-//! The per-run tool catalogue and calls (docs/13 §3, §4).
+//! Fixed per-run tool catalogue and lossless bounded call results (docs/27).
 
 use aether_support::KitError;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::Approval;
-use crate::protocol::{Connection, RpcError};
-use crate::store::{Target, Timeouts};
+use crate::protocol::{Connection, RpcError, tool_result};
+use crate::runtime::{Timeouts, check_cancel, connect};
+use crate::store::Target;
 
 /// One MCP tool in the run catalogue.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,24 +28,28 @@ pub struct McpTool {
     pub approval: Approval,
 }
 
-/// Outcome of one MCP tool call; the integration layer maps it to Chat's `ToolExecution`.
+/// Transport-neutral outcome; model projection belongs to the application runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpCallResult {
-    /// Text content joined; non-text items are placeholders.
-    Ok {
-        /// The joined text.
-        text: String,
+    /// A valid response, including tool-level errors and extension content.
+    Completed {
+        /// Original content entries, collectively bounded by the transport budget.
+        content: Vec<Value>,
+        /// Original structured result object, when present.
+        structured_content: Option<Value>,
+        /// Tool-level failure does not mean that execution never happened.
+        is_error: bool,
     },
-    /// Not executed, or the tool reported `isError`.
-    Error {
-        /// `tool_error` for `isError`, `unknown_tool`, or a `KitErrorCode` in snake case.
+    /// A definite pre-dispatch failure or a valid JSON-RPC error.
+    Failed {
+        /// Safe error code.
         code: String,
-        /// Safe message.
+        /// Safe error message.
         message: String,
     },
-    /// The request was sent but no answer arrived: it may have run.
+    /// Dispatched without a trustworthy terminal response; never automatically replay.
     Unknown {
-        /// `timeout`, `network`, `cancelled` or `budget_exceeded`.
+        /// timeout/network/cancelled/budget_exceeded/invalid_response.
         reason: String,
     },
 }
@@ -61,11 +66,20 @@ pub(crate) struct SessionServer {
 pub struct McpSession {
     servers: Vec<SessionServer>,
     timeouts: Timeouts,
+    shutdown: CancellationToken,
 }
 
 impl McpSession {
-    pub(crate) const fn new(servers: Vec<SessionServer>, timeouts: Timeouts) -> Self {
-        Self { servers, timeouts }
+    pub(crate) const fn new(
+        servers: Vec<SessionServer>,
+        timeouts: Timeouts,
+        shutdown: CancellationToken,
+    ) -> Self {
+        Self {
+            servers,
+            timeouts,
+            shutdown,
+        }
     }
 
     /// The catalogue fixed at the start of the run.
@@ -84,6 +98,9 @@ impl McpSession {
         args: Value,
         cancel: &CancellationToken,
     ) -> McpCallResult {
+        if let Err(error) = check_cancel(cancel, &self.shutdown) {
+            return failed(&error);
+        }
         let timeouts = self.timeouts;
         let found = self.servers.iter_mut().find_map(|server| {
             let name = server
@@ -95,7 +112,7 @@ impl McpSession {
             Some((server, name))
         });
         let Some((server, tool)) = found else {
-            return McpCallResult::Error {
+            return McpCallResult::Failed {
                 code: "unknown_tool".to_owned(),
                 message: format!("unknown tool {prefixed}"),
             };
@@ -104,28 +121,24 @@ impl McpSession {
         let mut connection = match server.connection.take().filter(Connection::is_alive) {
             Some(connection) => connection,
             // Nothing was called yet, so a failed handshake is a plain error.
-            None => match server.target.connect(timeouts, cancel).await {
+            None => match connect(&server.target, timeouts, cancel, &self.shutdown).await {
                 Ok(connection) => connection,
                 Err(error) => return failed(&error),
             },
         };
         let params = json!({ "name": tool, "arguments": args });
-        let result = connection.call("tools/call", params, cancel).await;
+        let result = connection
+            .call("tools/call", params, cancel, &self.shutdown)
+            .await;
         server.connection = Some(connection);
         match result {
-            Ok(result) => {
-                let text = content_text(&result);
-                if result["isError"].as_bool() == Some(true) {
-                    McpCallResult::Error {
-                        code: "tool_error".to_owned(),
-                        message: text,
-                    }
-                } else {
-                    McpCallResult::Ok { text }
-                }
-            }
+            Ok(result) => tool_result(result),
             Err(RpcError::Unknown(error)) => McpCallResult::Unknown {
-                reason: code_str(&error),
+                reason: if error.details().reason() == Some("invalid_response") {
+                    "invalid_response".to_owned()
+                } else {
+                    code_str(&error)
+                },
             },
             Err(error @ (RpcError::Failed(_) | RpcError::Expired)) => failed(&error.into_error()),
         }
@@ -133,7 +146,7 @@ impl McpSession {
 }
 
 fn failed(error: &KitError) -> McpCallResult {
-    McpCallResult::Error {
+    McpCallResult::Failed {
         code: code_str(error),
         message: error.message().to_owned(),
     }
@@ -144,18 +157,4 @@ fn code_str(error: &KitError) -> String {
         .ok()
         .and_then(|code| code.as_str().map(str::to_owned))
         .unwrap_or_default()
-}
-
-/// `text` items joined by newlines; other types become `[unsupported content: <type>]`.
-fn content_text(result: &Value) -> String {
-    result["content"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|item| match item["type"].as_str() {
-            Some("text") => item["text"].as_str().unwrap_or_default().to_owned(),
-            other => format!("[unsupported content: {}]", other.unwrap_or("unknown")),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }

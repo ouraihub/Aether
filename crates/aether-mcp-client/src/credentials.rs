@@ -1,4 +1,4 @@
-//! Per-server credentials, sealed at rest as JSON (docs/13 §2): request headers and query
+//! Per-server credentials, sealed at rest as JSON (docs/27 §2): request headers and query
 //! parameters for http servers, environment variables for stdio servers.
 
 use std::collections::BTreeMap;

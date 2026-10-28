@@ -4,10 +4,10 @@
     {
       "id": 1,
       "prompt": "Add Aether streaming chat with persistent history to a Tauri host that already uses providers. Show the required Rust Builder setup, host integration, UI ports, and capability permissions.",
-      "expected_output": "A feature-consistent integration using providers plus chat, observability before tauri::Builder, a ConversationStore passed to chat, KitHost boundaries, createTauriPorts with chatHistory, and matching permissions.",
+      "expected_output": "A feature-consistent integration constructing RunService and ConversationService over the same store, injecting them with Builder::new(logs).runs(...).conversations(...), observability before tauri::Builder, complete KitHost boundaries, createTauriPorts with independent conversations, and matching permissions.",
       "files": [],
       "expectations": [
-        "Does not call Builder.chat without Builder.providers",
+        "Constructs the runtime services before injecting them; provider management commands are optional independently of chat",
         "Initializes observability before tauri::Builder",
         "Passes a conversation store when persistent history is requested",
         "Separates compile-time features from Tauri capability permissions",
@@ -42,13 +42,13 @@
     },
     {
       "id": 4,
-      "prompt": "A ChatPanel test invokes real Tauri commands, hand-writes a RunEvent type, and expects ChatPort.run to resolve only after the assistant message is complete. Fix the test design according to Aether's contracts.",
-      "expected_output": "The test injects createFakePorts, imports generated DTO types, treats run resolution as acceptance, and asserts event-driven terminal behavior including cancellation.",
+      "prompt": "A ChatPanel test invokes real Tauri commands, hand-writes a RunEvent type, and expects RunClient.start to resolve only after the assistant message is complete. Fix the test design according to Aether's contracts.",
+      "expected_output": "The test injects createFakePorts, imports generated DTO bindings, treats start resolution as acceptance, and asserts event-driven terminal behavior including cancellation.",
       "files": [],
       "expectations": [
         "Uses createFakePorts instead of real Tauri IPC",
         "Uses generated DTO types instead of duplicate hand-written shapes",
-        "Treats ChatPort.run resolution as acceptance",
+        "Treats RunClient.start resolution as acceptance",
         "Asserts end events for completion and cancellation",
         "Tests observable behavior rather than forwarding implementation"
       ]

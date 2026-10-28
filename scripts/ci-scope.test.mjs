@@ -44,10 +44,13 @@ test('rejects rule and instruction documents at every depth and capitalization',
 
 test('rejects generated DTOs, build inputs and anything outside the allowlist', () => {
   for (const path of [
-    'packages/ui/src/ports/generated/Dto.ts',
-    'packages/ui/src/ports/generated/nested/Dto.ts',
-    'packages/ui/src/ports/generated/README.md',
-    'packages/ui/src/ports/generated',
+    'packages/contracts/src/generated/Dto.ts',
+    'packages/contracts/src/generated/nested/Dto.ts',
+    'packages/contracts/src/generated/README.md',
+    'packages/contracts/src/generated',
+    'packages/contracts/src/validation.ts',
+    'packages/core/src/engine/index.ts',
+    'packages/worker/src/app.ts',
     'packages/ui/src/main.js',
     'packages/ui/src/theme.scss',
     'packages/ui/src/icon.svg',

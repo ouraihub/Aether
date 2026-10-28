@@ -14,12 +14,7 @@ function pathScope(path) {
   if (parts.some((part) => !part || part === '.' || part === '..' || ruleName.test(part))) return 'full'
   if (['README.md', 'CHANGELOG.md', 'LICENSE'].includes(path)) return 'docs'
   if (path.startsWith('docs/') && path.endsWith('.md')) return 'docs'
-  if (
-    path.startsWith('packages/ui/src/') &&
-    !path.startsWith('packages/ui/src/ports/generated/') &&
-    /\.(?:ts|svelte|css)$/.test(path)
-  )
-    return 'frontend'
+  if (path.startsWith('packages/ui/src/') && /\.(?:ts|svelte|css)$/.test(path)) return 'frontend'
   return 'full'
 }
 

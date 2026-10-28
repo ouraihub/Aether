@@ -50,7 +50,7 @@
 
   async function openDir() {
     try {
-      await logs?.openDir()
+      await ports.desktop?.openLogsDirectory()
     } catch {
       notify.toast('error', t('errors.internal'))
     }
@@ -65,7 +65,9 @@
         <Switch bind:checked={problemsOnly} />
         {t('logs.problemsOnly')}
       </label>
-      <Button variant="outline" size="sm" onclick={() => void openDir()}>{t('logs.openDir')}</Button>
+      {#if ports.desktop}
+        <Button variant="outline" size="sm" onclick={() => void openDir()}>{t('logs.openDir')}</Button>
+      {/if}
     </header>
     {#if failed}
       <Alert variant="destructive"><AlertDescription>{t('logs.loadFailed')}</AlertDescription></Alert>

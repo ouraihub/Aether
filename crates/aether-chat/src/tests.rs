@@ -25,10 +25,11 @@ use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 use crate::{
-    Approval, Approver, AuthorizeContext, BoxFuture, Budget, EndStatus, ImagePart, Message,
-    PermissionMode, RunEvent, RunInput, RunSummary, Runner, SystemPart, ToolCall, ToolExecution,
-    ToolExecutor, Usage,
+    Approval, Approver, AuthorizeContext, BoxFuture, Budget, EndStatus, Message, PermissionMode,
+    RunEngine, RunEvent, RunInput, RunSummary, SystemPart, ToolCall, ToolExecution, ToolExecutor,
+    Usage,
 };
+use aether_images::ImagePart;
 
 const KEY: &str = "sk-test-0123456789abcdefghijkl";
 const PROTOCOLS: [Protocol; 3] = [
@@ -521,8 +522,8 @@ async fn vendor_reasoning_dialects_write_their_own_fields() {
     }
 }
 
-fn runner(first_byte_ms: u64, idle_ms: u64) -> Runner {
-    let mut runner = Runner::new(AddressPolicy::default()).unwrap();
+fn runner(first_byte_ms: u64, idle_ms: u64) -> RunEngine {
+    let mut runner = RunEngine::new(AddressPolicy::default()).unwrap();
     runner.first_byte = Duration::from_millis(first_byte_ms);
     runner.idle = Duration::from_millis(idle_ms);
     runner
@@ -530,7 +531,7 @@ fn runner(first_byte_ms: u64, idle_ms: u64) -> Runner {
 
 /// Runs once; `cancel_on_text` cancels when the first delta arrives.
 async fn run(
-    runner: &Runner,
+    runner: &RunEngine,
     input: RunInput,
     cancel_on_text: bool,
 ) -> (RunSummary, Vec<RunEvent>) {
