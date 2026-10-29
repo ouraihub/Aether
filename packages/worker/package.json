@@ -1,7 +1,12 @@
 {
   "name": "@ouraihub/aether-worker",
   "version": "0.1.0",
-  "private": true,
+  "license": "LGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ouraihub/Aether.git",
+    "directory": "packages/worker"
+  },
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -21,5 +26,15 @@
     "@ouraihub/aether-contracts": "workspace:*",
     "@ouraihub/aether-core": "workspace:*"
   },
-  "devDependencies": {}
+  "devDependencies": {},
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.svelte",
+    "!src/**/__tests__",
+    "migrations"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

@@ -1,7 +1,12 @@
 {
   "name": "@ouraihub/aether-contracts",
   "version": "0.1.0",
-  "private": true,
+  "license": "LGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ouraihub/Aether.git",
+    "directory": "packages/contracts"
+  },
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -17,5 +22,14 @@
   },
   "devDependencies": {
     "typescript": "5.9.3"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.svelte",
+    "!src/**/__tests__"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

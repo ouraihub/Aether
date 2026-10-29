@@ -7,6 +7,12 @@ A shared AI foundation with Rust/Tauri desktop services, a TypeScript execution 
 - Web 基座：`@ouraihub/aether-contracts` → `@ouraihub/aether-core` → `@ouraihub/aether-worker`；[Worker示例](examples/worker/README.md)组合真实D1/R2与每run一个Durable Object，UI使用`@ouraihub/aether-ui/web`。设计入口：`docs/02-概要设计-Web共享基座.md` → `docs/22-详细设计-跨运行时公共契约.md`、`docs/23-详细设计-Web Worker运行时.md`、`docs/29-详细设计-Web数据与安全.md`。
 - 新版职责分层：先读 [00 总览](docs/00-概要设计.md) → [03 自顶向下模块图](docs/03-契约优先架构与职责拆分设计.md) → [模块详细设计索引与迁移验收](docs/24-详细设计-职责分层与实现契约.md)。各能力接口直接更新原设计，长主题分文件，不并行维护新旧两套规范。
 
+## npm 包
+
+`@ouraihub/aether-{contracts,core,ui,presets,worker}` 以 LGPL-3.0-only 发布至 npmjs，供宿主通过 pnpm 安装固定版本，例如 `pnpm add --save-exact @ouraihub/aether-ui@0.1.0`。发布包保留 TypeScript/Svelte 源码，需要宿主构建工具编译；Worker 包同时包含 `migrations/`，UI 包包含其公开导出的 `fixtures/`。
+
+本地发布使用用户级 `.npmrc` 的 npmjs 凭据，不把 token 放入仓库。先通过 `pnpm run ci`，再执行 `pnpm --filter "./packages/**" -r publish --access public --no-git-checks`。pnpm 会把内部 `workspace:*` 转为包版本；依赖先于调用方发布。每次发布前必须更新对应包版本，已经发布的版本不得覆盖。不配置额外 GitHub token 或自动发布工作流。
+
 ## 目录
 
 | 路径                         | 内容                                                                                     |
