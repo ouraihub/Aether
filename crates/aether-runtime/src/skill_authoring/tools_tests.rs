@@ -7,7 +7,11 @@ fn workspace() -> (tempfile::TempDir, AuthoringTools) {
     aether_skills::creator::write_resources(&root.path().join("creator")).unwrap();
     fs::create_dir(root.path().join("skill")).unwrap();
     fs::create_dir(root.path().join("evaluations")).unwrap();
-    let tools = AuthoringTools::new(root.path().to_path_buf());
+    #[cfg(windows)]
+    let path = root.path().to_path_buf();
+    #[cfg(not(windows))]
+    let path = fs::canonicalize(root.path()).unwrap();
+    let tools = AuthoringTools::new(path);
     (root, tools)
 }
 
