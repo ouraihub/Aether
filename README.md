@@ -11,7 +11,9 @@ A shared AI foundation with Rust/Tauri desktop services, a TypeScript execution 
 
 `@ouraihub/aether-{contracts,core,ui,presets,worker}` 以 LGPL-3.0-only 发布至 npmjs，供宿主通过 pnpm 安装固定版本，例如 `pnpm add --save-exact @ouraihub/aether-ui@0.1.0`。发布包保留 TypeScript/Svelte 源码，需要宿主构建工具编译；Worker 包同时包含 `migrations/`，UI 包包含其公开导出的 `fixtures/`。
 
-本地发布使用用户级 `.npmrc` 的 npmjs 凭据，不把 token 放入仓库。先通过 `pnpm run ci`，再执行 `pnpm --filter "./packages/**" -r publish --access public --no-git-checks`。pnpm 会把内部 `workspace:*` 转为包版本；依赖先于调用方发布。每次发布前必须更新对应包版本，已经发布的版本不得覆盖。不配置额外 GitHub token 或自动发布工作流。
+主干合入 `packages/*/package.json` 的版本更新后，`Publish npm packages` 工作流先运行 Windows 完整 `pnpm run ci`，成功后在独立任务使用仓库 `NPM_TOKEN` Secret 发布尚未发布的版本；也可在 Actions 手动触发，但只允许 `main`。每个 Action 固定提交，发布凭据只注入 publish 步骤，不用于安装或 PR 检查。已发布的同版本自动跳过，不强制覆盖；新改动须先升级对应包版本。pnpm 将内部 `workspace:*` 转为包版本，依赖先于调用方发布。
+
+本地应急发布仍可使用用户级 `.npmrc`，不把 token 放入仓库。完整 CI 通过后执行 `pnpm --filter "./packages/**" -r publish --access public --no-git-checks --registry https://registry.npmjs.org`。更换 token 时同步更新仓库 `NPM_TOKEN` Secret。
 
 ## 目录
 
