@@ -19,6 +19,8 @@ Node 26 下的 jsdom 测试使用 jsdom 自身的 `localStorage`，不读取 Nod
 
 技能创作工作区在创建时规范化系统临时目录别名（例如 macOS `/var`），避免误判为模型路径链接；工作区内部的软链接、junction 和路径逃逸仍拒绝。
 
+系统技能发现仍拒绝用户输入路径中的链接；其测试先规范化测试框架创建的临时根目录，避免 macOS 系统别名掩盖实际的发现、打包及链接拒绝验收。
+
 本地应急发布仍可使用用户级 `.npmrc`，不把 token 放入仓库。完整 CI 通过后执行 `pnpm --filter "./packages/**" -r publish --access public --no-git-checks --registry https://registry.npmjs.org`。更换 token 时同步更新仓库 `NPM_TOKEN` Secret。
 
 ## 目录
