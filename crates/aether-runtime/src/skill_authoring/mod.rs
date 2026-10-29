@@ -183,7 +183,11 @@ impl SkillAuthoringService {
             return Err(KitError::cancelled());
         }
         let temp = tempfile::tempdir().map_err(KitError::internal)?;
+        #[cfg(windows)]
         let root = temp.path().to_owned();
+        // macOS temp paths may contain OS-owned aliases such as /var -> /private/var.
+        #[cfg(not(windows))]
+        let root = std::fs::canonicalize(temp.path()).map_err(KitError::internal)?;
         aether_skills::creator::write_resources(&root.join("creator"))?;
         std::fs::create_dir(root.join("skill")).map_err(KitError::internal)?;
         std::fs::create_dir(root.join("evaluations")).map_err(KitError::internal)?;

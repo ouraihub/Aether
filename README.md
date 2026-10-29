@@ -17,6 +17,8 @@ Node 26 下的 jsdom 测试使用 jsdom 自身的 `localStorage`，不读取 Nod
 
 主干合入 `packages/*/package.json` 的版本更新后，`Publish npm packages` 工作流先对同一提交运行 Windows 完整 CI，并复用 Unix 工作流运行 macOS、Linux 完整 CI，三个平台全部成功后才在独立任务使用仓库 `NPM_TOKEN` Secret 发布尚未发布的版本；也可在 Actions 手动触发，但只允许 `main`。每个 Action 固定提交，发布凭据只注入 publish 步骤，不用于安装或 PR 检查。已发布的同版本自动跳过，不强制覆盖；新改动须先升级对应包版本。pnpm 将内部 `workspace:*` 转为包版本，依赖先于调用方发布。
 
+技能创作工作区在创建时规范化系统临时目录别名（例如 macOS `/var`），避免误判为模型路径链接；工作区内部的软链接、junction 和路径逃逸仍拒绝。
+
 本地应急发布仍可使用用户级 `.npmrc`，不把 token 放入仓库。完整 CI 通过后执行 `pnpm --filter "./packages/**" -r publish --access public --no-git-checks --registry https://registry.npmjs.org`。更换 token 时同步更新仓库 `NPM_TOKEN` Secret。
 
 ## 目录

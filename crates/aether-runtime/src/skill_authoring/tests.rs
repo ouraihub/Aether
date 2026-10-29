@@ -378,6 +378,8 @@ async fn owner_close_cleans_up_and_is_permanent() {
     let owner = RunOwner::new();
     let id = service.create(&owner).unwrap();
     let path = service.session(&owner, &id).unwrap().root.clone();
+    #[cfg(not(windows))]
+    assert_eq!(path, std::fs::canonicalize(&path).unwrap());
     service.cancel_owner(&owner);
     assert_eq!(
         service.create(&owner).unwrap_err().code(),
