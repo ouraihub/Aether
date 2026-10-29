@@ -476,7 +476,13 @@ mod tests {
     #[test]
     fn selected_root_discovers_skills_and_packages_only_allowed_files() {
         let root = tempfile::tempdir().unwrap();
-        let skill = root.path().join("example");
+        #[cfg(not(windows))]
+        let root = root.path().canonicalize().unwrap();
+        #[cfg(not(windows))]
+        let root = root.as_path();
+        #[cfg(windows)]
+        let root = root.path();
+        let skill = root.join("example");
         fs::create_dir_all(skill.join("references")).unwrap();
         fs::write(
             skill.join("SKILL.md"),
@@ -485,7 +491,7 @@ mod tests {
         .unwrap();
         fs::write(skill.join("references/context.md"), "Context").unwrap();
         fs::write(skill.join("README.md"), "Not installed").unwrap();
-        let found = discover_directory(root.path()).unwrap();
+        let found = discover_directory(root).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(
             discover_directory(&skill).unwrap(),
@@ -520,6 +526,13 @@ mod tests {
             fs::read_to_string(skill.join("README.md")).unwrap(),
             "Not installed"
         );
+        #[cfg(unix)]
+        {
+            let link = root.join("linked");
+            std::os::unix::fs::symlink(&skill, &link).unwrap();
+            assert!(discover_directory(&link).is_err());
+            assert!(prepare_directory(&link).is_err());
+        }
         fs::write(skill.join("references/SKILL.md"), "nested").unwrap();
         assert!(prepare_directory(&skill).is_err());
     }
