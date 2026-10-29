@@ -7,6 +7,14 @@ A shared AI foundation with Rust/Tauri desktop services, a TypeScript execution 
 - Web 基座：`@ouraihub/aether-contracts` → `@ouraihub/aether-core` → `@ouraihub/aether-worker`；[Worker示例](examples/worker/README.md)组合真实D1/R2与每run一个Durable Object，UI使用`@ouraihub/aether-ui/web`。设计入口：`docs/02-概要设计-Web共享基座.md` → `docs/22-详细设计-跨运行时公共契约.md`、`docs/23-详细设计-Web Worker运行时.md`、`docs/29-详细设计-Web数据与安全.md`。
 - 新版职责分层：先读 [00 总览](docs/00-概要设计.md) → [03 自顶向下模块图](docs/03-契约优先架构与职责拆分设计.md) → [模块详细设计索引与迁移验收](docs/24-详细设计-职责分层与实现契约.md)。各能力接口直接更新原设计，长主题分文件，不并行维护新旧两套规范。
 
+## npm 包
+
+`@ouraihub/aether-{contracts,core,ui,presets,worker}` 以 LGPL-3.0-only 发布至 npmjs，供宿主通过 pnpm 安装固定版本，例如 `pnpm add --save-exact @ouraihub/aether-ui@0.1.0`。发布包保留 TypeScript/Svelte 源码，需要宿主构建工具编译；Worker 包同时包含 `migrations/`，UI 包包含其公开导出的 `fixtures/`。
+
+主干合入 `packages/*/package.json` 的版本更新后，`Publish npm packages` 工作流先对同一提交运行 Windows 完整 CI，并复用 Unix 工作流运行 macOS、Linux 完整 CI，三个平台全部成功后才在独立任务使用仓库 `NPM_TOKEN` Secret 发布尚未发布的版本；也可在 Actions 手动触发，但只允许 `main`。每个 Action 固定提交，发布凭据只注入 publish 步骤，不用于安装或 PR 检查。已发布的同版本自动跳过，不强制覆盖；新改动须先升级对应包版本。pnpm 将内部 `workspace:*` 转为包版本，依赖先于调用方发布。
+
+本地应急发布仍可使用用户级 `.npmrc`，不把 token 放入仓库。完整 CI 通过后执行 `pnpm --filter "./packages/**" -r publish --access public --no-git-checks --registry https://registry.npmjs.org`。更换 token 时同步更新仓库 `NPM_TOKEN` Secret。
+
 ## 目录
 
 | 路径                         | 内容                                                                                     |

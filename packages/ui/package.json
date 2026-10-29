@@ -1,7 +1,12 @@
 {
   "name": "@ouraihub/aether-ui",
   "version": "0.1.0",
-  "private": true,
+  "license": "LGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ouraihub/Aether.git",
+    "directory": "packages/ui"
+  },
   "type": "module",
   "imports": {
     "#lib/*": "./src/*"
@@ -55,5 +60,15 @@
     "typescript": "5.9.3",
     "vite": "8.3.4",
     "vitest": "4.1.10"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.svelte",
+    "!src/**/__tests__",
+    "fixtures"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }
