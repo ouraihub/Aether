@@ -43,8 +43,12 @@ jobs:
         run: call node_modules\@ouraihub\desktop-kit\msvc\msvc-env.bat
       - run: pnpm run ci
 
+  unix:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/unix.yml
+
   publish:
-    needs: verify
+    needs: [verify, unix]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
