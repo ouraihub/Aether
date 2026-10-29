@@ -9,6 +9,10 @@ A shared AI foundation with Rust/Tauri desktop services, a TypeScript execution 
 
 ## npm 包
 
+本地与 GitHub Actions 统一使用 Node LTS `26.13.0`（Lithium），由 `.node-version` 固定、`actions/setup-node` 读取；`package.json` 的 `engines.node` 同步约束，`devEngines.runtime` 让 pnpm 自动下载并用于项目脚本。pnpm 固定 `12.16.1`（本次升级时 npm `latest` 正式版），由 `packageManager` 声明，不使用预发布版本或浮动 `latest`。
+
+Node 26 下的 jsdom 测试使用 jsdom 自身的 `localStorage`，不读取 Node 原生 Web Storage。
+
 `@ouraihub/aether-{contracts,core,ui,presets,worker}` 以 LGPL-3.0-only 发布至 npmjs，供宿主通过 pnpm 安装固定版本，例如 `pnpm add --save-exact @ouraihub/aether-ui@0.1.0`。发布包保留 TypeScript/Svelte 源码，需要宿主构建工具编译；Worker 包同时包含 `migrations/`，UI 包包含其公开导出的 `fixtures/`。
 
 主干合入 `packages/*/package.json` 的版本更新后，`Publish npm packages` 工作流先对同一提交运行 Windows 完整 CI，并复用 Unix 工作流运行 macOS、Linux 完整 CI，三个平台全部成功后才在独立任务使用仓库 `NPM_TOKEN` Secret 发布尚未发布的版本；也可在 Actions 手动触发，但只允许 `main`。每个 Action 固定提交，发布凭据只注入 publish 步骤，不用于安装或 PR 检查。已发布的同版本自动跳过，不强制覆盖；新改动须先升级对应包版本。pnpm 将内部 `workspace:*` 转为包版本，依赖先于调用方发布。

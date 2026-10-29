@@ -2,9 +2,16 @@
   "name": "aether",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@12.5.1",
+  "packageManager": "pnpm@12.16.1",
   "engines": {
-    "node": ">=24.15.0"
+    "node": "26.13.0"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "26.13.0",
+      "onFail": "download"
+    }
   },
   "scripts": {
     "lint": "eslint packages/ui/src packages/core/src packages/worker/src packages/contracts/src",
