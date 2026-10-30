@@ -80,18 +80,9 @@ impl PinnedHost {
 
 #[tokio::test]
 async fn run_bound_capabilities_release_independently_and_exactly_once() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/v1", listener.local_addr().unwrap());
     // Keep both model requests pending; cancellation, not a fake engine, ends them.
-    let server = tokio::spawn(async move {
-        let mut sockets = Vec::new();
-        for _ in 0..2 {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            read_request(&mut socket).await;
-            sockets.push(socket);
-        }
-        std::future::pending::<()>().await;
-    });
+    let server = upstream(vec![Reply::silent(), Reply::silent()]).await;
+    let url = format!("{}/v1", server.url());
     let dir = tempfile::tempdir().unwrap();
     let (providers, request) = local_model(dir.path(), &url, "revision-one");
     let host = Arc::new(PinnedHost::default());
@@ -135,7 +126,7 @@ async fn run_bound_capabilities_release_independently_and_exactly_once() {
         finished.iter().filter(|id| **id == second.run_id).count(),
         1
     );
-    server.abort();
+    drop(server);
 }
 
 #[tokio::test]
@@ -161,9 +152,8 @@ async fn rejected_preparation_cleans_host_once_without_events_or_reservation() {
 
 #[tokio::test]
 async fn durable_finish_precedes_the_only_end_and_terminal_snapshot() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/v1", listener.local_addr().unwrap());
-    let server = tokio::spawn(upstream(listener, vec![HELLO]));
+    let server = upstream(vec![sse(HELLO)]).await;
+    let url = format!("{}/v1", server.url());
     let dir = tempfile::tempdir().unwrap();
     let (providers, request) = local_model(dir.path(), &url, "question");
     let store = Arc::new(SqliteStore::open(dir.path()).unwrap());
@@ -197,14 +187,13 @@ async fn durable_finish_precedes_the_only_end_and_terminal_snapshot() {
             .contains("Hello")
     );
     assert_eq!(*host.finished.lock().unwrap(), [accepted.run_id]);
-    server.await.unwrap();
+    wire_requests(&server, 1);
 }
 
 #[tokio::test]
 async fn save_failure_replaces_completed_end_and_snapshot_without_reexecution() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/v1", listener.local_addr().unwrap());
-    let server = tokio::spawn(upstream(listener, vec![HELLO]));
+    let server = upstream(vec![sse(HELLO)]).await;
+    let url = format!("{}/v1", server.url());
     let dir = tempfile::tempdir().unwrap();
     let (providers, request) = local_model(dir.path(), &url, "question");
     let store = Arc::new(SqliteStore::open(dir.path()).unwrap());
@@ -239,7 +228,7 @@ async fn save_failure_replaces_completed_end_and_snapshot_without_reexecution() 
     assert!(receiver.try_recv().is_err());
     assert!(deleted.load(std::sync::atomic::Ordering::SeqCst));
     assert_eq!(*host.finished.lock().unwrap(), [accepted.run_id]);
-    assert_eq!(server.await.unwrap().len(), 1);
+    wire_requests(&server, 1);
 }
 
 struct FailingTool(bool);
@@ -342,9 +331,8 @@ impl KitHost for BlockingTool {
 
 #[tokio::test]
 async fn concurrent_and_repeated_shutdown_wait_for_dispatched_host_work() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/v1", listener.local_addr().unwrap());
-    let server = tokio::spawn(upstream(listener, vec![TWO_TOOLS]));
+    let server = upstream(vec![sse(TWO_TOOLS)]).await;
+    let url = format!("{}/v1", server.url());
     let dir = tempfile::tempdir().unwrap();
     let (providers, request) = local_model(dir.path(), &url, "wait");
     let host = Arc::new(BlockingTool::default());
@@ -397,5 +385,185 @@ async fn concurrent_and_repeated_shutdown_wait_for_dispatched_host_work() {
         KitErrorCode::Cancelled
     );
     assert!(rejected.try_recv().is_err());
-    assert_eq!(server.await.unwrap().len(), 1);
+    wire_requests(&server, 1);
+}
+
+/// Blocks inside preparation (host `tools`, on the blocking pool) until released.
+struct PreparingHost {
+    entered: std::sync::mpsc::Sender<()>,
+    release: Mutex<std::sync::mpsc::Receiver<()>>,
+    finished: Mutex<Vec<String>>,
+}
+impl KitHost for PreparingHost {
+    fn tools(&self, _: &RunRequest, _: &str) -> Vec<HostTool> {
+        self.entered.send(()).unwrap();
+        self.release.lock().unwrap().recv().unwrap();
+        Vec::new()
+    }
+    fn run_finished(&self, id: &str) {
+        self.finished.lock().unwrap().push(id.into());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_waits_for_a_preparing_acceptance_across_an_expired_grace() {
+    let dir = tempfile::tempdir().unwrap();
+    let (providers, request) = local_model(dir.path(), "http://127.0.0.1:9/v1", "preparing");
+    let (entered, entered_rx) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel();
+    let host = Arc::new(PreparingHost {
+        entered,
+        release: Mutex::new(release_rx),
+        finished: Mutex::default(),
+    });
+    let service = service(host.clone(), providers, None);
+    let owner = RunOwner::new();
+    let (sink, mut receiver) = events();
+    let start = tokio::spawn({
+        let service = service.clone();
+        async move { service.start(context(&owner), request, sink).await }
+    });
+    tokio::task::spawn_blocking(move || entered_rx.recv().unwrap())
+        .await
+        .unwrap();
+
+    // A short grace expires while preparation is blocked; the acceptance is not abandoned.
+    service.shutdown(Duration::from_millis(30)).await;
+    assert!(host.finished.lock().unwrap().is_empty());
+
+    let shutdown = tokio::spawn({
+        let service = service.clone();
+        async move { service.shutdown(Duration::from_secs(5)).await }
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(
+        !shutdown.is_finished(),
+        "drain must wait for the preparing acceptance"
+    );
+    release.send(()).unwrap();
+    // Rejected after preparation because the service is closing; the host is released once.
+    assert_eq!(
+        start.await.unwrap().unwrap_err().code(),
+        KitErrorCode::Cancelled
+    );
+    shutdown.await.unwrap();
+    assert_eq!(host.finished.lock().unwrap().len(), 1);
+    assert!(receiver.try_recv().is_err());
+}
+
+/// Records the cutoff of every image purge, then delegates.
+struct PurgeProbe {
+    inner: Arc<SqliteStore>,
+    cutoffs: std::sync::mpsc::Sender<i64>,
+}
+impl ConversationStore for PurgeProbe {
+    fn list(
+        &self,
+        scope: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<crate::conversations::ConversationSummary>, KitError> {
+        self.inner.list(scope, limit)
+    }
+    fn load(&self, id: &str) -> Result<crate::conversations::Conversation, KitError> {
+        self.inner.load(id)
+    }
+    fn reserve_action(
+        &self,
+        action: &crate::conversations::ActionRequest,
+        validate: &mut dyn FnMut(
+            &crate::conversations::ReservationInput,
+        ) -> Result<aether_chat::RunInput, KitError>,
+    ) -> Result<crate::conversations::TurnReservation, KitError> {
+        self.inner.reserve_action(action, validate)
+    }
+    fn finish_turn(&self, turn: TurnHandle, record: TurnRecord) -> Result<(), KitError> {
+        self.inner.finish_turn(turn, record)
+    }
+    fn delete(&self, id: &str) -> Result<(), KitError> {
+        self.inner.delete(id)
+    }
+    fn rename(
+        &self,
+        id: &str,
+        title: &str,
+    ) -> Result<crate::conversations::ConversationSummary, KitError> {
+        self.inner.rename(id, title)
+    }
+    fn edit_turn(
+        &self,
+        c: &str,
+        t: &str,
+        text: &str,
+        expected: &str,
+    ) -> Result<crate::conversations::Conversation, KitError> {
+        self.inner.edit_turn(c, t, text, expected)
+    }
+    fn remove_turn(
+        &self,
+        c: &str,
+        t: &str,
+    ) -> Result<crate::conversations::Conversation, KitError> {
+        self.inner.remove_turn(c, t)
+    }
+    fn fork(&self, c: &str, t: &str) -> Result<crate::conversations::Conversation, KitError> {
+        self.inner.fork(c, t)
+    }
+    fn select_turn(
+        &self,
+        c: &str,
+        t: &str,
+    ) -> Result<crate::conversations::Conversation, KitError> {
+        self.inner.select_turn(c, t)
+    }
+    fn purge_images(&self, before_ms: i64) -> Result<usize, KitError> {
+        let cleared = self.inner.purge_images(before_ms);
+        self.cutoffs.send(before_ms).unwrap();
+        cleared
+    }
+    fn add_generated(&self, turn_id: &str, images: &[ImagePart]) -> Result<(), KitError> {
+        self.inner.add_generated(turn_id, images)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn image_ttl_maintenance_uses_the_injected_clock() {
+    let dir = tempfile::tempdir().unwrap();
+    let (providers, mut request) = local_model(dir.path(), "http://127.0.0.1:9/v1", "picture");
+    let inner = Arc::new(SqliteStore::open(dir.path()).unwrap());
+    request.images = vec![part("aW1n")];
+    let turn = reserve(&inner, providers.clone(), request);
+    let stored = || {
+        inner.load(&turn.conversation_id).unwrap().turns[0].images[0]
+            .data
+            .clone()
+    };
+    let ttl = crate::conversations::IMAGE_TTL_DAYS * 86_400_000;
+    let created = aether_support::clock::now_millis();
+    // One minute before and after expiry, on a fixed clock: no waiting for real days.
+    for (now, kept) in [
+        (created + ttl - 60_000, true),
+        (created + ttl + 60_000, false),
+    ] {
+        let (cutoffs, seen) = std::sync::mpsc::channel();
+        let mut deps = RunDependencies::new(providers.clone());
+        deps.conversations = Some(Arc::new(PurgeProbe {
+            inner: inner.clone(),
+            cutoffs,
+        }));
+        deps.clock = Arc::new(move || now);
+        let service = RunService::new(
+            Arc::new(Host),
+            RunConfig::default(),
+            deps,
+            AddressPolicy::default(),
+        )
+        .unwrap();
+        // The first tick fires immediately; wait for that purge to complete, not for time.
+        let cutoff = tokio::task::spawn_blocking(move || seen.recv().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(cutoff, now - ttl);
+        assert_eq!(stored().is_some(), kept, "now={now}");
+        service.shutdown(Duration::from_secs(2)).await;
+    }
 }

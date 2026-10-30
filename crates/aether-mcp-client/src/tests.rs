@@ -1,4 +1,4 @@
-//! Behaviour against a local fake MCP server (tokio loopback, minimal HTTP/1.1).
+//! Behaviour against a local fake MCP server (the shared scripted loopback upstream).
 #![expect(clippy::unwrap_used, reason = "a failed unwrap is a failed test")]
 
 use std::collections::BTreeMap;
@@ -6,10 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aether_support::KitErrorCode;
+use aether_testkit::{Gate, Request, Server};
 use serde_json::{Value, json};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::net::TcpListener;
 
 use crate::{
     Approval, CancellationToken, McpCallResult, McpRuntime, McpTransport, ServerSave, ServerSecret,
@@ -19,7 +18,7 @@ use crate::{
 mod behavior;
 mod stdio;
 
-/// What the fake server saw.
+/// What the fake server saw, with the JSON-RPC body decoded.
 #[derive(Clone, Debug)]
 struct Seen {
     target: String,
@@ -28,6 +27,13 @@ struct Seen {
 }
 
 impl Seen {
+    fn new(request: &Request) -> Self {
+        Self {
+            target: request.target.clone(),
+            headers: request.headers.iter().cloned().collect(),
+            body: serde_json::from_slice(&request.body).unwrap(),
+        }
+    }
     fn method(&self) -> &str {
         self.body["method"].as_str().unwrap_or_default()
     }
@@ -41,94 +47,57 @@ enum Reply {
     Session(String, Value),
     Sse(String),
     Status(u16),
+    /// Read the request and never answer.
     Hang,
-    Gated(Arc<tokio::sync::Notify>, Value),
+    /// Answer with this JSON once the gate opens.
+    Gated(Gate, Value),
 }
 
-type Handler = Arc<dyn Fn(&Seen) -> Reply + Send + Sync>;
+impl Reply {
+    fn wire(self) -> aether_testkit::Reply {
+        use aether_testkit::Reply as Wire;
+        match self {
+            Self::Json(body) => Wire::json(body.to_string()),
+            Self::Session(id, body) => Wire::http(
+                200,
+                &[
+                    ("content-type", "application/json"),
+                    ("mcp-session-id", &id),
+                ],
+                body.to_string(),
+            ),
+            Self::Sse(body) => Wire::http(200, &[("content-type", "text/event-stream")], body),
+            Self::Status(status) => Wire::http(status, &[("content-type", "text/plain")], ""),
+            Self::Hang => Wire::silent(),
+            Self::Gated(gate, body) => {
+                let body = body.to_string();
+                Wire::close().then_wait(&gate).then_raw(format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                ))
+            }
+        }
+    }
+}
 
+/// A fake MCP endpoint at `/mcp`; every connection is answered by `handler`, concurrently.
 struct Fake {
     url: String,
-    seen: Arc<Mutex<Vec<Seen>>>,
+    server: Server,
 }
 
 impl Fake {
     async fn start(handler: impl Fn(&Seen) -> Reply + Send + Sync + 'static) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let handler: Handler = Arc::new(handler);
-        let log = Arc::clone(&seen);
-        tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                tokio::spawn(serve(stream, Arc::clone(&handler), Arc::clone(&log)));
-            }
-        });
-        Self { url, seen }
+        let server = Server::handler(move |request| handler(&Seen::new(request)).wire()).await;
+        Self {
+            url: format!("{}/mcp", server.url()),
+            server,
+        }
     }
 
-    async fn seen(&self) -> Vec<Seen> {
-        self.seen.lock().await.clone()
+    fn seen(&self) -> Vec<Seen> {
+        self.server.seen().iter().map(Seen::new).collect()
     }
-}
-
-async fn serve(mut stream: TcpStream, handler: Handler, log: Arc<Mutex<Vec<Seen>>>) {
-    let mut buf = Vec::new();
-    let mut chunk = [0_u8; 4096];
-    let head_end = loop {
-        if let Some(at) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-            break at;
-        }
-        let n = stream.read(&mut chunk).await.unwrap();
-        if n == 0 {
-            return;
-        }
-        buf.extend_from_slice(&chunk[..n]);
-    };
-    let head = String::from_utf8_lossy(&buf[..head_end]).into_owned();
-    let mut lines = head.lines();
-    let target = lines.next().unwrap().split(' ').nth(1).unwrap().to_owned();
-    let headers: BTreeMap<String, String> = lines
-        .filter_map(|line| line.split_once(':'))
-        .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_owned()))
-        .collect();
-    let len: usize = headers["content-length"].parse().unwrap();
-    while buf.len() < head_end + 4 + len {
-        let n = stream.read(&mut chunk).await.unwrap();
-        buf.extend_from_slice(&chunk[..n]);
-    }
-    let body = serde_json::from_slice(&buf[head_end + 4..head_end + 4 + len]).unwrap();
-    let seen = Seen {
-        target,
-        headers,
-        body,
-    };
-    log.lock().await.push(seen.clone());
-    let (status, extra, content_type, body) = match handler(&seen) {
-        Reply::Json(body) => (200, String::new(), "application/json", body.to_string()),
-        Reply::Session(id, body) => (
-            200,
-            format!("Mcp-Session-Id: {id}\r\n"),
-            "application/json",
-            body.to_string(),
-        ),
-        Reply::Sse(body) => (200, String::new(), "text/event-stream", body),
-        Reply::Status(status) => (status, String::new(), "text/plain", String::new()),
-        Reply::Gated(release, body) => {
-            release.notified().await;
-            (200, String::new(), "application/json", body.to_string())
-        }
-        Reply::Hang => {
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            return;
-        }
-    };
-    let response = format!(
-        "HTTP/1.1 {status} X\r\n{extra}Content-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(response.as_bytes()).await.unwrap();
-    stream.shutdown().await.unwrap();
 }
 
 fn result(seen: &Seen, result: Value) -> Value {
@@ -218,7 +187,7 @@ async fn discovers_pages_over_json_and_sse_and_reuses_the_session() {
     assert_eq!(tools[1].description.chars().count(), 1024);
     assert!(tools.iter().all(|t| t.approval == Approval::Ask));
 
-    let seen = fake.seen().await;
+    let seen = fake.seen();
     let methods: Vec<_> = seen.iter().map(Seen::method).collect();
     assert_eq!(
         methods,
@@ -255,7 +224,7 @@ async fn discovers_pages_over_json_and_sse_and_reuses_the_session() {
             is_error: false,
         }
     );
-    let call = fake.seen().await.pop().unwrap();
+    let call = fake.seen().pop().unwrap();
     assert_eq!(
         call.body["params"],
         json!({ "name": "alpha", "arguments": { "q": 1 } })
@@ -303,7 +272,7 @@ async fn expired_session_rehandshakes_and_preserves_content() {
             is_error: true,
         }
     );
-    let seen = fake.seen().await;
+    let seen = fake.seen();
     let tail: Vec<_> = seen[3..]
         .iter()
         .map(|s| (s.method(), s.session()))
@@ -355,7 +324,7 @@ async fn timeout_after_send_is_unknown() {
             reason: "timeout".to_owned()
         }
     );
-    assert_eq!(fake.seen().await.last().unwrap().method(), "tools/call");
+    assert_eq!(fake.seen().last().unwrap().method(), "tools/call");
 }
 
 /// Refusing before any request is sent is a plain error, not `unknown`.
@@ -392,7 +361,7 @@ async fn own_server_port_is_skipped() {
     let port = url::Url::parse(&fake.url).unwrap().port();
     let session = runtime.session(&CancellationToken::new(), port).await;
     assert!(session.tools().is_empty());
-    assert!(fake.seen().await.is_empty());
+    assert!(fake.seen().is_empty());
     let session = runtime.session(&CancellationToken::new(), Some(1)).await;
     assert_eq!(session.tools().len(), 1);
 }
@@ -458,7 +427,7 @@ async fn credential_query_is_sent_but_never_stored_in_url() {
         .refresh(&id, &CancellationToken::new())
         .await
         .unwrap();
-    let seen = fake.seen().await;
+    let seen = fake.seen();
     assert!(seen.iter().all(|s| s.target == "/mcp?region=cn&ak=qry-456"));
     assert!(
         seen.iter()

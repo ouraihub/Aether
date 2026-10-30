@@ -686,28 +686,18 @@ mod tests {
 
     #[tokio::test]
     async fn declared_oversized_body_is_rejected_before_download() {
-        use tokio::{
-            io::{AsyncReadExt, AsyncWriteExt},
-            net::TcpListener,
-        };
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0; 4096];
-            let received = stream.read(&mut request).await.unwrap();
-            assert!(received > 0);
-            stream
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 3000000\r\nConnection: close\r\n\r\n",
-                )
-                .await
-                .unwrap();
-        });
+        use aether_testkit::{Exhausted, Reply, Server};
+        let mut server = Server::script(
+            vec![Reply::raw(
+                "HTTP/1.1 200 OK\r\nContent-Length: 3000000\r\nConnection: close\r\n\r\n",
+            )],
+            Exhausted::Reply(Reply::status(500, "unexpected request")),
+        )
+        .await;
         let result = crate::search::search(
             crate::execution::ResolvedConfig {
                 provider: "searxng".into(),
-                base_url: format!("http://{addr}"),
+                base_url: server.url(),
                 api_keys: Vec::new(),
                 basic_auth_username: None,
                 preferences: crate::SearchPreferences::default(),
@@ -717,6 +707,6 @@ mod tests {
         )
         .await;
         assert_eq!(result.unwrap_err().message(), "response too large");
-        server.await.unwrap();
+        server.request().await;
     }
 }

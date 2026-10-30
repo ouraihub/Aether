@@ -20,7 +20,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test \"src/**/*.test.ts\""
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "scenarios": "tsx scenarios/run.ts"
   },
   "dependencies": {
     "@ouraihub/aether-contracts": "workspace:*",

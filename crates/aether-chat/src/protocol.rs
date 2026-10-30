@@ -2,7 +2,7 @@
 
 use std::iter;
 
-use aether_support::{Connection, Protocol, ReasoningDialect, ReasoningEffort};
+use aether_support::{Connection, Protocol, ReasoningBlock, ReasoningDialect, ReasoningEffort};
 use serde_json::{Map, Value, json};
 
 use crate::types::{Message, ToolCall, ToolSpec, Usage};
@@ -68,10 +68,9 @@ impl Request<'_> {
     pub fn encode(&self) -> Description<'_> {
         let protocol = self.connection.protocol;
         let mut messages = Vec::new();
-        let vision = self.connection.can_vision;
-        encode_messages(protocol, vision, self.history, &mut messages);
+        encode_messages(self, self.history, &mut messages);
         push_user(&mut messages, protocol, self.input, self.images);
-        encode_messages(protocol, vision, self.turn, &mut messages);
+        encode_messages(self, self.turn, &mut messages);
         let has_system = !self.system.is_empty();
         let mut body = match protocol {
             Protocol::AnthropicMessages => {
@@ -96,7 +95,8 @@ impl Request<'_> {
             Protocol::OpenaiResponses => {
                 let mut body = json!({
                     "model": self.model, "max_output_tokens": self.max_output,
-                    "stream": true, "input": messages,
+                    "stream": true, "input": messages, "store": false,
+                    "include": ["reasoning.encrypted_content"],
                 });
                 if has_system {
                     body["instructions"] = json!(self.system);
@@ -165,6 +165,8 @@ impl Request<'_> {
             body,
             headers: &self.connection.headers,
             protocol,
+            endpoint_id: self.connection.endpoint_id.as_deref(),
+            model_id: self.model,
         }
     }
 }
@@ -177,22 +179,27 @@ pub struct Description<'a> {
     pub headers: &'a [(String, String)],
     /// Authentication plan: Bearer, plus Anthropic API key/version for Messages.
     pub protocol: Protocol,
+    /// Origin identity used to retain native reasoning for same-model replay only.
+    pub endpoint_id: Option<&'a str>,
+    /// Actual requested model, including when selected outside a stored connection.
+    pub model_id: &'a str,
 }
 
 /// `vision = false` strips history images: only their text is sent (docs/19 §3).
-fn encode_messages(protocol: Protocol, vision: bool, messages: &[Message], out: &mut Vec<Value>) {
-    if protocol == Protocol::AnthropicMessages {
-        anthropic_messages(vision, messages, out);
+fn encode_messages(request: &Request<'_>, messages: &[Message], out: &mut Vec<Value>) {
+    if request.connection.protocol == Protocol::AnthropicMessages {
+        anthropic_messages(request, messages, out);
     } else {
         for message in messages {
-            openai_message(protocol, vision, message, out);
+            openai_message(request, message, out);
         }
     }
 }
 
 /// Anthropic: consecutive tool results become one user message of `tool_result` blocks,
 /// ordered like the `tool_use` blocks of the assistant message they answer.
-fn anthropic_messages(vision: bool, history: &[Message], out: &mut Vec<Value>) {
+fn anthropic_messages(request: &Request<'_>, history: &[Message], out: &mut Vec<Value>) {
+    let vision = request.connection.can_vision;
     let is_tool = |m: &Message| matches!(m, Message::Tool { .. });
     let mut calls: &[ToolCall] = &[];
     for group in history.chunk_by(|a, b| is_tool(a) && is_tool(b)) {
@@ -215,7 +222,7 @@ fn anthropic_messages(vision: bool, history: &[Message], out: &mut Vec<Value>) {
                 calls = tool_calls;
                 let mut content = Vec::new();
                 for block in reasoning {
-                    if block.protocol == Protocol::AnthropicMessages {
+                    if same_identity(block, request) {
                         content.push(block.value.clone());
                     }
                 }
@@ -292,7 +299,15 @@ fn user_blocks(protocol: Protocol, text: &str, images: &[ImagePart]) -> Vec<Valu
     }
 }
 
-fn openai_message(protocol: Protocol, vision: bool, message: &Message, out: &mut Vec<Value>) {
+fn same_identity(block: &ReasoningBlock, request: &Request<'_>) -> bool {
+    block.protocol == request.connection.protocol
+        && block.endpoint_id == request.connection.endpoint_id
+        && block.model_id.as_deref() == Some(request.model)
+}
+
+fn openai_message(request: &Request<'_>, message: &Message, out: &mut Vec<Value>) {
+    let protocol = request.connection.protocol;
+    let vision = request.connection.can_vision;
     let responses = protocol == Protocol::OpenaiResponses;
     match message {
         Message::User(text) => out.push(json!({ "role": "user", "content": text })),
@@ -306,7 +321,7 @@ fn openai_message(protocol: Protocol, vision: bool, message: &Message, out: &mut
             reasoning,
         } if responses => {
             for block in reasoning {
-                if block.protocol == Protocol::OpenaiResponses {
+                if same_identity(block, request) {
                     out.push(block.value.clone());
                 }
             }
@@ -321,13 +336,13 @@ fn openai_message(protocol: Protocol, vision: bool, message: &Message, out: &mut
             reasoning,
         } => {
             let mut message = json!({ "role": "assistant", "content": text });
+            let reasoning: String = reasoning
+                .iter()
+                .filter(|block| same_identity(block, request))
+                .filter_map(|block| block.value.as_str())
+                .collect();
             if !reasoning.is_empty() {
-                message["reasoning_content"] = reasoning
-                    .iter()
-                    .filter(|b| b.protocol == Protocol::OpenaiChat)
-                    .filter_map(|b| b.value.as_str())
-                    .collect::<String>()
-                    .into();
+                message["reasoning_content"] = reasoning.into();
             }
             if !tool_calls.is_empty() {
                 message["tool_calls"] = tool_calls.iter().map(|c| json!({ "id": c.id, "type": "function", "function": { "name": c.name, "arguments": c.args.to_string() } })).collect();
@@ -364,6 +379,13 @@ fn tool_json(protocol: Protocol, tool: &ToolSpec) -> Value {
 pub enum Decoded {
     /// Assistant text delta.
     Text(String),
+    /// Public thinking or summary, optionally accompanied by answer text in the same event.
+    Reasoning {
+        /// Displayable fragment, never a signature or encrypted payload.
+        reasoning: String,
+        /// Answer fragment delivered alongside the public reasoning.
+        text: Option<String>,
+    },
     /// In-stream upstream error with its raw (unsanitized) message.
     Error(String),
     /// Event does not produce display text.
@@ -386,6 +408,8 @@ pub struct Round {
     pub tool_calls: Vec<ToolCall>,
     /// The output limit cut the reply, or some call's arguments are not a JSON object.
     pub truncated: bool,
+    /// Native reasoning payloads bound to this request's identity, for protocol replay.
+    pub reasoning: Vec<ReasoningBlock>,
 }
 
 /// Per-stream state; `done` is set by the protocol's terminal event.
@@ -395,6 +419,11 @@ pub struct Decoder {
     pub done: bool,
     calls: Vec<Partial>,
     truncated: bool,
+    endpoint_id: Option<String>,
+    model_id: Option<String>,
+    reasoning: Vec<ReasoningBlock>,
+    blocks: Vec<(Value, Value)>,
+    chat_reasoning: String,
     /// Anthropic `input_tokens` without cache; `usage.input_tokens` adds cache back.
     base_input: Option<u32>,
 }
@@ -408,11 +437,45 @@ impl Decoder {
             calls: Vec::new(),
             truncated: false,
             base_input: None,
+            endpoint_id: None,
+            model_id: None,
+            reasoning: Vec::new(),
+            blocks: Vec::new(),
+            chat_reasoning: String::new(),
         }
     }
 
-    /// Assembles the calls; each one's arguments must parse as a JSON object (docs/12 §3).
-    pub fn finish(self) -> Round {
+    /// Binds retained native payloads to their originating endpoint and model.
+    pub fn with_identity(mut self, endpoint_id: Option<&str>, model_id: Option<&str>) -> Self {
+        self.endpoint_id = endpoint_id.map(str::to_owned);
+        self.model_id = model_id.map(str::to_owned);
+        self
+    }
+
+    fn keep(&mut self, value: Value) {
+        if let Some(id) = value.get("id")
+            && let Some(block) = self
+                .reasoning
+                .iter_mut()
+                .find(|block| block.value.get("id") == Some(id))
+        {
+            block.value = value;
+            return;
+        }
+        self.reasoning.push(ReasoningBlock {
+            protocol: self.protocol,
+            endpoint_id: self.endpoint_id.clone(),
+            model_id: self.model_id.clone(),
+            value,
+        });
+    }
+
+    /// Assembles calls and retained native reasoning after a successfully finished stream.
+    pub fn finish(mut self) -> Round {
+        if !self.chat_reasoning.is_empty() {
+            let reasoning = std::mem::take(&mut self.chat_reasoning);
+            self.keep(reasoning.into());
+        }
         let mut truncated = self.truncated;
         let tool_calls = self
             .calls
@@ -441,6 +504,7 @@ impl Decoder {
         Round {
             tool_calls,
             truncated,
+            reasoning: self.reasoning,
         }
     }
 
@@ -497,6 +561,68 @@ impl Decoder {
                             == "web_search_tool_result_error" =>
                 {
                     return Decoded::Error("native web search failed".to_owned());
+                }
+                "content_block_start"
+                    if matches!(
+                        v["content_block"]["type"].as_str(),
+                        Some("thinking" | "redacted_thinking")
+                    ) =>
+                {
+                    let block = v["content_block"].clone();
+                    let initial = if block["type"] == "thinking" {
+                        reasoning(&block["thinking"])
+                    } else {
+                        Decoded::Skip
+                    };
+                    self.blocks.push((v["index"].clone(), block));
+                    return initial;
+                }
+                "content_block_delta"
+                    if matches!(
+                        v["delta"]["type"].as_str(),
+                        Some("thinking_delta" | "signature_delta")
+                    ) =>
+                {
+                    if let Some((_, block)) = self
+                        .blocks
+                        .iter_mut()
+                        .find(|(index, _)| *index == v["index"])
+                        && block["type"] == "thinking"
+                    {
+                        let field = if v["delta"]["type"] == "thinking_delta" {
+                            "thinking"
+                        } else {
+                            "signature"
+                        };
+                        if let Some(fragment) = v["delta"][field].as_str() {
+                            if !block[field].is_string() {
+                                block[field] = json!("");
+                            }
+                            if let Value::String(value) = &mut block[field] {
+                                value.push_str(fragment);
+                            }
+                            if field == "thinking" {
+                                return reasoning(&v["delta"][field]);
+                            }
+                        }
+                    }
+                }
+                "content_block_stop" => {
+                    if let Some(index) = self
+                        .blocks
+                        .iter()
+                        .position(|(index, _)| *index == v["index"])
+                    {
+                        let (_, block) = self.blocks.remove(index);
+                        let private = if block["type"] == "thinking" {
+                            &block["signature"]
+                        } else {
+                            &block["data"]
+                        };
+                        if private.as_str().is_some_and(|value| !value.is_empty()) {
+                            self.keep(block);
+                        }
+                    }
                 }
                 "content_block_delta" if v["delta"]["type"] == "input_json_delta" => {
                     self.append(&v["index"], &v["delta"]["partial_json"]);
@@ -558,10 +684,27 @@ impl Decoder {
                     self.done = true;
                     self.truncated |= choice["finish_reason"] == "length";
                 }
+                if let Some(thinking) = choice["delta"]["reasoning_content"]
+                    .as_str()
+                    .filter(|text| !text.is_empty())
+                {
+                    self.chat_reasoning.push_str(thinking);
+                    return Decoded::Reasoning {
+                        reasoning: thinking.to_owned(),
+                        text: choice["delta"]["content"]
+                            .as_str()
+                            .filter(|text| !text.is_empty())
+                            .map(str::to_owned),
+                    };
+                }
                 return text(&choice["delta"]["content"]);
             }
             Protocol::OpenaiResponses => match kind {
                 "response.output_text.delta" => return text(&v["delta"]),
+                "response.reasoning_summary_text.delta" => return reasoning(&v["delta"]),
+                "response.output_item.done" if v["item"]["type"] == "reasoning" => {
+                    self.keep(v["item"].clone());
+                }
                 "response.output_item.added" if v["item"]["type"] == "function_call" => {
                     let item = &v["item"];
                     // `call_id` (not the item id) is what `function_call_output` must echo.
@@ -578,6 +721,11 @@ impl Decoder {
                         tokens(&raw["input_tokens_details"]["cache_write_tokens"]);
                     usage.reasoning_tokens =
                         tokens(&raw["output_tokens_details"]["reasoning_tokens"]);
+                    for item in v["response"]["output"].as_array().into_iter().flatten() {
+                        if item["type"] == "reasoning" {
+                            self.keep(item.clone());
+                        }
+                    }
                     self.done = true;
                     self.truncated |=
                         v["response"]["incomplete_details"]["reason"] == "max_output_tokens";
@@ -594,6 +742,15 @@ impl Decoder {
 fn text(value: &Value) -> Decoded {
     match value.as_str() {
         Some(text) if !text.is_empty() => Decoded::Text(text.to_owned()),
+        _ => Decoded::Skip,
+    }
+}
+fn reasoning(value: &Value) -> Decoded {
+    match value.as_str() {
+        Some(value) if !value.is_empty() => Decoded::Reasoning {
+            reasoning: value.to_owned(),
+            text: None,
+        },
         _ => Decoded::Skip,
     }
 }

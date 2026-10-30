@@ -2,7 +2,8 @@
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use aether_support::clock::now_millis;
 
 use aether_support::KitError;
 use aether_support::db::{self, Migration};
@@ -209,12 +210,4 @@ fn hash(token: &str) -> String {
 
 fn parse_ids(json: &str) -> Result<Vec<String>, KitError> {
     serde_json::from_str(json).map_err(KitError::internal)
-}
-
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
-        })
 }

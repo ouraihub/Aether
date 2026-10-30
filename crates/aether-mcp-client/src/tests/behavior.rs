@@ -124,7 +124,6 @@ async fn malformed_dispatched_results_are_unknown_and_are_not_replayed() {
         );
         assert_eq!(
             fake.seen()
-                .await
                 .iter()
                 .filter(|seen| seen.method() == "tools/call")
                 .count(),
@@ -147,7 +146,7 @@ async fn cancellation_before_call_never_dispatches_or_connects() {
     let active = CancellationToken::new();
     let mut connected = runtime.session(&active, None).await;
     let mut lazy = runtime.session(&active, None).await;
-    let before = fake.seen().await.len();
+    let before = fake.seen().len();
     let cancelled = CancellationToken::new();
     cancelled.cancel();
     for session in [&mut connected, &mut lazy] {
@@ -156,7 +155,7 @@ async fn cancellation_before_call_never_dispatches_or_connects() {
             McpCallResult::Failed { code, .. } if code == "cancelled"
         ));
     }
-    assert_eq!(fake.seen().await.len(), before);
+    assert_eq!(fake.seen().len(), before);
     assert_eq!(
         runtime
             .refresh(&store.list().unwrap()[0].id, &cancelled)
@@ -166,7 +165,7 @@ async fn cancellation_before_call_never_dispatches_or_connects() {
         KitErrorCode::Cancelled
     );
     assert!(runtime.session(&cancelled, None).await.tools().is_empty());
-    assert_eq!(fake.seen().await.len(), before);
+    assert_eq!(fake.seen().len(), before);
     assert!(matches!(
         connected.call("mcp_cancel_t", json!({}), &active).await,
         McpCallResult::Completed { .. }
@@ -187,7 +186,7 @@ async fn shutdown_is_terminal_for_connected_and_lazy_sessions() {
     let cancel = CancellationToken::new();
     let mut connected = runtime.session(&cancel, None).await;
     let mut lazy = runtime.session(&cancel, None).await;
-    let before = fake.seen().await.len();
+    let before = fake.seen().len();
     runtime.shutdown().await;
     runtime.shutdown().await;
     for session in [&mut connected, &mut lazy] {
@@ -201,7 +200,7 @@ async fn shutdown_is_terminal_for_connected_and_lazy_sessions() {
         KitErrorCode::Cancelled
     );
     assert!(runtime.session(&cancel, None).await.tools().is_empty());
-    assert_eq!(fake.seen().await.len(), before);
+    assert_eq!(fake.seen().len(), before);
 }
 
 #[tokio::test]
@@ -235,7 +234,6 @@ async fn shutdown_cancels_dispatched_calls_without_replaying_them() {
     );
     assert_eq!(
         fake.seen()
-            .await
             .iter()
             .filter(|seen| seen.method() == "tools/call")
             .count(),
@@ -256,8 +254,8 @@ async fn stale_refresh_outlives_run_cancellation_and_keeps_session_snapshot() {
     let counter = Arc::clone(&lists);
     let started = Arc::new(Notify::new());
     let signal = Arc::clone(&started);
-    let release = Arc::new(Notify::new());
-    let gate = Arc::clone(&release);
+    let release = Gate::new();
+    let gate = release.clone();
     let fake = Fake::start(move |seen| match seen.method() {
         "initialize" => Reply::Json(initialized(seen, "2025-03-26")),
         "notifications/initialized" => Reply::Status(202),
@@ -267,7 +265,7 @@ async fn stale_refresh_outlives_run_cancellation_and_keeps_session_snapshot() {
         _ => {
             signal.notify_one();
             Reply::Gated(
-                Arc::clone(&gate),
+                gate.clone(),
                 result(seen, json!({ "tools": [tool("old"), tool("new")] })),
             )
         }
@@ -294,7 +292,7 @@ async fn stale_refresh_outlives_run_cancellation_and_keeps_session_snapshot() {
         .await
         .unwrap();
     run.cancel();
-    release.notify_one();
+    release.open();
     tokio::time::timeout(Duration::from_secs(5), async {
         while store.list().unwrap()[0].tools.len() != 2 {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -368,7 +366,7 @@ async fn concurrent_shutdown_drains_pending_stale_refresh_without_replacing_cach
     })
     .await
     .unwrap();
-    let before = fake.seen().await.len();
+    let before = fake.seen().len();
     assert_eq!(store.list().unwrap()[0].tools[0].approval, Approval::Deny);
     assert!(
         runtime
@@ -385,7 +383,7 @@ async fn concurrent_shutdown_drains_pending_stale_refresh_without_replacing_cach
             .code(),
         KitErrorCode::Cancelled
     );
-    assert_eq!(fake.seen().await.len(), before);
+    assert_eq!(fake.seen().len(), before);
 }
 
 #[tokio::test]
@@ -456,7 +454,6 @@ async fn nontext_and_structured_payloads_share_the_transport_budget() {
         );
         assert_eq!(
             fake.seen()
-                .await
                 .iter()
                 .filter(|seen| seen.method() == "tools/call")
                 .count(),

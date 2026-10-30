@@ -1,0 +1,57 @@
+{
+  "$comment": "Controlled inputs for contracts/scenarios.json runs (see scenario-runs.md). Both runners and contracts-check read this file; nothing here is an expected output.",
+  "knownDrift": [],
+  "owner": "scenario-owner",
+  "foreignOwner": "scenario-intruder",
+  "model": { "protocol": "openai-chat", "modelId": "scenario-model", "contextWindow": 32000, "maxOutput": 1024 },
+  "tools": {
+    "read_note": {
+      "description": "Reads one note.",
+      "parameters": {
+        "type": "object",
+        "properties": { "path": { "type": "string" } },
+        "required": ["path"],
+        "additionalProperties": false
+      },
+      "effect": "read",
+      "output": "note contents"
+    }
+  },
+  "scenarios": {
+    "acceptance-response-race": {
+      "input": "Say hello.",
+      "tools": [],
+      "replies": [{ "reasoning": ["Let me ", "think."], "text": ["Hel", "lo ", "world"], "gate": "model" }]
+    },
+    "tool-approval-allow": {
+      "input": "Read the note.",
+      "tools": [{ "name": "read_note", "approval": "ask" }],
+      "replies": [
+        { "calls": [{ "id": "call-approve", "name": "read_note", "args": { "path": { "prefix": "notes/", "repeat": "x", "count": 2100 } } }] },
+        { "text": ["done"] }
+      ]
+    },
+    "receiver-send-failure": {
+      "input": "Write it down.",
+      "tools": [{ "name": "read_note", "approval": "auto" }],
+      "replies": [
+        {
+          "text": ["first"],
+          "gate": "model",
+          "afterGate": { "text": ["second"], "calls": [{ "id": "call-side", "name": "read_note", "args": { "path": "notes/a.md" } }] }
+        },
+        { "text": ["never requested"] }
+      ]
+    },
+    "round-exhaustion": {
+      "input": "Keep reading.",
+      "maxRounds": 2,
+      "tools": [{ "name": "read_note", "approval": "auto" }],
+      "replies": [
+        { "calls": [{ "id": "call-r1", "name": "read_note", "args": { "path": "notes/1.md" } }] },
+        { "calls": [{ "id": "call-r2", "name": "read_note", "args": { "path": "notes/2.md" } }] },
+        { "text": ["never requested"] }
+      ]
+    }
+  }
+}

@@ -3,9 +3,8 @@
   import { Button } from '#lib/components/ui/button/index.js'
   import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js'
   import { getKitContext } from '../context'
-  import { renderMarkdown } from '../markdown'
-  import ApprovalCard from './ApprovalCard.svelte'
-  import type { ChatTurn, ToolItem } from './run-session.svelte'
+  import ChatMessage from './ChatMessage.svelte'
+  import type { ChatTurn } from './run-session.svelte'
   import type { ImageRef, ModelOption, ModelRef } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
   import ExternalLinkIcon from '@lucide/svelte/icons/external-link'
@@ -29,7 +28,7 @@
 
   let {
     turn,
-    onApprove,
+    latest = false,
     onInsert,
     onRetry,
     modelLabel,
@@ -50,7 +49,7 @@
     onExportMarkdown,
   }: {
     turn: ChatTurn
-    onApprove: (tool: ToolItem, allow: boolean) => void
+    latest?: boolean
     onInsert?: ((markdown: string) => void) | undefined
     onRetry?: (() => void) | undefined
     modelLabel?: string
@@ -73,7 +72,6 @@
   } = $props()
   const { i18n, notify } = getKitContext()
   const { t } = i18n
-  const html = $derived(renderMarkdown(turn.text))
   const savable = $derived(turn.text !== '' || turn.generated.length > 0)
   function safeUrl(value: string): string | null {
     try {
@@ -157,62 +155,66 @@
 </script>
 
 <li class="message-turn flex min-w-0 flex-col gap-2">
-  {#if showInput && turn.images.length > 0}
-    <ul class="user-images">
-      {#each turn.images as image, index (index)}
-        <li>
-          {#if image.url}<a
-              href={image.url}
-              target="_blank"
-              rel="noopener"
-              onclick={(event) => openImage(event, image.url)}
-              aria-label={t('chat.openImage', { index: index + 1 })}
-              title={t('chat.openImage', { index: index + 1 })}><img src={image.url} alt="" /></a
-            >{:else}<span class="image-expired">{t('chat.imageExpired')}</span>{/if}
-        </li>
-      {/each}
-    </ul>
+  {#if showInput}
+    <ChatMessage role="user" text={turn.input} showMoreLabel={t('chat.showMore')} showLessLabel={t('chat.showLess')}>
+      {#snippet attachments()}
+        {#if turn.images.length > 0}
+          <ul class="user-images">
+            {#each turn.images as image, index (index)}
+              <li>
+                {#if image.url}<a
+                    href={image.url}
+                    target="_blank"
+                    rel="noopener"
+                    onclick={(event) => openImage(event, image.url)}
+                    aria-label={t('chat.openImage', { index: index + 1 })}
+                    title={t('chat.openImage', { index: index + 1 })}><img src={image.url} alt="" /></a
+                  >{:else}<span class="image-expired">{t('chat.imageExpired')}</span>{/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {/snippet}
+    </ChatMessage>
   {/if}
-  {#if showInput}<p class="user-message">{turn.input}</p>{/if}
-  <div class="assistant-message" class:chosen>
-    {#if modelLabel}<div class="reply-source">{modelLabel}</div>{/if}
-    {#if turn.reasoningText}
-      <details class="thinking text-muted-foreground text-kit-sm">
-        <summary class="cursor-pointer">{t('chat.reasoning')}</summary>
-        <p class="whitespace-pre-wrap">{turn.reasoningText}</p>
-      </details>
-    {/if}
-    {#each turn.tools as tool (tool.callId)}
-      {#if tool.pending === null}
-        <ToolCallItem {tool} />
-      {:else}
-        <ApprovalCard {tool} onAnswer={(allow) => onApprove(tool, allow)} />
+  <ChatMessage
+    role="assistant"
+    text={turn.text}
+    label={modelLabel}
+    status={turn.status}
+    reasoning={turn.reasoningText}
+    reasoningLabel={t('chat.reasoning')}
+    selected={chosen}
+    {latest}
+  >
+    {#snippet process()}
+      {#if turn.tools.some((tool) => tool.pending === null)}
+        <details class="tool-process" open={turn.status === 'running'}>
+          <summary>{t('chat.toolProcess')}</summary>
+          {#each turn.tools.filter((tool) => tool.pending === null) as tool (tool.callId)}<ToolCallItem {tool} />{/each}
+        </details>
       {/if}
-    {/each}
-    {#if turn.generated.length > 0}
-      <ul class="generated-images" aria-label={t('chat.generatedImages')}>
-        {#each turn.generated as image, index (index)}
-          <li>
-            {#if image.url}<a
-                href={image.url}
-                target="_blank"
-                rel="noopener"
-                onclick={(event) => openImage(event, image.url)}
-                aria-label={t('chat.openGeneratedImage', { index: index + 1 })}
-                title={t('chat.openGeneratedImage', { index: index + 1 })}><img src={image.url} alt="" /></a
-              >{:else}<span class="image-expired">{t('chat.imageExpired')}</span>{/if}
-          </li>
-        {/each}
-      </ul>
-    {/if}
-    <div
-      class="markdown"
-      {@attach (node) => {
-        node.innerHTML = html
-      }}
-    ></div>
-    {#if savable || (onRetry && turn.status !== 'running') || onUseContext || onDelete}
-      <div class="message-actions">
+    {/snippet}
+    {#snippet attachments()}
+      {#if turn.generated.length > 0}
+        <ul class="generated-images" aria-label={t('chat.generatedImages')}>
+          {#each turn.generated as image, index (index)}
+            <li>
+              {#if image.url}<a
+                  href={image.url}
+                  target="_blank"
+                  rel="noopener"
+                  onclick={(event) => openImage(event, image.url)}
+                  aria-label={t('chat.openGeneratedImage', { index: index + 1 })}
+                  title={t('chat.openGeneratedImage', { index: index + 1 })}><img src={image.url} alt="" /></a
+                >{:else}<span class="image-expired">{t('chat.imageExpired')}</span>{/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/snippet}
+    {#snippet actions()}
+      {#if savable || (onRetry && turn.status !== 'running') || onUseContext || onDelete}
         {#if turn.text !== ''}
           <Button
             variant="ghost"
@@ -341,8 +343,8 @@
           </DropdownMenu.Root>
         {/if}
         <span class="text-muted-foreground text-kit-sm" role="status">{copied ? t('chat.copied') : ''}</span>
-      </div>
-    {/if}
+      {/if}
+    {/snippet}
     {#if turn.search.status === 'complete'}
       <section class="flex flex-col gap-1 text-kit-sm" aria-label={t('chat.sources')}>
         <p class="text-muted-foreground">{t('chat.sources')}</p>
@@ -369,15 +371,11 @@
     {:else if turn.exhausted}
       <p class="text-muted-foreground text-kit-sm">{t('chat.exhausted')}</p>
     {/if}
-  </div>
+  </ChatMessage>
 </li>
 
 <style>
-  .message-turn,
-  .user-message,
-  .assistant-message,
-  .markdown {
-    box-sizing: border-box;
+  .message-turn {
     min-width: 0;
     max-width: 100%;
     overflow-wrap: anywhere;
@@ -440,144 +438,15 @@
     font-size: var(--kit-font-size-sm, 0.8125rem);
     text-align: center;
   }
-  .user-message {
-    align-self: flex-end;
-    margin: 0;
-    padding: 0.625rem 0.75rem;
-    border-radius: var(--kit-radius);
-    background: var(--color-primary);
-    color: var(--color-primary-foreground);
-    font-size: var(--kit-text-base);
-    white-space: pre-wrap;
-  }
-  .assistant-message {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    padding: 0.75rem;
-    border-radius: var(--kit-radius);
-    background: var(--color-muted);
-    color: var(--color-foreground);
-  }
-  .assistant-message.chosen {
-    outline: 1px solid var(--color-primary);
-  }
-  .reply-source {
+  .tool-process {
+    color: var(--color-muted-foreground);
     font-size: var(--kit-text-sm);
-    color: var(--color-muted-foreground);
-    overflow-wrap: anywhere;
   }
-  .thinking {
-    min-width: 0;
+  .tool-process summary {
+    cursor: pointer;
   }
-  .message-actions {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    border-top: 1px solid var(--color-border);
-    padding-top: 0.5rem;
-  }
-  .markdown {
-    font-size: var(--kit-text-base);
-    line-height: 1.6;
-  }
-  .markdown :global(p),
-  .markdown :global(ul),
-  .markdown :global(ol),
-  .markdown :global(blockquote),
-  .markdown :global(pre),
-  .markdown :global(table) {
-    margin: 0.75em 0;
-  }
-  .markdown :global(h1),
-  .markdown :global(h2),
-  .markdown :global(h3),
-  .markdown :global(h4),
-  .markdown :global(h5),
-  .markdown :global(h6) {
-    margin: 1em 0 0.5em;
-    font-weight: 600;
-    line-height: 1.35;
-  }
-  .markdown :global(h1) {
-    font-size: 1.4em;
-  }
-  .markdown :global(h2) {
-    font-size: 1.25em;
-  }
-  .markdown :global(h3) {
-    font-size: 1.1em;
-  }
-  .markdown :global(ul),
-  .markdown :global(ol) {
-    padding-inline-start: 1.5em;
-  }
-  .markdown :global(ul) {
-    list-style: disc;
-  }
-  .markdown :global(ol) {
-    list-style: decimal;
-  }
-  .markdown :global(li) {
-    margin: 0.25em 0;
-  }
-  .markdown :global(li::marker) {
-    color: var(--color-muted-foreground);
-  }
-  .markdown :global(blockquote) {
-    border-inline-start: 3px solid var(--color-border);
-    padding-inline-start: 0.75em;
-    color: var(--color-muted-foreground);
-  }
-  .markdown :global(a) {
-    color: var(--color-primary);
-    text-decoration: underline;
-    overflow-wrap: anywhere;
-  }
-  .markdown :global(code) {
-    border-radius: var(--kit-radius-sm);
-    background: var(--color-background);
-    padding: 0.1em 0.3em;
-    font-size: 0.95em;
-  }
-  .markdown :global(pre) {
-    max-width: 100%;
-    overflow-x: auto;
-    padding: 0.75em;
-    border: 1px solid var(--color-border);
-    border-radius: var(--kit-radius-sm);
-    background: var(--color-background);
-    white-space: pre;
-    overflow-wrap: normal;
-  }
-  .markdown :global(pre code) {
-    padding: 0;
-    background: none;
-  }
-  .markdown :global(table) {
-    display: block;
-    max-width: 100%;
-    overflow-x: auto;
-    border-collapse: collapse;
-  }
-  .markdown :global(th),
-  .markdown :global(td) {
-    padding: 0.4em 0.6em;
-    border: 1px solid var(--color-border);
-  }
-  .markdown :global(th) {
-    font-weight: 600;
-  }
-  .markdown :global(img),
-  .markdown :global(video) {
-    max-width: 100%;
-    height: auto;
-  }
-  .markdown :global(:first-child) {
-    margin-top: 0;
-  }
-  .markdown :global(:last-child) {
-    margin-bottom: 0;
+  .tool-process summary:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
   }
 </style>

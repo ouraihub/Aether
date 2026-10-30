@@ -3,7 +3,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use aether_support::clock::now_millis;
 
 use aether_support::db::{self, Migration};
 use aether_support::id::new_id;
@@ -1137,14 +1138,6 @@ fn corrupt(column: &str) -> KitError {
     KitError::internal(std::io::Error::other(format!(
         "providers.db: bad {column} value"
     )))
-}
-
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
-        })
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@ import type { ModelRequest } from '../src/protocol/request.js'
 import { Decoder } from '../src/protocol/decoder.js'
 import { emptyUsage } from '../src/pricing.js'
 import { at } from '../src/guard.js'
+import { estimateContextTokens, contextUsageForRequest, validateReasoning } from '../src/engine/index.js'
 
 function request(): ModelRequest {
   return {
@@ -86,4 +87,47 @@ test('signed anthropic reasoning replays natively and encrypted responses are no
     null,
   )
   assert.equal(responses.reasoning.length, 1)
+})
+
+test('shared context distinguishes previews, per-request reports and unknown counts', () => {
+  assert.equal(estimateContextTokens('中文😀'), 1)
+  assert.equal(estimateContextTokens(undefined), null)
+  const cyclic: { self?: unknown } = {}
+  cyclic.self = cyclic
+  assert.equal(estimateContextTokens(cyclic), null)
+  const request = {
+    inputTokens: 10,
+    outputTokens: 5,
+    estimatedInputTokens: 90,
+    contextWindow: null,
+    endpointId: 'endpoint',
+    modelId: 'model',
+  }
+  assert.deepEqual(contextUsageForRequest(request), {
+    tokens: 15,
+    contextWindow: null,
+    source: 'reported',
+    endpointId: 'endpoint',
+    modelId: 'model',
+  })
+  assert.equal(contextUsageForRequest({ ...request, inputTokens: null }).source, 'estimated')
+  assert.equal(contextUsageForRequest({ ...request, inputTokens: null, estimatedInputTokens: null }).tokens, null)
+  assert.equal(
+    validateReasoning(
+      { dialect: 'anthropic-budget', efforts: ['high'], budgetTokens: 2048 },
+      'anthropic-messages',
+      'high',
+      4096,
+    ),
+    1638,
+  )
+  assert.throws(() =>
+    validateReasoning(
+      { dialect: 'anthropic-budget', efforts: ['high'], budgetTokens: 2048 },
+      'openai-chat',
+      'high',
+      4096,
+    ),
+  )
+  assert.throws(() => validateReasoning(null, 'openai-chat', 'high', 4096))
 })

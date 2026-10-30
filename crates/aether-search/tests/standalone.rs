@@ -3,114 +3,39 @@
 
 use aether_search::{Compression, SearchPreferences, execution::ResolvedConfig, fetch, search};
 use aether_support::net::{AddressPolicy, HostPort};
+use aether_testkit::{Exhausted, Reply, Request};
 use serde_json::json;
-use std::{collections::VecDeque, time::Duration};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-    sync::mpsc,
-    task::JoinHandle,
-};
+use std::time::Duration;
 use zeroize::Zeroizing;
 
-struct Reply {
-    wire: Vec<u8>,
-    delay: Duration,
-}
-
-impl Reply {
-    fn status(status: u16, body: &str) -> Self {
-        Self::raw(format!(
-            "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        ))
-    }
-
-    fn raw(wire: String) -> Self {
-        Self {
-            wire: wire.into_bytes(),
-            delay: Duration::ZERO,
-        }
-    }
-}
-
+/// The shared scripted upstream plus the configuration a public consumer passes for it; a
+/// request past the script gets a `500`.
 struct Server {
     url: String,
     port: u16,
-    requests: mpsc::UnboundedReceiver<String>,
-    task: JoinHandle<()>,
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+    upstream: aether_testkit::Server,
 }
 
 impl Server {
     async fn start(replies: Vec<Reply>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let (sender, requests) = mpsc::unbounded_channel();
-        let task = tokio::spawn(async move {
-            let mut replies = VecDeque::from(replies);
-            loop {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                let mut bytes = Vec::new();
-                let mut buffer = [0; 4096];
-                loop {
-                    let count = stream.read(&mut buffer).await.unwrap();
-                    if count == 0 {
-                        break;
-                    }
-                    bytes.extend_from_slice(&buffer[..count]);
-                    if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
-                        let headers = String::from_utf8_lossy(&bytes[..end]);
-                        let length = headers
-                            .lines()
-                            .find_map(|line| {
-                                let (name, value) = line.split_once(':')?;
-                                name.eq_ignore_ascii_case("content-length")
-                                    .then(|| value.trim().parse::<usize>().unwrap())
-                            })
-                            .unwrap_or(0);
-                        if bytes.len() >= end + 4 + length {
-                            break;
-                        }
-                    }
-                }
-                if sender.send(String::from_utf8(bytes).unwrap()).is_err() {
-                    break;
-                }
-                let reply = replies
-                    .pop_front()
-                    .unwrap_or_else(|| Reply::status(500, "unexpected request"));
-                tokio::time::sleep(reply.delay).await;
-                // Early client cancellation and body-budget rejection may close the socket.
-                let _ = stream.write_all(&reply.wire).await;
-            }
-        });
+        let upstream = aether_testkit::Server::script(
+            replies,
+            Exhausted::Reply(Reply::status(500, "unexpected request")),
+        )
+        .await;
         Self {
-            url: format!("http://127.0.0.1:{port}"),
-            port,
-            requests,
-            task,
+            url: upstream.url(),
+            port: upstream.port(),
+            upstream,
         }
     }
 
-    async fn request(&mut self) -> String {
-        tokio::time::timeout(Duration::from_secs(2), self.requests.recv())
-            .await
-            .unwrap()
-            .unwrap()
+    async fn request(&mut self) -> Request {
+        self.upstream.request().await
     }
 
     async fn no_request(&mut self) {
-        assert!(
-            tokio::time::timeout(Duration::from_millis(150), self.requests.recv())
-                .await
-                .is_err()
-        );
+        self.upstream.no_request(Duration::from_millis(150)).await;
     }
 
     fn config(&self, provider: &str, keys: &[&str]) -> ResolvedConfig {
@@ -138,6 +63,13 @@ fn results() -> String {
         .to_string()
 }
 
+fn delayed_status(status: u16, body: &str, delay: Duration) -> Reply {
+    Reply::default().then_sleep(delay).then_raw(format!(
+        "HTTP/1.1 {status} test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    ))
+}
+
 fn assert_error(error: aether_support::KitError, code: &str, field: Option<&str>, reason: &str) {
     let value = serde_json::to_value(error).unwrap();
     assert_eq!(value["code"], code);
@@ -152,7 +84,7 @@ async fn explicit_keys_authenticate_in_given_order_only_on_401_403_429() {
     for status in [401, 403, 429] {
         let mut server = Server::start(vec![
             Reply::status(status, "denied"),
-            Reply::status(200, &results()),
+            Reply::status(200, results()),
         ])
         .await;
         let result = search::search(
@@ -166,15 +98,15 @@ async fn explicit_keys_authenticate_in_given_order_only_on_401_403_429() {
         assert_eq!(result.hits[0].snippet, "body");
         for key in ["fixture-first", "fixture-second"] {
             let request = server.request().await;
-            assert!(request.starts_with("POST /search HTTP/1.1\r\n"));
-            assert!(
-                request
-                    .to_ascii_lowercase()
-                    .contains(&format!("authorization: bearer {key}\r\n"))
-            );
-            let body = request.split_once("\r\n\r\n").unwrap().1;
+            assert_eq!(request.method, "POST");
+            assert_eq!(request.target, "/search");
             assert_eq!(
-                serde_json::from_str::<serde_json::Value>(body).unwrap()["query"],
+                request.header("authorization"),
+                Some(format!("Bearer {key}").as_str())
+            );
+            let body = request.text();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&body).unwrap()["query"],
                 "世界 query"
             );
         }
@@ -188,12 +120,9 @@ async fn explicit_keys_authenticate_in_given_order_only_on_401_403_429() {
             .await
             .is_err()
         );
-        assert!(
-            server
-                .request()
-                .await
-                .to_ascii_lowercase()
-                .contains("authorization: bearer fixture-first\r\n")
+        assert_eq!(
+            server.request().await.header("authorization"),
+            Some("Bearer fixture-first")
         );
         server.no_request().await;
     }
@@ -244,7 +173,7 @@ async fn parsing_deduplication_blacklist_and_unicode_cutoff_share_public_path() 
         {"title":"third","url":"https://example.com/c","content":"third"}
     ]})
     .to_string();
-    let mut server = Server::start(vec![Reply::status(200, &body)]).await;
+    let mut server = Server::start(vec![Reply::status(200, body)]).await;
     let mut config = server.config("tavily", &["fixture-key"]);
     config.preferences.max_results = 2;
     config.preferences.blacklist = vec!["blocked.example".into()];
@@ -271,7 +200,7 @@ async fn direct_fetch_has_no_provider_credentials_and_returns_a_page() {
     assert!(page.content.contains("Readable 世界"));
     assert!(!page.content.contains("secret()"));
     assert!(!page.content.contains("hidden"));
-    let request = server.request().await.to_ascii_lowercase();
+    let request = server.request().await.raw_text().to_ascii_lowercase();
     assert!(request.starts_with("get /document http/1.1"));
     for forbidden in [
         "authorization:",
@@ -386,14 +315,13 @@ async fn public_inputs_reject_invalid_provider_keys_preferences_query_and_url_wi
 
 #[tokio::test]
 async fn dropping_pending_search_prevents_subsequent_key_attempts() {
-    let mut denied = Reply::status(401, "denied");
-    denied.delay = Duration::from_millis(75);
-    let mut server = Server::start(vec![denied, Reply::status(200, &results())]).await;
+    let denied = delayed_status(401, "denied", Duration::from_millis(75));
+    let mut server = Server::start(vec![denied, Reply::status(200, results())]).await;
     let config = server.config("tavily", &["fixture-first", "fixture-second"]);
     let mut pending = Box::pin(search::search(config, "query"));
     tokio::select! {
         result = &mut pending => panic!("request completed before cancellation: {result:?}"),
-        request = server.request() => assert!(request.contains("fixture-first")),
+        request = server.request() => assert_eq!(request.header("authorization"), Some("Bearer fixture-first")),
     }
     drop(pending);
     server.no_request().await;
@@ -403,9 +331,7 @@ async fn dropping_pending_search_prevents_subsequent_key_attempts() {
 async fn declared_and_chunked_oversize_bodies_are_rejected_without_key_retry() {
     let oversized = "x".repeat(2 * 1024 * 1024 + 1);
     let replies = [
-        Reply::raw(
-            "HTTP/1.1 200 OK\r\nContent-Length: 2097153\r\nConnection: close\r\n\r\n".into(),
-        ),
+        Reply::raw("HTTP/1.1 200 OK\r\nContent-Length: 2097153\r\nConnection: close\r\n\r\n"),
         Reply::raw(format!(
             "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{oversized}\r\n0\r\n\r\n",
             oversized.len()
@@ -434,7 +360,7 @@ async fn declared_and_chunked_oversize_bodies_are_rejected_without_key_retry() {
 async fn network_failure_does_not_attempt_the_second_key() {
     let mut server = Server::start(vec![
         Reply::raw(String::new()),
-        Reply::status(200, &results()),
+        Reply::status(200, results()),
     ])
     .await;
     assert!(
@@ -451,13 +377,13 @@ async fn network_failure_does_not_attempt_the_second_key() {
 
 #[tokio::test]
 async fn maximum_unicode_query_and_anonymous_search_are_accepted() {
-    let mut server = Server::start(vec![Reply::status(200, &results())]).await;
+    let mut server = Server::start(vec![Reply::status(200, results())]).await;
     let query = "界".repeat(4096);
     let result = search::search(server.config("searxng", &[]), &query)
         .await
         .unwrap();
     assert_eq!(result.query, query);
-    let request = server.request().await.to_ascii_lowercase();
+    let request = server.request().await.raw_text().to_ascii_lowercase();
     assert!(request.starts_with("get /search?"));
     assert!(!request.contains("authorization:"));
     server.no_request().await;
@@ -478,7 +404,7 @@ async fn direct_fetch_enforces_chunked_body_budget_and_unicode_page_safety_limit
     );
     server.request().await;
     let body = format!("<title>Unicode</title><p>{}</p>", "界🙂".repeat(13000));
-    let mut server = Server::start(vec![Reply::status(200, &body)]).await;
+    let mut server = Server::start(vec![Reply::status(200, body)]).await;
     let page = fetch::fetch(server.config("fetch", &[]), &server.url)
         .await
         .unwrap();
@@ -489,7 +415,7 @@ async fn direct_fetch_enforces_chunked_body_budget_and_unicode_page_safety_limit
 
 #[tokio::test]
 async fn redirect_to_link_local_address_is_rejected_by_address_policy() {
-    let mut origin = Server::start(vec![Reply::raw("HTTP/1.1 302 Found\r\nLocation: http://169.254.169.254/blocked\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into())]).await;
+    let mut origin = Server::start(vec![Reply::raw("HTTP/1.1 302 Found\r\nLocation: http://169.254.169.254/blocked\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")]).await;
     let error = tokio::time::timeout(
         Duration::from_secs(2),
         fetch::fetch(origin.config("fetch", &[]), &origin.url),
@@ -525,7 +451,7 @@ async fn supplier_fetch_rejects_target_before_http_and_rechecks_returned_source(
     );
     server.no_request().await;
     let body = json!({"success":true,"data":{"markdown":"content","metadata":{"title":"Page","sourceURL":"https://blocked.example/returned"}}}).to_string();
-    let mut server = Server::start(vec![Reply::status(200, &body)]).await;
+    let mut server = Server::start(vec![Reply::status(200, body)]).await;
     let mut config = server.config("firecrawl", &[]);
     config.preferences.blacklist.push("blocked.example".into());
     assert_error(
@@ -540,10 +466,9 @@ async fn supplier_fetch_rejects_target_before_http_and_rechecks_returned_source(
 }
 
 async fn total_deadline(provider: &str, fetch_page: bool, budget: u64) {
-    let mut denied = Reply::status(401, "denied");
-    denied.delay = Duration::from_secs(budget / 2 + 1);
-    let mut success = Reply::status(200, &results());
-    success.delay = denied.delay;
+    let delay = Duration::from_secs(budget / 2 + 1);
+    let denied = delayed_status(401, "denied", delay);
+    let success = delayed_status(200, &results(), delay);
     let mut server = Server::start(vec![denied, success]).await;
     let config = server.config(provider, &["fixture-first", "fixture-second"]);
     let started = tokio::time::Instant::now();
@@ -562,7 +487,15 @@ async fn total_deadline(provider: &str, fetch_page: bool, budget: u64) {
     assert!(started.elapsed() >= Duration::from_secs(budget - 1));
     assert!(started.elapsed() < Duration::from_secs(budget + 3));
     for key in ["fixture-first", "fixture-second"] {
-        assert!(server.request().await.contains(key));
+        let request = server.request().await;
+        if provider == "exa-mcp" {
+            assert_eq!(request.header("x-api-key"), Some(key));
+        } else {
+            assert_eq!(
+                request.header("authorization"),
+                Some(format!("Bearer {key}").as_str())
+            );
+        }
     }
     server.no_request().await;
 }

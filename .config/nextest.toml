@@ -1,0 +1,35 @@
+[profile.default]
+# Report every failure in one run; a test still running after two minutes is hung and gets killed.
+fail-fast = false
+slow-timeout = { period = "60s", terminate-after = 2 }
+# A flaky test must fail the gate, not pass on a second attempt.
+retries = 0
+
+[test-groups]
+serial = { max-threads = 1 }
+
+# Tests that launch real child processes (re-executed test binaries, scripts, cmd mklink) and
+# assert on their lifetime or timing; running them one at a time keeps process-tree checks and
+# elapsed-time bounds independent of each other. The whole stdio module is grouped: most of it
+# launches fixture servers.
+[[profile.default.overrides]]
+filter = 'package(aether-mcp-client) & test(/^tests::stdio::/)'
+test-group = 'serial'
+
+[[profile.default.overrides]]
+filter = 'package(aether-support) & test(=db::tests::killed_upgrade_resumes_on_reopen)'
+test-group = 'serial'
+
+[[profile.default.overrides]]
+filter = 'package(aether-runtime) & test(/^skill_authoring::tools::tests::/)'
+test-group = 'serial'
+
+[[profile.default.overrides]]
+filter = 'package(aether-skills) & (test(=package::tests::directory_junction_is_rejected_not_followed) | test(=system::tests::ancestor_junction_is_rejected))'
+test-group = 'serial'
+
+# ts-rs export tests rewrite shared files under TS_RS_EXPORT_DIR; its write lock only covers one
+# process, so with a process per test the writers are serialized here instead.
+[[profile.default.overrides]]
+filter = 'test(/(^|::)export_bindings_/)'
+test-group = 'serial'

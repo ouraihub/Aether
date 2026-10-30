@@ -400,7 +400,7 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       },
       approve: async (runId) => {
         if (!runs.has(runId)) throw clientError('not_found', `run ${runId}`, { entity: 'run' })
-        throw clientError('conflict', 'no pending approval', { reason: 'approval_expired' })
+        throw clientError('conflict', 'no pending approval', { reason: 'approval_not_pending' })
       },
       getSnapshot: async (runId) => {
         const run = runs.get(runId)

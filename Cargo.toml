@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/aether-support",
+  "crates/aether-testkit",
   "crates/aether-observability",
   "crates/aether-providers",
   "crates/aether-chat",
@@ -35,6 +36,7 @@ aether-skills = { path = "crates/aether-skills" }
 aether-mcp-client = { path = "crates/aether-mcp-client" }
 aether-mcp-server = { path = "crates/aether-mcp-server" }
 aether-search = { path = "crates/aether-search" }
+aether-testkit = { path = "crates/aether-testkit" }
 tauri-plugin-aether = { path = "plugin/tauri-plugin-aether" }
 
 tauri = "=2.12.1"

@@ -7,7 +7,7 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use super::tools::{expected, limited};
-use super::{PROTOCOLS, Reply, end, fixture, input, runner, script, sse};
+use super::{PROTOCOLS, end, fixture, input, requests, runner, script, sse};
 use crate::tools::{DENIED_NOTE, TRUNCATED_NOTE, UNKNOWN_NOTE, proposed};
 use crate::validate::PLAN_NOTICE;
 use crate::{
@@ -15,6 +15,7 @@ use crate::{
     RunSummary, ToolCall, ToolEffect, ToolExecution, ToolExecutor, ToolOutcome, ToolSource,
     ToolSpec,
 };
+use aether_testkit::{Reply, Server};
 
 /// What one `authorize` call saw.
 #[derive(Debug, Clone, PartialEq)]
@@ -140,12 +141,12 @@ fn spec(name: &str, approval: Approval, effect: ToolEffect) -> ToolSpec {
 }
 
 /// Input whose upstream answers `replies` in order, with the `read_file` tool.
-async fn scripted(protocol: Protocol, replies: Vec<Reply>) -> (RunInput, super::Seen) {
-    let (base, seen) = script(replies).await;
+async fn scripted(protocol: Protocol, replies: Vec<Reply>) -> (RunInput, Server) {
+    let (base, server) = script(replies).await;
     let mut input = input(protocol, base);
     input.history.clear();
     input.tools = read_file();
-    (input, seen)
+    (input, server)
 }
 
 /// Runs with `host`; `cancel_on_approval` cancels once approval is requested.
@@ -206,11 +207,12 @@ fn text(protocol: Protocol) -> Reply {
 #[tokio::test]
 async fn truncated_round_executes_nothing_and_says_why() {
     for protocol in PROTOCOLS {
-        let (input, seen) = scripted(protocol, vec![sse(limited(protocol)), text(protocol)]).await;
+        let (input, server) =
+            scripted(protocol, vec![sse(limited(protocol)), text(protocol)]).await;
         let host = Host::new(Approval::Auto);
         let (_, events) = run_with(&host, input, &CancellationToken::new(), false).await;
         assert!(host.executed().is_empty(), "{protocol:?}");
-        let seen = seen.lock().await;
+        let seen = requests(&server);
         assert_eq!(seen.len(), 2, "{protocol:?}");
         assert!(seen[1].contains(TRUNCATED_NOTE), "{protocol:?}");
         assert_eq!(end(&events).0, EndStatus::Completed);
@@ -222,7 +224,7 @@ async fn ask_waits_for_the_user_and_deny_feeds_back_denied() {
     for protocol in PROTOCOLS {
         let (a, b) = ids(protocol);
         for allow in [true, false] {
-            let (input, _) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
+            let (input, _server) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
             let mut host = Host::new(Approval::Ask);
             host.allow = Some(allow);
             let (summary, events) = run_with(&host, input, &CancellationToken::new(), false).await;
@@ -248,7 +250,7 @@ async fn ask_waits_for_the_user_and_deny_feeds_back_denied() {
 async fn unknown_outcome_is_fed_back_and_never_retried() {
     for protocol in PROTOCOLS {
         let (a, b) = ids(protocol);
-        let (input, seen) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
+        let (input, server) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
         let mut host = Host::new(Approval::Auto);
         host.reply = ToolExecution::Unknown {
             reason: "timeout".to_owned(),
@@ -260,7 +262,7 @@ async fn unknown_outcome_is_fed_back_and_never_retried() {
             [(a, ToolOutcome::Unknown), (b, ToolOutcome::Unknown)]
         );
         assert!(fed_back(&summary).iter().all(|(_, t)| *t == UNKNOWN_NOTE));
-        assert_eq!(seen.lock().await.len(), 2, "{protocol:?}");
+        assert_eq!(server.seen().len(), 2, "{protocol:?}");
     }
 }
 
@@ -269,7 +271,7 @@ async fn repeated_call_id_executes_once() {
     for protocol in PROTOCOLS {
         let (a, b) = ids(protocol);
         let replies = vec![multi(protocol), multi(protocol), text(protocol)];
-        let (input, _) = scripted(protocol, replies).await;
+        let (input, _server) = scripted(protocol, replies).await;
         let host = Host::new(Approval::Auto);
         let (summary, events) = run_with(&host, input, &CancellationToken::new(), false).await;
         assert_eq!(host.executed(), [a.clone(), b.clone()], "{protocol:?}");
@@ -287,7 +289,7 @@ async fn repeated_call_id_executes_once() {
 async fn reused_call_id_with_changed_arguments_fails_without_reexecution() {
     for protocol in PROTOCOLS {
         let changed = fixture(protocol, "multi-tool").replace("a.md", "changed.md");
-        let (input, _) = scripted(protocol, vec![multi(protocol), sse(changed)]).await;
+        let (input, _server) = scripted(protocol, vec![multi(protocol), sse(changed)]).await;
         let host = Host::new(Approval::Auto);
         let (summary, events) = run_with(&host, input, &CancellationToken::new(), false).await;
         assert_eq!(host.executed().len(), 2, "{protocol:?}");
@@ -299,7 +301,7 @@ async fn reused_call_id_with_changed_arguments_fails_without_reexecution() {
 #[tokio::test]
 async fn tool_error_payload_reaches_event_without_entering_model_text() {
     let protocol = Protocol::OpenaiChat;
-    let (input, _) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
+    let (input, _server) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
     let mut host = Host::new(Approval::Auto);
     let payload = json!({"diagnostic": "private structured result"});
     host.reply = ToolExecution::Error {
@@ -321,11 +323,11 @@ async fn tool_error_payload_reaches_event_without_entering_model_text() {
 async fn round_limit_stops_the_loop_as_exhausted() {
     for protocol in PROTOCOLS {
         // Every request asks for tools again.
-        let (mut input, seen) = scripted(protocol, vec![multi(protocol)]).await;
+        let (mut input, server) = scripted(protocol, vec![multi(protocol)]).await;
         input.budget.max_rounds = 2;
         let host = Host::new(Approval::Auto);
         let (summary, events) = run_with(&host, input, &CancellationToken::new(), false).await;
-        assert_eq!(seen.lock().await.len(), 2, "{protocol:?}");
+        assert_eq!(server.seen().len(), 2, "{protocol:?}");
         assert!(summary.exhausted, "{protocol:?}");
         assert_eq!(end(&events).0, EndStatus::Completed);
         assert!(matches!(
@@ -341,13 +343,13 @@ async fn round_limit_stops_the_loop_as_exhausted() {
 #[tokio::test]
 async fn cancel_while_awaiting_approval_starts_nothing() {
     for protocol in PROTOCOLS {
-        let (input, seen) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
+        let (input, server) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
         let mut host = Host::new(Approval::Ask);
         host.allow = None;
         let (_, events) = run_with(&host, input, &CancellationToken::new(), true).await;
         assert!(host.executed().is_empty(), "{protocol:?}");
         assert_eq!(log(&host.asked).len(), 1, "{protocol:?}");
-        assert_eq!(seen.lock().await.len(), 1, "{protocol:?}");
+        assert_eq!(server.seen().len(), 1, "{protocol:?}");
         assert_eq!(end(&events).0, EndStatus::Cancelled);
     }
 }
@@ -356,13 +358,13 @@ async fn cancel_while_awaiting_approval_starts_nothing() {
 async fn cancel_during_a_tool_starts_no_further_tool() {
     for protocol in PROTOCOLS {
         let (a, _) = ids(protocol);
-        let (input, seen) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
+        let (input, server) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
         let cancel = CancellationToken::new();
         let mut host = Host::new(Approval::Auto);
         host.cancel_in_execute = Some(cancel.clone());
         let (_, events) = run_with(&host, input, &cancel, false).await;
         assert_eq!(host.executed(), [a], "{protocol:?}");
-        assert_eq!(seen.lock().await.len(), 1, "{protocol:?}");
+        assert_eq!(server.seen().len(), 1, "{protocol:?}");
         assert_eq!(end(&events).0, EndStatus::Cancelled);
     }
 }
@@ -420,7 +422,7 @@ fn mode_matrix_relaxes_only_ask_and_never_deny() {
 
 /// The tool names and system text of the first request of a run in `mode`.
 async fn first_request(protocol: Protocol, mode: PermissionMode) -> (Vec<String>, String) {
-    let (mut input, seen) = scripted(protocol, vec![text(protocol)]).await;
+    let (mut input, server) = scripted(protocol, vec![text(protocol)]).await;
     input.permission_mode = mode;
     input.tools = EFFECTS
         .iter()
@@ -429,7 +431,7 @@ async fn first_request(protocol: Protocol, mode: PermissionMode) -> (Vec<String>
     let host = Host::proposing();
     let (_, events) = run_with(&host, input, &CancellationToken::new(), false).await;
     assert_eq!(end(&events).0, EndStatus::Completed);
-    let raw = seen.lock().await[0].clone();
+    let raw = requests(&server).remove(0);
     let body = super::request_body(&raw);
     let names = body["tools"]
         .as_array()
@@ -476,7 +478,7 @@ async fn mode_run(
     host: &Host,
     tool: ToolSpec,
 ) -> Vec<RunEvent> {
-    let (mut input, _) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
+    let (mut input, _server) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
     input.permission_mode = mode;
     input.purpose = "notes".to_owned();
     input.tools = vec![tool];
@@ -570,7 +572,7 @@ async fn catalogue_deny_is_never_relaxed() {
 #[tokio::test]
 async fn plan_call_to_a_hidden_tool_is_unknown_and_never_runs() {
     let protocol = Protocol::OpenaiChat;
-    let (input, seen) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
+    let (input, server) = scripted(protocol, vec![multi(protocol), text(protocol)]).await;
     let mut input = input;
     input.permission_mode = PermissionMode::Plan;
     // The model names `read_file`, which is an edit tool here and so not in the Plan catalogue.
@@ -584,5 +586,5 @@ async fn plan_call_to_a_hidden_tool_is_unknown_and_never_runs() {
             .iter()
             .all(|(_, text)| text.contains("unknown_tool"))
     );
-    assert_eq!(seen.lock().await.len(), 2);
+    assert_eq!(server.seen().len(), 2);
 }
