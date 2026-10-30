@@ -7,11 +7,10 @@ use aether_chat::{Budget, EndStatus, RunEngine, RunEvent, RunInput, RunSummary, 
 use aether_support::net::AddressPolicy;
 use aether_support::{KitError, KitErrorCode};
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::task::Poll;
 use std::time::Duration;
-use tokio::task::JoinHandle;
+use tokio_util::task::TaskTracker;
 
 /// Defaults and approval timeout for Native runs.
 #[derive(Debug, Clone, Copy)]
@@ -46,6 +45,8 @@ pub struct RunDependencies {
     /// Optional MCP runtime shared with configuration adapters.
     #[cfg(feature = "mcp-client")]
     pub mcp: Option<Arc<aether_mcp_client::McpRuntime>>,
+    /// Wall clock for time-based maintenance (image TTL); tests inject a fixed clock.
+    pub clock: aether_support::clock::Clock,
 }
 impl RunDependencies {
     /// Starts with no optional capabilities, independent of Cargo feature unification.
@@ -60,6 +61,7 @@ impl RunDependencies {
             search: None,
             #[cfg(feature = "mcp-client")]
             mcp: None,
+            clock: aether_support::clock::system(),
         }
     }
 }
@@ -134,11 +136,13 @@ pub struct RunService {
     registry: Mutex<Registry>,
     approvals: Arc<Approvals>,
     closing: Arc<AtomicBool>,
-    preparing: AtomicUsize,
-    tasks: Mutex<Vec<JoinHandle<()>>>,
-    drain: tokio::sync::Mutex<()>,
+    /// Acceptances still preparing (tokens only). Drained before `tasks`, because an acceptance
+    /// spawns its execution before releasing its token.
+    preparing: TaskTracker,
+    /// Every execution and the maintenance loop. Tracker waits are cancellation-safe and consume
+    /// nothing, so timed-out or concurrent shutdown callers each keep waiting under their own grace.
+    tasks: TaskTracker,
     maintenance_cancel: CancellationToken,
-    maintenance: Mutex<Option<JoinHandle<()>>>,
 }
 struct HostRun {
     host: Arc<dyn KitHost>,
@@ -147,12 +151,6 @@ struct HostRun {
 impl Drop for HostRun {
     fn drop(&mut self) {
         self.host.run_finished(&self.run_id);
-    }
-}
-struct Preparing<'a>(&'a AtomicUsize);
-impl Drop for Preparing<'_> {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -169,22 +167,25 @@ impl RunService {
     ) -> Result<Arc<Self>, KitError> {
         let engine = Arc::new(RunEngine::new(policy.clone())?);
         let cancel = CancellationToken::new();
-        let maintenance = if let Some(store) = deps.conversations.clone() {
+        let tasks = TaskTracker::new();
+        if let Some(store) = deps.conversations.clone() {
+            let clock = deps.clock.clone();
             let handle = tokio::runtime::Handle::try_current().map_err(KitError::internal)?;
             let token = cancel.clone();
-            Some(handle.spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_secs(3600));
-                loop {
-                    tokio::select! { biased; () = token.cancelled() => break, _ = interval.tick() => {} }
-                    let store = Arc::clone(&store);
-                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX));
-                    let result = tokio::task::spawn_blocking(move || store.purge_images(now.saturating_sub(crate::conversations::IMAGE_TTL_DAYS * 86_400_000))).await;
-                    match result { Ok(Ok(_)) => {}, Ok(Err(error)) => tracing::warn!(code = ?error.code(), "runtime.images.purge_failed"), Err(_) => tracing::warn!("runtime.images.purge_panicked") }
-                }
-            }))
-        } else {
-            None
-        };
+            tasks.spawn_on(
+                async move {
+                    let mut interval = tokio::time::interval(Duration::from_secs(3600));
+                    loop {
+                        tokio::select! { biased; () = token.cancelled() => break, _ = interval.tick() => {} }
+                        let store = Arc::clone(&store);
+                        let now = clock();
+                        let result = tokio::task::spawn_blocking(move || store.purge_images(now.saturating_sub(crate::conversations::IMAGE_TTL_DAYS * 86_400_000))).await;
+                        match result { Ok(Ok(_)) => {}, Ok(Err(error)) => tracing::warn!(code = ?error.code(), "runtime.images.purge_failed"), Err(_) => tracing::warn!("runtime.images.purge_panicked") }
+                    }
+                },
+                &handle,
+            );
+        }
         Ok(Arc::new(Self {
             host,
             config,
@@ -194,11 +195,9 @@ impl RunService {
             registry: Mutex::default(),
             approvals: Arc::new(Approvals::new(config.approval_timeout)),
             closing: Arc::new(AtomicBool::new(false)),
-            preparing: AtomicUsize::new(0),
-            tasks: Mutex::default(),
-            drain: tokio::sync::Mutex::new(()),
+            preparing: TaskTracker::new(),
+            tasks,
             maintenance_cancel: cancel,
-            maintenance: Mutex::new(maintenance),
         }))
     }
 
@@ -232,8 +231,8 @@ impl RunService {
         request: RunRequest,
         events: EventSink,
     ) -> Result<RunAccepted, KitError> {
-        self.preparing.fetch_add(1, Ordering::AcqRel);
-        let _preparing = Preparing(&self.preparing);
+        // Counted until acceptance returns; shutdown waits on it without polling.
+        let _preparing = self.preparing.token();
         self.open(&context.owner)?;
         crate::prepare::check_request(&request, self.deps.conversations.is_some())?;
         let run_id = aether_support::id::new_id()?;
@@ -364,7 +363,9 @@ impl RunService {
             );
         }
         let service = self.clone();
-        let task = tokio::spawn(async move {
+        // Spawned while this acceptance still holds its preparing token, so a drain that has seen
+        // `preparing` empty already sees this execution in `tasks`.
+        self.tasks.spawn(async move {
             let _guard = guard;
             service
                 .execute(Execution {
@@ -379,9 +380,6 @@ impl RunService {
                 })
                 .await;
         });
-        let mut tasks = lock(&self.tasks);
-        tasks.retain(|task| !task.is_finished());
-        tasks.push(task);
         Ok(accepted)
     }
 
@@ -426,7 +424,7 @@ impl RunService {
             .is_none_or(CancellationToken::is_cancelled)
             || !self.approvals.answer(run_id, call_id, allow)
         {
-            return Err(KitError::conflict("approval_expired"));
+            return Err(KitError::conflict("approval_not_pending"));
         }
         Ok(Ack { ok: true })
     }
@@ -475,42 +473,13 @@ impl RunService {
                 }
             }
         }
-        let deadline = tokio::time::Instant::now() + grace;
-        let drained = tokio::time::timeout_at(deadline, async {
-            let _drain = self.drain.lock().await;
-            while self.preparing.load(Ordering::Acquire) != 0 {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            // Retain ownership across timeout/cancellation so a later caller can finish draining.
-            while std::future::poll_fn(|cx| {
-                let mut tasks = lock(&self.tasks);
-                let Some(task) = tasks.last_mut() else {
-                    return Poll::Ready(false);
-                };
-                match std::pin::Pin::new(task).poll(cx) {
-                    Poll::Pending => Poll::Pending,
-                    Poll::Ready(_) => {
-                        tasks.pop();
-                        Poll::Ready(true)
-                    }
-                }
-            })
-            .await
-            {}
-            std::future::poll_fn(|cx| {
-                let mut maintenance = lock(&self.maintenance);
-                let Some(task) = maintenance.as_mut() else {
-                    return Poll::Ready(());
-                };
-                match std::pin::Pin::new(task).poll(cx) {
-                    Poll::Pending => Poll::Pending,
-                    Poll::Ready(_) => {
-                        maintenance.take();
-                        Poll::Ready(())
-                    }
-                }
-            })
-            .await;
+        self.preparing.close();
+        self.tasks.close();
+        // Both waits are cancellation-safe and consume nothing: a caller whose grace expires
+        // leaves every task owned by the trackers, and concurrent callers wait independently.
+        let drained = tokio::time::timeout(grace, async {
+            self.preparing.wait().await;
+            self.tasks.wait().await;
         })
         .await;
         let active = lock(&self.registry)
@@ -518,16 +487,7 @@ impl RunService {
             .values()
             .filter(|record| record.cancel.is_some())
             .count();
-        let preparing = self.preparing.load(Ordering::Acquire);
-        let left = lock(&self.tasks)
-            .iter()
-            .filter(|task| !task.is_finished())
-            .count()
-            + usize::from(
-                lock(&self.maintenance)
-                    .as_ref()
-                    .is_some_and(|task| !task.is_finished()),
-            );
+        let (preparing, left) = (self.preparing.len(), self.tasks.len());
         if drained.is_err() {
             tracing::warn!(active, preparing, left, "runtime.shutdown.incomplete");
         } else {
@@ -577,7 +537,7 @@ impl RunService {
         };
         #[cfg(not(feature = "search"))]
         let searched: Result<(), KitError> = {
-            let _ = search;
+            let () = search;
             Ok(())
         };
         let (summary, mut end) = match searched {

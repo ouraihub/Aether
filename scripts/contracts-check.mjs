@@ -1,4 +1,5 @@
-// docs/22 gate: AJV fixtures, TypeScript binding assignments and actual Rust serialization.
+// docs/22 gate: AJV fixtures, TypeScript binding assignments, actual Rust serialization and
+// scenario runs on both backends (contracts/scenario-runs.md).
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -6,16 +7,77 @@ import { fileURLToPath } from 'node:url'
 import Ajv from 'ajv'
 import ts from 'typescript'
 import * as standalone from '../packages/contracts/src/validators.js'
+import { BACKENDS, checkExecutable, checkRunnerOutput, judgeScenarios, publicValues } from './scenario-check.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const directory = join(root, 'contracts')
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'))
+const usage =
+  'Usage: node scripts/contracts-check.mjs [--rust-output <file|->] [--scenario-output native=<file> worker=<file>]'
+
+function parseArgs(args) {
+  const options = {}
+  for (let index = 0; index < args.length;) {
+    if (args[index] === '--rust-output' && options.rust === undefined && index + 1 < args.length) {
+      options.rust = args[index + 1]
+      index += 2
+    } else if (args[index] === '--scenario-output' && options.scenarios === undefined) {
+      const files = {}
+      for (const arg of args.slice(index + 1, index + 3)) {
+        const at = arg.indexOf('=')
+        if (at > 0 && at < arg.length - 1) files[arg.slice(0, at)] = arg.slice(at + 1)
+      }
+      if (Object.keys(files).sort().join(',') !== BACKENDS.join(',')) throw new Error(usage)
+      options.scenarios = files
+      index += 3
+    } else {
+      throw new Error(usage)
+    }
+  }
+  return options
+}
+
+// Builds the aether-runtime examples in one cargo call (inherited logs), then runs each directly
+// so only the example's own stdout is parsed.
+function runRustExamples(names) {
+  const cargo = ['build', '-p', 'aether-runtime', '--features', 'runs', '--quiet']
+  for (const name of names) cargo.push('--example', name)
+  const [command, cargoArgs] =
+    process.platform === 'win32'
+      ? ['cmd.exe', ['/d', '/c', 'node_modules\\@ouraihub\\desktop-kit\\msvc\\cargo-msvc.bat', ...cargo]]
+      : ['cargo', cargo]
+  execFileSync(command, cargoArgs, { cwd: root, stdio: 'inherit' })
+  const outputs = {}
+  for (const name of names) {
+    const executable = join(
+      resolve(root, process.env.CARGO_TARGET_DIR || 'target'),
+      'debug',
+      'examples',
+      process.platform === 'win32' ? `${name}.exe` : name,
+    )
+    outputs[name] = execFileSync(executable, [], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'inherit'],
+      maxBuffer: 16 * 1024 * 1024,
+    })
+  }
+  return outputs
+}
+
+function runWorkerScenarios() {
+  const pnpm = ['--filter', '@ouraihub/aether-worker', 'run', '--silent', 'scenarios']
+  const [command, pnpmArgs] = process.platform === 'win32' ? ['cmd.exe', ['/d', '/c', 'pnpm', ...pnpm]] : ['pnpm', pnpm]
+  return execFileSync(command, pnpmArgs, {
+    cwd: root,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+    maxBuffer: 16 * 1024 * 1024,
+  })
+}
 
 function main() {
-  const args = process.argv.slice(2)
-  if (args.length !== 0 && (args.length !== 2 || args[0] !== '--rust-output')) {
-    throw new Error('Usage: node scripts/contracts-check.mjs [--rust-output <file|->]')
-  }
+  const options = parseArgs(process.argv.slice(2))
   execFileSync(process.execPath, ['packages/contracts/scripts/generate.mjs', '--check'], {
     cwd: root,
     stdio: 'inherit',
@@ -122,7 +184,7 @@ function main() {
   }
   const bindingCases = bindingRanges.length
   const virtual = join(root, '__aether_contract_fixtures__.ts')
-  const options = {
+  const compilerOptions = {
     noEmit: true,
     strict: true,
     exactOptionalPropertyTypes: true,
@@ -132,7 +194,7 @@ function main() {
     types: [],
     skipLibCheck: false,
   }
-  const host = ts.createCompilerHost(options)
+  const host = ts.createCompilerHost(compilerOptions)
   const canonicalPath = (path) => {
     const normalized = resolve(path).replaceAll('\\', '/')
     return host.useCaseSensitiveFileNames() ? normalized : normalized.toLowerCase()
@@ -148,7 +210,7 @@ function main() {
     isVirtual(path)
       ? ts.createSourceFile(path, text, languageVersion, true)
       : originalGetSourceFile(path, languageVersion, onError, shouldCreateNewSourceFile)
-  const program = ts.createProgram([virtual], options, host)
+  const program = ts.createProgram([virtual], compilerOptions, host)
   const diagnostics = ts.getPreEmitDiagnostics(program)
   const unexpected = []
   for (const diagnostic of diagnostics) {
@@ -171,31 +233,31 @@ function main() {
     )
   }
 
+  const scenarioSpec = json(join(directory, 'scenarios.json'))
+  const scenarioFixtures = json(join(directory, 'scenario-fixtures.json'))
+  if (scenarioSpec.contractVersion !== 1) throw new Error('Unsupported scenarios contractVersion')
+  const { executable } = scenarioSpec
+  checkExecutable(
+    executable,
+    scenarioSpec.scenarios.map((scenario) => scenario.id),
+  )
+  // Both backends run in this invocation unless their output files are supplied.
+  const rustExamples = []
+  if (options.rust === undefined) rustExamples.push('contract-output')
+  if (options.scenarios === undefined) rustExamples.push('scenario-output')
+  const built = rustExamples.length ? runRustExamples(rustExamples) : {}
+  const scenarioDocuments = options.scenarios
+    ? Object.fromEntries(
+        BACKENDS.map((backend) => [backend, readFileSync(resolve(options.scenarios[backend]), 'utf8')]),
+      )
+    : { native: built['scenario-output'], worker: runWorkerScenarios() }
+
   let rustCount = 0
   {
-    let serialized
-    if (args.length) {
-      serialized = readFileSync(args[1] === '-' ? 0 : resolve(args[1]), 'utf8')
-    } else {
-      const cargo = ['build', '-p', 'aether-runtime', '--features', 'runs', '--example', 'contract-output', '--quiet']
-      const [command, cargoArgs] =
-        process.platform === 'win32'
-          ? ['cmd.exe', ['/d', '/c', 'node_modules\\@ouraihub\\desktop-kit\\msvc\\cargo-msvc.bat', ...cargo]]
-          : ['cargo', cargo]
-      execFileSync(command, cargoArgs, { cwd: root, stdio: 'inherit' })
-      const executable = join(
-        resolve(root, process.env.CARGO_TARGET_DIR || 'target'),
-        'debug',
-        'examples',
-        process.platform === 'win32' ? 'contract-output.exe' : 'contract-output',
-      )
-      serialized = execFileSync(executable, [], {
-        cwd: root,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'inherit'],
-        maxBuffer: 16 * 1024 * 1024,
-      })
-    }
+    const serialized =
+      options.rust === undefined
+        ? built['contract-output']
+        : readFileSync(options.rust === '-' ? 0 : resolve(options.rust), 'utf8')
     const output = JSON.parse(serialized)
     if (!Array.isArray(output) || output.length === 0) throw new Error('Rust output must be a nonempty JSON array')
     const contracts = new Set()
@@ -224,11 +286,36 @@ function main() {
       for (const value of expected) if (!actual.has(value)) throw new Error(`Rust output missing ${label}: ${value}`)
     }
   }
+
+  let scenarioValues = 0
+  const scenarios = {}
+  for (const backend of BACKENDS) {
+    let output
+    try {
+      output = JSON.parse(scenarioDocuments[backend])
+    } catch (error) {
+      throw new Error(`${backend} scenario output is not JSON: ${error.message}`, { cause: error })
+    }
+    scenarios[backend] = checkRunnerOutput(output, backend, executable)
+    for (const id of executable) {
+      for (const [contract, value, label] of publicValues(backend, id, scenarios[backend][id])) {
+        check(contract, value, true, label)
+        scenarioValues++
+      }
+    }
+  }
+  const { failures, drifts } = judgeScenarios({ executable, knownDrift: scenarioFixtures.knownDrift, scenarios })
+  for (const { drift, note, occurs } of drifts) {
+    process.stdout.write(`contracts-check: known drift ${drift}${occurs ? '' : ' (no longer occurs)'}: ${note}\n`)
+  }
+  if (failures.length) throw new Error(`scenario runs failed:\n${failures.join('\n')}`)
+
   process.stdout.write(
     `contracts-check: ${validators.size} Draft07 contracts, ${cases.size} shared cases, ${boundaries} boundaries, ${bindingCases} TypeScript assignments passed\n`,
   )
+  process.stdout.write(`contracts-check: ${rustCount} actual Rust serialization values passed\n`)
   process.stdout.write(
-    `contracts-check: ${rustCount} actual Rust serialization values passed; behavior scenarios are specified separately, not executed by this data gate\n`,
+    `contracts-check: ${executable.length} executable scenarios ${options.scenarios ? 'checked from supplied native+worker output files' : 'executed on native+worker'}: ${scenarioValues} public values valid, assertions and trace comparison passed with ${drifts.length} known drifts; ${scenarioSpec.scenarios.length - executable.length} scenarios specified only\n`,
   )
 }
 

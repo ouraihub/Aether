@@ -1,7 +1,8 @@
 //! Conversation domain, service and SQLite persistence (docs/26).
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use aether_support::clock::now_millis;
 
 use aether_support::db::{self, Migration};
 use aether_support::{KitError, SkillRef};
@@ -1067,14 +1068,6 @@ fn json<T: DeserializeOwned>(row: &Row<'_>, index: usize) -> rusqlite::Result<T>
     serde_json::from_str(&text).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(index, Type::Text, Box::new(error))
     })
-}
-
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
-        })
 }
 
 #[cfg(test)]

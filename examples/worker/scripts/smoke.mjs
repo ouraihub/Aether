@@ -6,7 +6,11 @@ const local = {}
 try {
   for (const line of (await readFile(new URL('../.dev.vars', import.meta.url), 'utf8')).split(/\r?\n/u)) {
     const split = line.indexOf('=')
-    if (split > 0) local[line.slice(0, split)] = JSON.parse(line.slice(split + 1))
+    if (split <= 0) continue
+    // The literal format written by scripts/init-local.mjs.
+    const value = /^'([^']*)'$/u.exec(line.slice(split + 1))
+    assert.ok(value, `.dev.vars ${line.slice(0, split)} is not a single-quoted value; regenerate it with init:local`)
+    local[line.slice(0, split)] = value[1]
   }
 } catch (error) { if (error.code !== 'ENOENT') throw error }
 const option = name => process.env[name] ?? local[name]

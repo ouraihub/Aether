@@ -2,10 +2,11 @@
 // packages/contracts/src/generated. Exits 1 on any missing, extra or changed file.
 // `--write` replaces the committed dir with the fresh output instead.
 import { execFileSync } from 'node:child_process'
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { relativeJsImports } from '../packages/contracts/scripts/module-specifiers.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const committed = join(root, 'packages/contracts/src/generated')
@@ -24,6 +25,10 @@ try {
     env: { ...process.env, TS_RS_EXPORT_DIR: fresh },
     stdio: ['ignore', 'ignore', 'inherit'],
   })
+  for (const file of readdirSync(fresh, { recursive: true }).filter((file) => file.endsWith('.ts'))) {
+    const path = join(fresh, file)
+    writeFileSync(path, relativeJsImports(readFileSync(path, 'utf8')))
+  }
   if (process.argv.includes('--write')) {
     rmSync(committed, { recursive: true, force: true })
     cpSync(fresh, committed, { recursive: true })

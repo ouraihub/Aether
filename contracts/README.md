@@ -8,6 +8,8 @@ The canonical TypeScript package is `@ouraihub/aether-contracts`: Rust exports g
 
 `pnpm --filter @ouraihub/aether-contracts check-generated` checks reproducibility. The full data gate below also compares standalone validation with schema validation for every shared fixture and expanded boundary, while retaining all TypeScript assignments and actual Rust serialization checks.
 
+Relative imports and re-exports in the public TypeScript assets use `.js` specifiers for strict NodeNext consumers. `pnpm kit:dto` and `pnpm kit:dto-check` normalize only relative module specifiers in the temporary ts-rs exports before writing or comparing them; DTO type bodies are unchanged. `node packages/contracts/scripts/generate.mjs` applies the same normalization to existing bindings and regenerates the index and validator assets without running Cargo.
+
 ## Run the data/binding gate
 
 ```sh

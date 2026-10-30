@@ -1,7 +1,6 @@
 //! Public capabilities consumed without Store, SQLite or native credentials services.
 #![expect(clippy::unwrap_used, reason = "a failed unwrap is a failed test")]
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use aether_providers::{
@@ -10,12 +9,32 @@ use aether_providers::{
     probe::{ProbeInput, probe},
 };
 use aether_support::net::AddressPolicy;
+use aether_testkit::{Exhausted, Reply, Server};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
-type Seen = Arc<tokio::sync::Mutex<Vec<String>>>;
+/// A loopback upstream that keeps running while held.
+struct Seen(Server);
+
+impl Seen {
+    /// Request heads (lower-cased) seen so far.
+    fn heads(&self) -> Vec<String> {
+        self.0
+            .seen()
+            .iter()
+            .map(|request| {
+                let raw = &request.raw;
+                let end = raw
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .map_or(raw.len(), |at| at + 4);
+                String::from_utf8_lossy(&raw[..end]).to_lowercase()
+            })
+            .collect()
+    }
+}
 
 fn endpoint(base_url: &str) -> EndpointSnapshot {
     EndpointSnapshot {
@@ -43,33 +62,12 @@ fn input(base_url: &str) -> ProbeInput {
     }
 }
 
+/// Answers the n-th request with `responses[n]` verbatim, later ones with a 500.
 async fn server(responses: Vec<String>) -> (String, Seen) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-    let seen = Seen::default();
-    let log = Arc::clone(&seen);
-    tokio::spawn(async move {
-        let mut responses = responses.into_iter();
-        while let Ok((mut socket, _)) = listener.accept().await {
-            let mut request = Vec::new();
-            let mut chunk = [0; 2048];
-            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-                let n = socket.read(&mut chunk).await.unwrap();
-                if n == 0 {
-                    break;
-                }
-                request.extend_from_slice(&chunk[..n]);
-            }
-            log.lock()
-                .await
-                .push(String::from_utf8_lossy(&request).to_lowercase());
-            let response = responses
-                .next()
-                .unwrap_or_else(|| http(500, "unexpected request"));
-            let _ = socket.write_all(response.as_bytes()).await;
-        }
-    });
-    (base, seen)
+    let replies = responses.into_iter().map(Reply::raw).collect();
+    let unexpected = Reply::raw(http(500, "unexpected request"));
+    let server = Server::script(replies, Exhausted::Reply(unexpected)).await;
+    (server.url(), Seen(server))
 }
 
 fn http(status: u16, body: &str) -> String {
@@ -165,7 +163,7 @@ async fn fixed_key_fallback_authentication_parsing_and_no_cross_call_rotation() 
         let result = probe(config, &CancellationToken::new()).await.unwrap();
         assert!(result.error.is_none());
         assert_eq!(result.models.len(), 1);
-        let requests = seen.lock().await;
+        let requests = seen.heads();
         assert_eq!(requests.len(), 2);
         for (request, key) in requests.iter().zip(["first", "second"]) {
             assert!(request.starts_with("get /v1/models "));
@@ -182,8 +180,7 @@ async fn fixed_key_fallback_authentication_parsing_and_no_cross_call_rotation() 
             .unwrap();
     }
     assert!(
-        seen.lock()
-            .await
+        seen.heads()
             .iter()
             .all(|request| request.contains("authorization: bearer first"))
     );
@@ -200,7 +197,7 @@ async fn other_errors_do_not_retry_and_all_attempt_keys_are_redacted() {
         assert_eq!(error.status, Some(status));
         let message = error.message.unwrap_or_default();
         assert!(!message.contains("first") && !message.contains("second"));
-        assert_eq!(seen.lock().await.len(), 1);
+        assert_eq!(seen.heads().len(), 1);
     }
 }
 
@@ -216,7 +213,7 @@ async fn probe_and_suggestion_share_policy_cancellation_and_body_limits() {
         .unwrap();
     assert!(result.error.is_none());
     assert!(result.suggested_protocol.is_none());
-    let requests = seen.lock().await;
+    let requests = seen.heads();
     assert_eq!(requests.len(), 2);
     assert!(requests[1].starts_with("post /v1/messages "));
     assert!(requests[1].contains("authorization: bearer first"));
@@ -227,7 +224,7 @@ async fn probe_and_suggestion_share_policy_cancellation_and_body_limits() {
     cancel.cancel();
     assert!(probe(input(&base), &cancel).await.is_err());
     tokio::time::sleep(Duration::from_millis(20)).await;
-    assert!(seen.lock().await.is_empty());
+    assert!(seen.heads().is_empty());
 
     let result = probe(input("https://192.168.1.1"), &CancellationToken::new())
         .await
@@ -255,7 +252,7 @@ async fn bounded_model_bodies_and_redirects_do_not_start_extra_requests() {
             .await
             .unwrap();
         assert_eq!(result.error.unwrap().kind, ProbeErrorKind::InvalidBody);
-        assert_eq!(seen.lock().await.len(), 1);
+        assert_eq!(seen.heads().len(), 1);
     }
     let (target, received) = server(vec![http(200, "[\"gpt-4o\"]")]).await;
     let (base, seen) = server(vec![format!("HTTP/1.1 302 Found\r\nLocation: {target}/v1/models\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")]).await;
@@ -263,8 +260,8 @@ async fn bounded_model_bodies_and_redirects_do_not_start_extra_requests() {
         .await
         .unwrap();
     assert_eq!(result.error.unwrap().status, Some(302));
-    assert_eq!(seen.lock().await.len(), 1);
-    assert!(received.lock().await.is_empty());
+    assert_eq!(seen.heads().len(), 1);
+    assert!(received.heads().is_empty());
 }
 
 #[tokio::test]

@@ -2,7 +2,8 @@
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+
+pub(crate) use aether_support::clock::now_millis as now_ms;
 
 use aether_support::db::{self, Migration};
 use aether_support::{KitError, KitErrorCode, id, mask, net, secret};
@@ -610,12 +611,4 @@ fn parse_approval(value: &str) -> Approval {
         "deny" => Approval::Deny,
         _ => Approval::Ask,
     }
-}
-
-pub(crate) fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
-        })
 }

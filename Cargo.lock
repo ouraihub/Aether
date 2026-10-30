@@ -50,6 +50,7 @@ version = "0.1.0"
 dependencies = [
  "aether-images",
  "aether-support",
+ "aether-testkit",
  "async-trait",
  "getrandom 0.4.3",
  "reqwest 0.12.28",
@@ -68,6 +69,7 @@ name = "aether-images"
 version = "0.1.0"
 dependencies = [
  "aether-support",
+ "aether-testkit",
  "base64 0.22.1",
  "getrandom 0.4.3",
  "reqwest 0.12.28",
@@ -84,6 +86,7 @@ name = "aether-mcp-client"
 version = "0.1.0"
 dependencies = [
  "aether-support",
+ "aether-testkit",
  "process-wrap",
  "reqwest 0.12.28",
  "rusqlite",
@@ -142,6 +145,7 @@ name = "aether-providers"
 version = "0.1.0"
 dependencies = [
  "aether-support",
+ "aether-testkit",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -164,6 +168,7 @@ dependencies = [
  "aether-search",
  "aether-skills",
  "aether-support",
+ "aether-testkit",
  "async-trait",
  "process-wrap",
  "rusqlite",
@@ -182,6 +187,7 @@ name = "aether-search"
 version = "0.1.0"
 dependencies = [
  "aether-support",
+ "aether-testkit",
  "base64 0.22.1",
  "reqwest 0.12.28",
  "rusqlite",
@@ -214,6 +220,7 @@ name = "aether-support"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "aether-testkit",
  "getrandom 0.4.3",
  "keyring",
  "reqwest 0.12.28",
@@ -229,6 +236,13 @@ dependencies = [
  "url",
  "windows",
  "zeroize",
+]
+
+[[package]]
+name = "aether-testkit"
+version = "0.1.0"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]
@@ -4925,6 +4939,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",

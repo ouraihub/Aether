@@ -2,7 +2,7 @@
 import { execFileSync, execSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 
 const scope =
   process.argv.length === 2 ? 'full' : process.argv[2] === '--scope' && process.argv.length === 4 ? process.argv[3] : ''
@@ -13,7 +13,10 @@ if (!['docs', 'automation', 'frontend', 'full'].includes(scope))
 const cargo = (args) =>
   process.platform === 'win32' ? `node_modules\\@ouraihub\\desktop-kit\\msvc\\cargo-msvc.bat ${args}` : `cargo ${args}`
 
-const common = ['node --test scripts/ci-scope.test.mjs scripts/ci-gate.test.mjs', 'pnpm exec release-kit check']
+const common = [
+  'node --test scripts/ci-scope.test.mjs scripts/ci-gate.test.mjs scripts/scenario-check.test.mjs',
+  'pnpm exec release-kit check',
+]
 const frontend = ['pnpm run check', 'pnpm -r --filter "./examples/*/ui" run build', 'pnpm run kit:i18n']
 const steps =
   scope === 'docs' || scope === 'automation'
@@ -27,6 +30,7 @@ const steps =
           'pnpm --filter @ouraihub/aether-contracts check-generated',
           'pnpm --filter @ouraihub/aether-worker-example build',
           'pnpm run kit:check-deps',
+          'pnpm run kit:nondet-check',
           'pnpm run kit:dto-check',
           'node scripts/contracts-check.mjs',
           cargo('check -p aether-support --no-default-features'),
@@ -35,46 +39,65 @@ const steps =
           cargo('check -p aether-runtime --no-default-features --features conversations'),
           cargo('fmt --all -- --check'),
           cargo('clippy --workspace --all-targets --all-features -- -D warnings'),
-          cargo('test --workspace --all-features'),
+          // nextest gives every test its own process and a hang timeout; it does not run doctests.
+          cargo('nextest run --workspace --all-features'),
+          cargo('test --workspace --all-features --doc'),
           ...['providers', 'chat', 'conversations', 'skills', 'search', 'mcp-client', 'mcp-server'].map((feature) =>
             cargo(`check -p tauri-plugin-aether --no-default-features --features ${feature}`),
           ),
         ]
 
-if (scope !== 'docs') {
-  const directory = mkdtempSync(join(tmpdir(), 'aether-actionlint-'))
-  try {
+// Pinned release tools are fetched into a throwaway directory and run by path, never installed globally.
+const directories = []
+function release(name, url) {
+  const directory = mkdtempSync(join(tmpdir(), `aether-${name}-`))
+  directories.push(directory)
+  const archive = join(directory, url.slice(url.lastIndexOf('/') + 1))
+  execFileSync('curl', ['--fail', '--location', '--max-time', '120', '--output', archive, url], { stdio: 'inherit' })
+  execFileSync('tar', ['-xf', archive, '-C', directory], { stdio: 'inherit' })
+  return directory
+}
+
+try {
+  if (scope !== 'docs') {
     const platform = { win32: 'windows', darwin: 'darwin', linux: 'linux' }[process.platform]
     const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch]
     if (!platform || !arch) throw new Error('Unsupported actionlint platform')
     const archive = `actionlint_1.7.12_${platform}_${arch}.${platform === 'windows' ? 'zip' : 'tar.gz'}`
-    execFileSync(
-      'curl',
-      [
-        '--fail',
-        '--location',
-        '--max-time',
-        '60',
-        '--output',
-        join(directory, archive),
-        `https://github.com/rhysd/actionlint/releases/download/v1.7.12/${archive}`,
-      ],
-      { stdio: 'inherit' },
-    )
-    execFileSync('tar', ['-xf', join(directory, archive), '-C', directory], { stdio: 'inherit' })
+    const directory = release('actionlint', `https://github.com/rhysd/actionlint/releases/download/v1.7.12/${archive}`)
     execFileSync(
       join(directory, platform === 'windows' ? 'actionlint.exe' : 'actionlint'),
       ['-shellcheck=', '-pyflakes='],
-      { stdio: 'inherit' },
+      {
+        stdio: 'inherit',
+      },
     )
-  } finally {
-    rmSync(directory, { recursive: true, force: true })
   }
-}
+  if (scope === 'full') {
+    const target = {
+      'win32-x64': 'x86_64-pc-windows-msvc.zip',
+      'win32-arm64': 'aarch64-pc-windows-msvc.zip',
+      'darwin-x64': 'universal-apple-darwin.tar.gz',
+      'darwin-arm64': 'universal-apple-darwin.tar.gz',
+      'linux-x64': 'x86_64-unknown-linux-gnu.tar.gz',
+      'linux-arm64': 'aarch64-unknown-linux-gnu.tar.gz',
+    }[`${process.platform}-${process.arch}`]
+    if (!target) throw new Error('Unsupported cargo-nextest platform')
+    const version = 'cargo-nextest-0.9.149'
+    const nextest = release(
+      'nextest',
+      `https://github.com/nextest-rs/nextest/releases/download/${version}/${version}-${target}`,
+    )
+    // cargo resolves `cargo nextest` through PATH; the MSVC wrapper only prepends to PATH.
+    process.env.PATH = `${nextest}${delimiter}${process.env.PATH}`
+  }
 
-for (const step of steps) {
-  console.log(`\n=== ${step}`)
-  execSync(step, { stdio: 'inherit' })
+  for (const step of steps) {
+    console.log(`\n=== ${step}`)
+    execSync(step, { stdio: 'inherit' })
+  }
+} finally {
+  for (const directory of directories) rmSync(directory, { recursive: true, force: true })
 }
 if (scope === 'full' && (process.platform === 'darwin' || process.platform === 'linux')) {
   execSync(cargo('build -p aether-providers --example native-secrets'), { stdio: 'inherit' })

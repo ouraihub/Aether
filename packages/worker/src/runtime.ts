@@ -589,10 +589,25 @@ export class WorkerRuntime {
           kind: 'error',
           code: 'generated_save_failed',
           message: 'Image was generated, but its persistence could not be confirmed. Do not automatically regenerate.',
-          payload: { generated: true, persisted: false },
+          payload: {
+            generated: true,
+            persisted: false,
+            usage: result.usage,
+            totalTokens: result.totalTokens,
+            revisedPrompt: result.revisedPrompt,
+          },
         }
       }
-      return { kind: 'ok', text: 'Generated 1 image(s).', payload: { images: references } }
+      return {
+        kind: 'ok',
+        text: 'Generated 1 image(s).',
+        payload: {
+          images: references,
+          usage: result.usage,
+          totalTokens: result.totalTokens,
+          revisedPrompt: result.revisedPrompt,
+        },
+      }
     } catch (error) {
       if (error instanceof ImageFailure && error.dispatch === 'unknown')
         return {

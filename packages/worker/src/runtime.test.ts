@@ -10,7 +10,7 @@ import { createCredentialPort } from './credentials.js'
 import type { WorkerHost } from './host.js'
 import { ProviderService } from './providers/index.js'
 import { WorkerRuntime } from './runtime.js'
-import type { DocumentStore, StoredDocument } from './storage.js'
+import { MemoryDocuments } from './testing/fakes.js'
 
 const actor: Actor = {
   subjectId: 'subject',
@@ -57,43 +57,6 @@ const allowed = {
     return true
   },
 }
-class TestDocuments implements DocumentStore {
-  readonly documents = new Map<string, StoredDocument>()
-  failConversations = false
-  private id(owner: Actor, collection: string, key: string): string {
-    return JSON.stringify([owner.applicationId, owner.tenantId, owner.subjectId, collection, key])
-  }
-  async get(owner: Actor, collection: string, key: string): Promise<StoredDocument | null> {
-    return structuredClone(this.documents.get(this.id(owner, collection, key)) ?? null)
-  }
-  async list(owner: Actor, collection: string): Promise<readonly StoredDocument[]> {
-    const prefix = JSON.stringify([owner.applicationId, owner.tenantId, owner.subjectId, collection]).slice(0, -1)
-    return [...this.documents.entries()]
-      .filter(([key]) => key.startsWith(prefix))
-      .map(([, value]) => structuredClone(value))
-  }
-  async compareAndSet(
-    owner: Actor,
-    collection: string,
-    key: string,
-    expected: number | null,
-    value: unknown,
-  ): Promise<StoredDocument> {
-    if (collection === 'conversations' && this.failConversations)
-      throw new KitFailure('internal', 'secret-token database failure')
-    const id = this.id(owner, collection, key),
-      old = this.documents.get(id)
-    if ((old?.revision ?? null) !== expected) throw new KitFailure('conflict', 'Concurrent update')
-    const saved = { key, revision: (old?.revision ?? 0) + 1, value: structuredClone(value) }
-    this.documents.set(id, saved)
-    return structuredClone(saved)
-  }
-  async remove(owner: Actor, collection: string, key: string, expected: number): Promise<void> {
-    const id = this.id(owner, collection, key)
-    if (this.documents.get(id)?.revision !== expected) throw new KitFailure('conflict', 'Concurrent update')
-    this.documents.delete(id)
-  }
-}
 function response(tool = false): Response {
   const delta = tool
     ? { tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'read_item', arguments: '{}' } }] }
@@ -112,7 +75,7 @@ async function setup(
     },
   },
 ) {
-  const documents = new TestDocuments()
+  const documents = new MemoryDocuments()
   const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
   const credentials = createCredentialPort({ currentKeyId: 'key', keys: new Map([['key', key]]) })
   const providers = new ProviderService({

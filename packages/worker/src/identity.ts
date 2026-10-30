@@ -1,5 +1,6 @@
 import { badRequest, KitFailure } from '@ouraihub/aether-core'
 import { immutableActor, isActor, ownerKey, type Actor } from './context.ts'
+import { retryCas } from './storage.ts'
 import type { DocumentStore, StoredDocument } from './storage.ts'
 
 export interface IdentityPort {
@@ -160,17 +161,13 @@ export class OpaqueSessionStore {
     const key = await tokenKey(token)
     if (key === null) return
     // Retry only metadata CAS, never authentication or external side effects.
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const document = await this.#store.get(this.#registry, 'opaque_sessions', key)
-      if (!document) return
-      try {
-        await this.#store.remove(this.#registry, 'opaque_sessions', key, document.revision)
-        return
-      } catch (error) {
-        if (!(error instanceof KitFailure) || error.code !== 'conflict') throw error
-      }
-    }
-    throw new KitFailure('conflict', 'Session revocation conflicted')
+    await retryCas(
+      async (cas) => {
+        const document = await this.#store.get(this.#registry, 'opaque_sessions', key)
+        if (document) await cas(() => this.#store.remove(this.#registry, 'opaque_sessions', key, document.revision))
+      },
+      () => new KitFailure('conflict', 'Session revocation conflicted'),
+    )
   }
   async rotate(
     token: string,

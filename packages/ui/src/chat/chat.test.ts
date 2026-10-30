@@ -497,11 +497,9 @@ describe('ChatPanel', () => {
     runs[0]?.emit({ kind: 'usage', ...usage })
     runs[0]?.emit({ kind: 'context', usage: { tokens: 150, contextWindow: 1000, source: 'reported', ...model } })
     runs[0]?.emit({ kind: 'end', status: 'completed' })
-    const usageDetails = screen.getByLabelText('Token usage', { selector: 'details' })
-    const summary = usageDetails.querySelector('summary')
-    if (!summary) throw new Error('Token usage disclosure is missing its summary')
-    await fireEvent.click(summary)
+    await fireEvent.click(screen.getByRole('button', { name: 'Usage and settings' }))
     await waitFor(() => expect(screen.getByRole('meter').getAttribute('value')).toBe('15'))
+    await fireEvent.click(screen.getByText('Token usage', { selector: 'summary' }))
     await send('second')
     runs[1]?.emit({
       kind: 'usage',
@@ -558,9 +556,8 @@ describe('ChatPanel', () => {
       },
     })
     await screen.findByText('answer')
-    const summary = screen.getByLabelText('Token usage', { selector: 'details' }).querySelector('summary')
-    if (!summary) throw new Error('Token usage disclosure is missing its summary')
-    await fireEvent.click(summary)
+    await fireEvent.click(screen.getByRole('button', { name: 'Usage and settings' }))
+    await fireEvent.click(screen.getByText('Token usage', { selector: 'summary' }))
     expect(screen.getByRole('meter').getAttribute('value')).toBe('1.5')
     expect(screen.getByText('summary')).toBeTruthy()
     expect(screen.getByRole('row', { name: 'Cache read Unknown Unknown' })).toBeTruthy()

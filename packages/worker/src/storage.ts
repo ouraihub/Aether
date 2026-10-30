@@ -196,3 +196,56 @@ export class D1DocumentStore implements DocumentStore {
     if (row === null) throw new KitFailure('conflict', 'Document revision conflict')
   }
 }
+
+export interface RetryOptions {
+  readonly attempts?: number
+  readonly baseMs?: number
+  /** Injected for deterministic tests; defaults to a real timer. */
+  readonly sleep?: (ms: number) => Promise<unknown>
+  readonly random?: () => number
+}
+/** Marks the store call inside a `retryCas` attempt; only its revision conflicts are retried. */
+export type CasCall = <T>(write: () => Promise<T>) => Promise<T>
+class RevisionConflict extends Error {}
+
+/**
+ * Runs `attempt` until its CAS write succeeds. Each attempt must reload and re-apply its change
+ * to the newest revision. Only a conflict raised by the `cas`-wrapped store call is retried;
+ * semantic conflicts from the attempt itself (stale preparation, finished turn) surface at once.
+ * Retries back off exponentially with jitter, so contending writers spread out instead of
+ * exhausting their attempts in lockstep.
+ */
+export async function retryCas<T>(
+  attempt: (cas: CasCall) => Promise<T>,
+  exhausted: () => KitFailure,
+  options: RetryOptions = {},
+): Promise<T> {
+  const attempts = options.attempts ?? 8,
+    baseMs = options.baseMs ?? 5,
+    random = options.random ?? Math.random
+  const sleep =
+    options.sleep ??
+    ((ms: number) => {
+      const { promise, resolve } = Promise.withResolvers<void>()
+      setTimeout(resolve, ms)
+      return promise
+    })
+  const cas: CasCall = async (write) => {
+    try {
+      return await write()
+    } catch (error) {
+      if (error instanceof KitFailure && error.code === 'conflict' && error.details?.reason === undefined)
+        throw new RevisionConflict()
+      throw error
+    }
+  }
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await attempt(cas)
+    } catch (error) {
+      if (!(error instanceof RevisionConflict)) throw error
+    }
+    if (i < attempts - 1) await sleep(baseMs * 2 ** i * (0.5 + random()))
+  }
+  throw exhausted()
+}

@@ -27,14 +27,14 @@ const storageKey = 'run'
 const encoder = new TextEncoder()
 const conflict = (reason: string): KitFailure => new KitFailure('conflict', 'Run state conflict', { reason })
 const missing = (): KitFailure => new KitFailure('not_found', 'Run not found')
-const interrupted = (): KitError => ({
+const interrupted = (newId: () => string): KitError => ({
   code: 'internal',
   message: 'Run interrupted',
-  details: { reason: 'interrupted', errorId: crypto.randomUUID() },
+  details: { reason: 'interrupted', errorId: newId() },
 })
 
 /** No arbitrary messages/details cross this boundary, even from host KitFailures. */
-function publicError(error: unknown): KitError {
+function publicError(error: unknown, newId: () => string): KitError {
   const code = error instanceof KitFailure ? error.code : isContract('KitError', error) ? error.code : 'internal'
   const messages: Record<KitError['code'], string> = {
     bad_request: 'Invalid request',
@@ -66,7 +66,7 @@ function publicError(error: unknown): KitError {
       ? {
           details: {
             ...(safeReason ? { reason: safeReason } : {}),
-            ...(code === 'internal' ? { errorId: crypto.randomUUID() } : {}),
+            ...(code === 'internal' ? { errorId: newId() } : {}),
           },
         }
       : {}),
@@ -118,8 +118,17 @@ function endEvent(snapshot: RunSnapshot): RunEvent {
   }
 }
 
+/** Time and identifiers the coordinator uses for leases, request ids and error ids. */
+export interface CoordinatorOptions {
+  /** Milliseconds since the epoch; drives the 30 s subscription lease and alarms. */
+  readonly now?: () => number
+  readonly newId?: () => string
+}
+
 /** The router alone constructs this private protocol after authentication. */
-export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) {
+export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime, options: CoordinatorOptions = {}) {
+  const now = options.now ?? Date.now
+  const newId = options.newId ?? (() => crypto.randomUUID())
   return class RunCoordinator {
     private readonly state: DurableObjectState
     private readonly runtime: Runtime
@@ -152,7 +161,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
           }
         }
         record.phase = 'failed'
-        record.snapshot = { ...record.snapshot, status: 'failed', error: interrupted() }
+        record.snapshot = { ...record.snapshot, status: 'failed', error: interrupted(newId) }
         record.pending = null
         record.acceptedUntil = null
         await this.persist()
@@ -162,7 +171,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
     }
 
     private context(actor: Actor): WorkerContext {
-      return { actor, signal: this.abort.signal, requestId: crypto.randomUUID(), now: Date.now() }
+      return { actor, signal: this.abort.signal, requestId: newId(), now: now() }
     }
     private serialize<T>(action: () => Promise<T>): Promise<T> {
       const result = this.queue.then(action)
@@ -276,7 +285,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
           turnId: record.snapshot.turnId,
           status: snapshot.status,
           cancelRequested: record.snapshot.cancelRequested || snapshot.cancelRequested,
-          ...(snapshot.error ? { error: publicError(snapshot.error) } : {}),
+          ...(snapshot.error ? { error: publicError(snapshot.error, newId) } : {}),
           ...(snapshot.exhausted === undefined ? {} : { exhausted: snapshot.exhausted }),
         }
         record.phase = snapshot.status
@@ -306,7 +315,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
             throw recoveryError
         }
       }
-      await this.finish({ ...record.snapshot, status: 'failed', error: publicError(error) })
+      await this.finish({ ...record.snapshot, status: 'failed', error: publicError(error, newId) })
     }
     private async run(prepared: PreparedExecution, execute: boolean): Promise<void> {
       try {
@@ -401,7 +410,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
             this.metadata.phase = 'accepted'
             this.metadata.snapshot.conversationId = prepared.accepted.conversationId
             this.metadata.snapshot.turnId = prepared.accepted.turnId
-            this.metadata.acceptedUntil = Date.now() + 30000
+            this.metadata.acceptedUntil = now() + 30000
             await this.state.storage.setAlarm(this.metadata.acceptedUntil)
             await this.persist()
           })
@@ -540,7 +549,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
         }
         throw missing()
       } catch (error) {
-        const safe = publicError(error)
+        const safe = publicError(error, newId)
         return Response.json(safe, { status: statusCode(safe) })
       }
     }
@@ -548,7 +557,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
       await this.ready
       const record = this.metadata
       if (record?.phase === 'accepted' && record.acceptedUntil !== null) {
-        if (Date.now() >= record.acceptedUntil) await this.cancelRun()
+        if (now() >= record.acceptedUntil) await this.cancelRun()
         else
           await this.serialize(async () => {
             if (this.metadata?.phase === 'accepted' && this.metadata.acceptedUntil !== null)

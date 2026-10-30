@@ -17,11 +17,10 @@ use aether_chat::{
 };
 use aether_images::ImagePart;
 use aether_support::{KitError, KitErrorCode, net::AddressPolicy};
+use aether_testkit::{Exhausted, Gate, Reply, Server};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Notify, mpsc};
 
 mod actions;
@@ -45,50 +44,32 @@ const TWO_TOOLS: &str = concat!(
     "data: [DONE]\n\n",
 );
 
-async fn read_request(socket: &mut TcpStream) -> String {
-    let mut bytes = Vec::new();
-    let mut chunk = [0; 4096];
-    let (headers, length) = loop {
-        if let Some(at) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
-            let header = String::from_utf8_lossy(&bytes[..at]);
-            let length = header
-                .lines()
-                .filter_map(|line| line.split_once(':'))
-                .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-                .unwrap()
-                .1
-                .trim()
-                .parse::<usize>()
-                .unwrap();
-            break (at + 4, length);
-        }
-        let n = socket.read(&mut chunk).await.unwrap();
-        assert_ne!(n, 0, "connection closed before request headers");
-        bytes.extend_from_slice(&chunk[..n]);
-    };
-    while bytes.len() < headers + length {
-        let n = socket.read(&mut chunk).await.unwrap();
-        assert_ne!(n, 0, "connection closed before request body");
-        bytes.extend_from_slice(&chunk[..n]);
-    }
-    String::from_utf8(bytes).unwrap()
-}
-
-async fn respond(socket: &mut TcpStream, body: &str) {
-    let response = format!(
+/// One complete `200 text/event-stream` response framed by `content-length`.
+fn sse_wire(body: &str) -> String {
+    format!(
         "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()
-    );
-    socket.write_all(response.as_bytes()).await.unwrap();
+    )
 }
 
-async fn upstream(listener: TcpListener, bodies: Vec<&'static str>) -> Vec<String> {
-    let mut requests = Vec::new();
-    for body in bodies {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        requests.push(read_request(&mut socket).await);
-        respond(&mut socket, body).await;
-    }
+fn sse(body: &str) -> Reply {
+    Reply::raw(sse_wire(body))
+}
+
+/// A model upstream answering the n-th connection with `replies[n]`; later connections are
+/// closed unanswered, so an unexpected extra request fails its run.
+async fn upstream(replies: Vec<Reply>) -> Server {
+    Server::script(replies, Exhausted::Reply(Reply::close())).await
+}
+
+/// The raw requests `server` received, after checking that exactly `count` arrived.
+fn wire_requests(server: &Server, count: usize) -> Vec<String> {
+    let requests: Vec<_> = server
+        .seen()
+        .iter()
+        .map(aether_testkit::Request::raw_text)
+        .collect();
+    assert_eq!(requests.len(), count, "upstream requests");
     requests
 }
 
@@ -241,9 +222,8 @@ fn part(data: &str) -> ImagePart {
 
 #[tokio::test]
 async fn runs_without_history_and_keeps_a_bounded_terminal_snapshot() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/v1", listener.local_addr().unwrap());
-    let server = tokio::spawn(upstream(listener, vec![HELLO]));
+    let server = upstream(vec![sse(HELLO)]).await;
+    let url = format!("{}/v1", server.url());
     let dir = tempfile::tempdir().unwrap();
     let (providers, request) = local_model(dir.path(), &url, "hi");
     let service = service(Arc::new(Host), providers, None);
@@ -293,7 +273,7 @@ async fn runs_without_history_and_keeps_a_bounded_terminal_snapshot() {
     assert!(rejected.try_recv().is_err());
     service.shutdown(Duration::from_secs(2)).await;
     assert!(receiver.try_recv().is_err(), "no second End");
-    let requests = server.await.unwrap();
+    let requests = wire_requests(&server, 1);
     assert!(requests[0].starts_with("POST /v1/chat/completions"));
     assert!(requests[0].contains("\"content\":\"hi\""));
 }
@@ -342,14 +322,16 @@ impl KitHost for Notes {
 }
 
 async fn tool_run(deny: bool, answer: Option<bool>) -> (Arc<Notes>, Vec<RunEvent>, String) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/v1", listener.local_addr().unwrap());
-    let gate = Arc::new(Notify::new());
-    let server_gate = gate.clone();
-    let server = tokio::spawn(async move {
-        server_gate.notified().await;
-        upstream(listener, vec![TWO_TOOLS, HELLO]).await
-    });
+    // The first reply is withheld until the run id is known to the approving sink.
+    let gate = Gate::new();
+    let server = upstream(vec![
+        Reply::default()
+            .then_wait(&gate)
+            .then_raw(sse_wire(TWO_TOOLS)),
+        sse(HELLO),
+    ])
+    .await;
+    let url = format!("{}/v1", server.url());
     let dir = tempfile::tempdir().unwrap();
     let (providers, request) = local_model(dir.path(), &url, "note");
     let host = Arc::new(Notes {
@@ -402,7 +384,7 @@ async fn tool_run(deny: bool, answer: Option<bool>) -> (Arc<Notes>, Vec<RunEvent
         .await
         .unwrap();
     *run_id.lock().unwrap() = Some(accepted.run_id.clone());
-    gate.notify_one();
+    gate.open();
     let received = until_end(&mut receiver).await;
     assert_end(&received, EndStatus::Completed);
     assert_eq!(
@@ -413,7 +395,7 @@ async fn tool_run(deny: bool, answer: Option<bool>) -> (Arc<Notes>, Vec<RunEvent
         KitErrorCode::Conflict
     );
     service.shutdown(Duration::from_secs(2)).await;
-    let requests = server.await.unwrap();
+    let requests = wire_requests(&server, 2);
     (host, received, requests[1].clone())
 }
 
@@ -479,9 +461,8 @@ async fn approval_timeout_cancel_and_consumption_remove_pending_entries() {
 
 #[tokio::test]
 async fn owners_cannot_observe_approve_or_cancel_each_others_active_runs() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/v1", listener.local_addr().unwrap());
-    let server = tokio::spawn(upstream(listener, vec![TWO_TOOLS]));
+    let server = upstream(vec![sse(TWO_TOOLS)]).await;
+    let url = format!("{}/v1", server.url());
     let dir = tempfile::tempdir().unwrap();
     let (providers, request) = local_model(dir.path(), &url, "note");
     let host = Arc::new(Notes {
@@ -580,7 +561,7 @@ async fn owners_cannot_observe_approve_or_cancel_each_others_active_runs() {
     );
     assert!(rejected.try_recv().is_err());
     service.shutdown(Duration::from_secs(2)).await;
-    server.await.unwrap();
+    wire_requests(&server, 1);
 }
 
 struct AllModes;

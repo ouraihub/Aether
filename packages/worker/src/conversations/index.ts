@@ -11,7 +11,8 @@ import { KitFailure, badRequest } from '@ouraihub/aether-core/error'
 import { canonicalJson, isRecord } from '@ouraihub/aether-core/guard'
 import { decodeImage, parseImage } from '@ouraihub/aether-core/images'
 import type { Actor, WorkerContext } from '../context.ts'
-import type { DocumentStore, StoredDocument } from '../storage.ts'
+import { retryCas } from '../storage.ts'
+import type { DocumentStore, RetryOptions, StoredDocument } from '../storage.ts'
 import { authoritative, fingerprint, resolveAction } from './action.ts'
 import type { PreparedAction, ReservationInput } from './action.ts'
 import {
@@ -51,15 +52,23 @@ export interface ConversationOptions {
   store: DocumentStore
   now?: () => number
   newId?: () => string
+  /** CAS retry schedule; tests inject sleep/random to make contention deterministic. */
+  retry?: RetryOptions
 }
 export class ConversationService {
   private readonly store: DocumentStore
   private readonly now: () => number
   private readonly newId: () => string
+  private readonly retry: RetryOptions
   constructor(options: ConversationOptions) {
     this.store = options.store
     this.now = options.now ?? Date.now
     this.newId = options.newId ?? (() => crypto.randomUUID())
+    this.retry = options.retry ?? {}
+  }
+  /** Reloads and re-applies `attempt` on revision conflicts; see `retryCas`. */
+  private update<T>(attempt: Parameters<typeof retryCas<T>>[0]): Promise<T> {
+    return retryCas(attempt, () => conflict('conversation_contended'), this.retry)
   }
   private async load(id: string, actor: Actor): Promise<{ revision: number; document: ConversationDocument }> {
     checkId('conversationId', id)
@@ -110,7 +119,7 @@ export class ConversationService {
     validate?: (input: ReservationInput, execution: RunInput) => RunInput,
   ): Promise<TurnReservation> {
     const handle = this.plan(prepared, runId)
-    for (let attempt = 0; attempt < 8; attempt++) {
+    return this.update(async (cas) => {
       const stored = await this.store.get(actor, COLLECTION, handle.conversationId)
       if (prepared.request.conversationId && !stored) throw conflict('preparation_changed')
       if (!prepared.request.conversationId && stored) throw conflict('run_identity_exists')
@@ -191,20 +200,16 @@ export class ConversationService {
       next.turns.push(turn)
       next.summary.updatedAt = now
       const checked = parseDocument(next, handle.conversationId)
-      try {
-        await this.store.compareAndSet(actor, COLLECTION, handle.conversationId, stored?.revision ?? null, checked)
-      } catch (error) {
-        if (error instanceof KitFailure && error.code === 'conflict' && attempt < 7) continue
-        throw error
-      }
+      await cas(() =>
+        this.store.compareAndSet(actor, COLLECTION, handle.conversationId, stored?.revision ?? null, checked),
+      )
       return {
         handle,
         accepted: { runId, conversationId: handle.conversationId, turnId: handle.turnId },
         input,
         runInput,
       }
-    }
-    throw conflict('conversation_contended')
+    })
   }
   private checkHandle(document: ConversationDocument, handle: AcceptedHandle): StoredTurn {
     if (document.summary.id !== handle.conversationId) throw notFound('turn')
@@ -214,7 +219,7 @@ export class ConversationService {
     return turn
   }
   async finish(handle: AcceptedHandle, summary: RunSummary, actor: Actor): Promise<Conversation> {
-    for (let attempt = 0; attempt < 8; attempt++) {
+    return this.update(async (cas) => {
       const { document, revision } = await this.load(handle.conversationId, actor),
         turn = this.checkHandle(document, handle)
       turn.status = summary.status
@@ -226,79 +231,70 @@ export class ConversationService {
       document.summary.updatedAt = this.now()
       if (summary.status === 'completed' && turn.supersedesId === null) document.summary.selectedTurnId = turn.id
       const checked = parseDocument(document, document.summary.id)
-      try {
-        await this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, checked)
-      } catch (error) {
-        if (error instanceof KitFailure && error.code === 'conflict' && attempt < 7) continue
-        throw error
-      }
+      await cas(() => this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, checked))
       return project(checked)
-    }
-    throw conflict('conversation_contended')
+    })
   }
   /** Only the coordinator, having established interruption, may recover a planned run. */
   async recover(handle: AcceptedHandle, actor: Actor): Promise<Conversation> {
-    for (let attempt = 0; attempt < 8; attempt++) {
+    return this.update(async (cas) => {
       const { document, revision } = await this.load(handle.conversationId, actor),
         turn = this.checkHandle(document, handle)
       turn.status = 'failed'
       turn.errorCode = 'interrupted'
       turn.contextUsage = null
       document.summary.updatedAt = this.now()
-      try {
-        await this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document)
-      } catch (error) {
-        if (error instanceof KitFailure && error.code === 'conflict' && attempt < 7) continue
-        throw error
-      }
+      await cas(() => this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document))
       return project(document)
-    }
-    throw conflict('conversation_contended')
+    })
   }
   async addGenerated(handle: AcceptedHandle, images: readonly ImagePart[], actor: Actor): Promise<ImageRef[]> {
     for (const image of images) parseImage(image)
-    for (let attempt = 0; attempt < 8; attempt++) {
+    return this.update(async (cas) => {
       const { document, revision } = await this.load(handle.conversationId, actor),
         turn = this.checkHandle(document, handle),
         first = turn.generated.length
       const now = this.now()
       turn.generated.push(...images.map((image) => ({ ...image, createdAt: now })))
-      try {
-        await this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document)
-      } catch (error) {
-        if (error instanceof KitFailure && error.code === 'conflict' && attempt < 7) continue
-        throw error
-      }
+      await cas(() => this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document))
       return imageRefs(handle.conversationId, handle.turnId, 'generated', turn.generated).slice(first)
-    }
-    throw conflict('conversation_contended')
+    })
   }
   async purgeImages(beforeMs: number, actor: Actor): Promise<number> {
     if (!Number.isSafeInteger(beforeMs) || beforeMs < 0) throw badRequest('beforeMs', 'invalid')
     let total = 0
-    for await (const stored of this.documents(actor)) {
-      const document = parseDocument(stored.value, stored.key)
-      let count = 0
-      for (const turn of document.turns)
-        for (const image of [...turn.images, ...turn.generated])
-          if (image.data !== null && image.createdAt < beforeMs) {
-            image.data = null
-            count++
-          }
-      if (count) {
-        await this.store.compareAndSet(actor, COLLECTION, stored.key, stored.revision, document)
-        total += count
-      }
+    for await (const listed of this.documents(actor)) {
+      // The listed revision is tried first; after a conflict the document is reloaded, and one
+      // deleted meanwhile has nothing left to purge.
+      let current: StoredDocument | null = listed
+      total += await this.update(async (cas) => {
+        current ??= await this.store.get(actor, COLLECTION, listed.key)
+        const stored = current
+        current = null
+        if (stored === null) return 0
+        const document = parseDocument(stored.value, stored.key)
+        let count = 0
+        for (const turn of document.turns)
+          for (const image of [...turn.images, ...turn.generated])
+            if (image.data !== null && image.createdAt < beforeMs) {
+              image.data = null
+              count++
+            }
+        if (count) await cas(() => this.store.compareAndSet(actor, COLLECTION, stored.key, stored.revision, document))
+        return count
+      })
     }
     return total
   }
   async rename(id: string, title: string, actor: Actor): Promise<ConversationSummary> {
     checkText('title', title, 200, true)
-    const { document, revision } = await this.load(id, actor)
-    idle(document)
-    document.summary.title = title.trim()
-    await this.store.compareAndSet(actor, COLLECTION, id, revision, document)
-    return document.summary
+    return this.update(async (cas) => {
+      const { document, revision } = await this.load(id, actor)
+      idle(document)
+      document.summary.title = title.trim()
+      await cas(() => this.store.compareAndSet(actor, COLLECTION, id, revision, document))
+      return document.summary
+    })
   }
   async delete(id: string, actor: Actor): Promise<void> {
     const { document, revision } = await this.load(id, actor)

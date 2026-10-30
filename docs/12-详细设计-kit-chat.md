@@ -26,6 +26,7 @@ flowchart TB
 - 不认识conversationId、Store、KitHost、scope、窗口或Channel；不选择模型/技能/搜索/绘图，不查询历史或保存终态。
 - 工具实际授权/审批等待与分派由25实现接缝；引擎执行目录/停止规则。会话候选/翻译/图片持久化不是引擎方法。
 - 不新增多模型并行、后台运行、RAG或工具并发。图片作为明确的模型输入受支持，不再保留旧“不做图片输入”的矛盾描述。
+- Cherry式会话外观和Agent／翻译／应用助手入口只组合UI展示原语（16 §4.2）；不把宿主会话控制、审批选择或翻译工作流下沉到RunEngine。ChatSurface/ChatComposer/ChatMessage不依赖此引擎或RunSession，已有ChatPanel继续使用真实运行客户端。
 
 默认feature为空，仅合同/纯protocol/校验/risk；native才启support/native、Native transport及RunEngine，完整feature权威见25 §1.1。纯合同对support/images依赖关闭default-features，避免会话领域消费Message时隐式开启模型transport；workspace继承按25合法配置。
 
@@ -196,6 +197,14 @@ pub struct RunSummary {
 RunEngine替换原Runner名称并迁所有调用，不保留旧别名。Usage包含input/output/cache_read/cache_write/reasoning五项Option<u32>，逐轮饱和相加，完全未知仍None；执行错误从引擎End截取用于25最终收尾。完整公共事件字段见22，持久TurnRecord见26。一次性生成同样走run（工具空、max_rounds=1），不另造generate聊天接口。
 
 引擎每次恰好一个End且最后，summary与原始End一致；panic/error/cancel路径也走单一出口。25截获引擎End，先保存再决定对外最终End，因此引擎completed不代表数据库已保存。部分输出失败保留消息，不自动重放。Channel失败只由接入sink映射取消，引擎仅看token。
+
+### 5.1 决策状态机与驱动器
+
+循环的决策与I/O分离，两端同构：`aether-chat/src/machine.rs`、`packages/core/src/engine/machine.ts`为纯状态机，决定轮次与轮数上限（TS另含context预算）、截断作废、运行内callId去重与冲突、目录匹配与目录Deny、审批路由、结果回灌文案与取消检查点；不做I/O、不读时钟，只读取消标志。驱动器（`run.rs`、`engine/index.ts`，TS的有界审批等待与执行在`engine/tools.ts`）执行状态机给出的Action（模型请求、宿主authorize、审批等待、工具执行）并回送结果，另持有usage/cost/context与唯一End。待执行调用随Action传递并随结果交回，状态机不持有“当前调用”。
+
+审批等待先注册再发`approval_required`；与取消竞争时偏向取消（`biased`），审批方因同一取消返回false记为取消而非拒绝。
+
+公开行为由黄金轨迹锁定：`aether-chat/src/tests/traces.json`、`packages/core/tests/traces.json`按场景×三协议记录全部事件、上游请求体、宿主调用序列与summary，随机边界归一化。重构不得改变轨迹；行为变更须`AETHER_WRITE_TRACES=1`重新生成并在评审中逐项核对差异。两份轨迹各自锁定本端行为，不互相逐字比对：两端分片、usage/context事件与回灌文案可不同，只受22 §4.1不变量约束。
 
 ## 6. 实施与待验收
 

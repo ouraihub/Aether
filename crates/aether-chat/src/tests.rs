@@ -9,18 +9,16 @@
 
 mod tool_loop;
 mod tools;
+mod traces;
 mod validate;
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aether_support::net::AddressPolicy;
 use aether_support::{
     Connection, KitErrorCode, Protocol, ReasoningConfig, ReasoningDialect, ReasoningEffort,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use aether_testkit::{Exhausted, Reply, Server};
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
@@ -38,91 +36,38 @@ const PROTOCOLS: [Protocol; 3] = [
     Protocol::OpenaiResponses,
 ];
 
-/// How the fake upstream answers.
-#[derive(Clone)]
-enum Reply {
-    /// 200 SSE: `body[..cut]`, then stall forever if `cut < body.len()`, else close.
-    Sse { body: String, cut: usize },
-    /// Accept the request and never answer.
-    Silent,
-    /// A non-2xx JSON error.
-    Status(u16, String),
-}
+/// Bytes per write, so SSE events and UTF-8 sequences cross reads.
+const CHUNK: usize = 7;
 
-/// Raw requests the fake upstream received, in order.
-type Seen = Arc<Mutex<Vec<String>>>;
-
-/// Returns the base URL and the raw requests seen.
-async fn upstream(reply: Reply) -> (String, Seen) {
+/// Returns the base URL and the upstream; every request gets `reply`.
+async fn upstream(reply: Reply) -> (String, Server) {
     script(vec![reply]).await
 }
 
-/// The n-th request gets `replies[n]`; later ones get the last reply.
-async fn script(replies: Vec<Reply>) -> (String, Seen) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let log = Arc::clone(&seen);
-    tokio::spawn(async move {
-        let mut next = 0;
-        while let Ok((mut socket, _)) = listener.accept().await {
-            let raw = read_request(&mut socket).await;
-            log.lock().await.push(raw);
-            let reply = replies[next.min(replies.len() - 1)].clone();
-            next += 1;
-            tokio::spawn(async move {
-                match reply {
-                    Reply::Sse { body, cut } => {
-                        let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
-                        let _ = socket.write_all(head.as_bytes()).await;
-                        // Small pieces so deltas cross chunk (and UTF-8) boundaries.
-                        for piece in body.as_bytes()[..cut].chunks(7) {
-                            let _ = socket.write_all(piece).await;
-                            let _ = socket.flush().await;
-                        }
-                        if cut < body.len() {
-                            tokio::time::sleep(Duration::from_secs(3600)).await;
-                        }
-                    }
-                    Reply::Silent => tokio::time::sleep(Duration::from_secs(3600)).await,
-                    Reply::Status(status, body) => {
-                        let response = format!(
-                            "HTTP/1.1 {status} Err\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                            body.len()
-                        );
-                        let _ = socket.write_all(response.as_bytes()).await;
-                    }
-                }
-                let _ = socket.shutdown().await;
-            });
-        }
-    });
-    (format!("http://127.0.0.1:{port}/v1"), seen)
+/// The n-th request gets `replies[n]`; later ones get the last reply. The upstream stops when
+/// the returned [`Server`] is dropped.
+async fn script(replies: Vec<Reply>) -> (String, Server) {
+    let server = Server::script(replies, Exhausted::RepeatLast).await;
+    (format!("{}/v1", server.url()), server)
 }
 
-async fn read_request(socket: &mut tokio::net::TcpStream) -> String {
-    let mut raw = Vec::new();
-    let mut buf = [0_u8; 4096];
-    loop {
-        let n = socket.read(&mut buf).await.unwrap();
-        raw.extend_from_slice(&buf[..n]);
-        let text = String::from_utf8_lossy(&raw);
-        if let Some(end) = text.find("\r\n\r\n") {
-            let length = text[..end]
-                .lines()
-                .find_map(|line| {
-                    line.to_ascii_lowercase()
-                        .strip_prefix("content-length:")
-                        .map(|v| v.trim().parse::<usize>().unwrap())
-                })
-                .unwrap_or(0);
-            if raw.len() >= end + 4 + length || n == 0 {
-                return String::from_utf8_lossy(&raw).into_owned();
-            }
-        }
-        if n == 0 {
-            return String::from_utf8_lossy(&raw).into_owned();
-        }
+/// The raw requests the upstream received so far, in order.
+fn requests(server: &Server) -> Vec<String> {
+    server
+        .seen()
+        .iter()
+        .map(aether_testkit::Request::raw_text)
+        .collect()
+}
+
+/// 200 SSE: `body[..cut]`, then stall until the upstream is dropped if `cut < body.len()`,
+/// else close.
+fn sse_cut(body: &str, cut: usize) -> Reply {
+    let reply = Reply::sse(&body.as_bytes()[..cut], CHUNK);
+    if cut < body.len() {
+        reply.then_stall()
+    } else {
+        reply
     }
 }
 
@@ -152,10 +97,7 @@ fn expected(protocol: Protocol, name: &str) -> serde_json::Value {
 
 /// A complete 200 SSE reply.
 fn sse(body: String) -> Reply {
-    Reply::Sse {
-        cut: body.len(),
-        body,
-    }
+    Reply::sse(body, CHUNK)
 }
 
 /// For runs without tools: any call is denied, nothing executes or waits.
@@ -237,11 +179,7 @@ async fn native_search_keeps_citations_and_does_not_execute_server_calls_locally
                     "data: {\"type\":\"response.output_text.annotation.added\",\"annotation\":{\"type\":\"url_citation\",\"url\":\"https://example.com/source\"}}\n\n",
                     "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}\n\n")
         }.to_owned();
-        let (base, seen) = upstream(Reply::Sse {
-            cut: body.len(),
-            body,
-        })
-        .await;
+        let (base, server) = upstream(sse(body)).await;
         let mut req = input(protocol, base);
         req.connection.native_web_search = true;
         req.native_web_search = true;
@@ -256,9 +194,9 @@ async fn native_search_keeps_citations_and_does_not_execute_server_calls_locally
                 .iter()
                 .any(|e| matches!(e, RunEvent::ToolCall { .. }))
         );
-        let requests = seen.lock().await;
+        let sent = requests(&server);
         let encoded: serde_json::Value =
-            serde_json::from_str(requests[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+            serde_json::from_str(sent[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(
             encoded["tools"][0]["type"],
             if protocol == Protocol::AnthropicMessages {
@@ -300,7 +238,7 @@ async fn usage_counts_cache_and_reasoning_and_prices_the_turn() {
                 "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":120,\"output_tokens\":30,\"input_tokens_details\":{\"cached_tokens\":80,\"cache_write_tokens\":10},\"output_tokens_details\":{\"reasoning_tokens\":20}}}}\n\n",
             ),
         };
-        let (base, _) = upstream(sse(body.to_owned())).await;
+        let (base, _server) = upstream(sse(body.to_owned())).await;
         let mut req = input(protocol, base);
         req.connection.pricing = Some(pricing.clone());
         let (summary, events) = run(&runner(5_000, 5_000), req, false).await;
@@ -316,6 +254,14 @@ async fn usage_counts_cache_and_reasoning_and_prices_the_turn() {
                 reasoning_tokens: reasoning,
             },
             "{protocol:?}"
+        );
+        let context = summary.context_usage.as_ref().unwrap();
+        assert_eq!(context.tokens, Some(150));
+        assert_eq!(context.source, aether_support::ContextSource::Reported);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, RunEvent::Context { usage } if usage == context))
         );
         // (30·10 + 80·1 + 10·10 + 30·20) / 1e6
         let cost = summary.cost.unwrap();
@@ -337,7 +283,7 @@ fn request_body(raw: &str) -> serde_json::Value {
 #[tokio::test]
 async fn custom_headers_are_sent_and_never_replace_auth() {
     for protocol in PROTOCOLS {
-        let (base, seen) = upstream(sse(fixture(protocol, "text"))).await;
+        let (base, server) = upstream(sse(fixture(protocol, "text"))).await;
         let mut req = input(protocol, base);
         req.connection.headers = vec![
             ("X-Relay-Tag".to_owned(), "team-a".to_owned()),
@@ -346,7 +292,7 @@ async fn custom_headers_are_sent_and_never_replace_auth() {
         ];
         let (summary, _) = run(&runner(5_000, 5_000), req, false).await;
         assert_eq!(summary.status, EndStatus::Completed);
-        let raw = seen.lock().await[0].to_ascii_lowercase();
+        let raw = requests(&server)[0].to_ascii_lowercase();
         assert!(raw.contains("x-relay-tag: team-a"), "{raw}");
         assert!(raw.contains(&format!(
             "authorization: bearer {}",
@@ -359,15 +305,15 @@ async fn custom_headers_are_sent_and_never_replace_auth() {
 #[tokio::test]
 async fn reasoning_default_and_none_are_encoded_per_protocol() {
     for protocol in PROTOCOLS {
-        let (base, seen) = upstream(sse(fixture(protocol, "text"))).await;
+        let (base, server) = upstream(sse(fixture(protocol, "text"))).await;
         let (summary, _) = run(&runner(5_000, 5_000), input(protocol, base), false).await;
         assert_eq!(summary.status, EndStatus::Completed);
-        let body = request_body(&seen.lock().await[0]);
+        let body = request_body(&requests(&server)[0]);
         assert!(body.get("reasoning_effort").is_none());
         assert!(body.get("reasoning").is_none());
         assert!(body.get("thinking").is_none());
 
-        let (base, seen) = upstream(sse(fixture(protocol, "text"))).await;
+        let (base, server) = upstream(sse(fixture(protocol, "text"))).await;
         let mut high = input(protocol, base);
         high.reasoning_effort = ReasoningEffort::High;
         high.connection.reasoning = Some(ReasoningConfig {
@@ -381,7 +327,7 @@ async fn reasoning_default_and_none_are_encoded_per_protocol() {
         });
         let (summary, _) = run(&runner(5_000, 5_000), high, false).await;
         assert_eq!(summary.status, EndStatus::Completed);
-        let encoded = request_body(&seen.lock().await[0]);
+        let encoded = request_body(&requests(&server)[0]);
         match protocol {
             Protocol::AnthropicMessages => assert_eq!(
                 encoded["thinking"],
@@ -391,7 +337,7 @@ async fn reasoning_default_and_none_are_encoded_per_protocol() {
             Protocol::OpenaiResponses => assert_eq!(encoded["reasoning"]["effort"], "high"),
         }
 
-        let (base, seen) = upstream(sse(fixture(protocol, "text"))).await;
+        let (base, server) = upstream(sse(fixture(protocol, "text"))).await;
         let mut req = input(protocol, base);
         req.reasoning_effort = ReasoningEffort::None;
         req.connection.reasoning = Some(ReasoningConfig {
@@ -405,7 +351,7 @@ async fn reasoning_default_and_none_are_encoded_per_protocol() {
         });
         let (summary, _) = run(&runner(5_000, 5_000), req, false).await;
         assert_eq!(summary.status, EndStatus::Completed);
-        let body = request_body(&seen.lock().await[0]);
+        let body = request_body(&requests(&server)[0]);
         match protocol {
             Protocol::AnthropicMessages => {
                 assert_eq!(body["thinking"], serde_json::json!({"type":"disabled"}))
@@ -425,7 +371,7 @@ async fn reasoning_budget_dialects_clamp_before_encoding() {
         ReasoningDialect::AnthropicBudget,
         ReasoningDialect::AnthropicAdaptive,
     ] {
-        let (base, seen) = upstream(sse(fixture(Protocol::AnthropicMessages, "text"))).await;
+        let (base, server) = upstream(sse(fixture(Protocol::AnthropicMessages, "text"))).await;
         let mut req = input(Protocol::AnthropicMessages, base);
         req.budget.max_output = 2_000;
         req.reasoning_effort = ReasoningEffort::High;
@@ -436,7 +382,7 @@ async fn reasoning_budget_dialects_clamp_before_encoding() {
         });
         let (summary, _) = run(&runner(5_000, 5_000), req, false).await;
         assert_eq!(summary.status, EndStatus::Completed);
-        let body = request_body(&seen.lock().await[0]);
+        let body = request_body(&requests(&server)[0]);
         if dialect == ReasoningDialect::AnthropicBudget {
             assert_eq!(
                 body["thinking"],
@@ -492,7 +438,7 @@ async fn vendor_reasoning_dialects_write_their_own_fields() {
         ),
     ];
     for (dialect, budget_tokens, effort, expected) in cases {
-        let (base, seen) = upstream(sse(fixture(Protocol::OpenaiChat, "text"))).await;
+        let (base, server) = upstream(sse(fixture(Protocol::OpenaiChat, "text"))).await;
         let mut req = input(Protocol::OpenaiChat, base);
         req.reasoning_effort = effort;
         req.connection.reasoning = Some(ReasoningConfig {
@@ -506,7 +452,7 @@ async fn vendor_reasoning_dialects_write_their_own_fields() {
             EndStatus::Completed,
             "{dialect:?} {effort:?}"
         );
-        let body = request_body(&seen.lock().await[0]);
+        let body = request_body(&requests(&server)[0]);
         for key in [
             "thinking",
             "reasoning_effort",
@@ -597,7 +543,7 @@ async fn streams_text_and_usage_for_every_protocol() {
             let o = u32::try_from(want["outputTokens"].as_u64().unwrap()).unwrap();
             let body = fixture(protocol, name);
             let cut = body.len();
-            let (base, seen) = upstream(Reply::Sse { body, cut }).await;
+            let (base, server) = upstream(sse_cut(&body, cut)).await;
             let input = input(protocol, base);
             let (summary, events) = run(&runner(5_000, 5_000), input, false).await;
             assert_eq!(
@@ -618,12 +564,11 @@ async fn streams_text_and_usage_for_every_protocol() {
                 reasoning_tokens: detail,
             };
             assert_eq!(summary.usage, expected, "{protocol:?} {name}");
-            assert!(matches!(
-                events[events.len() - 2],
-                RunEvent::Usage { input_tokens, output_tokens, cost: None, .. } if input_tokens == Some(i) && output_tokens == Some(o)
-            ));
+            assert!(events.iter().any(|event| matches!(event,
+                RunEvent::Usage { input_tokens, output_tokens, cost: None, .. } if *input_tokens == Some(i) && *output_tokens == Some(o)
+            )));
 
-            let request = seen.lock().await[0].clone();
+            let request = requests(&server).remove(0);
             let (path, system, auth) = match protocol {
                 Protocol::AnthropicMessages => {
                     ("/v1/messages", r#""system":"be brief""#, "x-api-key: ")
@@ -676,7 +621,7 @@ async fn in_stream_upstream_error_fails_and_keeps_partial_text() {
         assert_eq!(want["errorCode"], "upstream");
         let body = fixture(protocol, "upstream-error");
         let cut = body.len();
-        let (base, _) = upstream(Reply::Sse { body, cut }).await;
+        let (base, _server) = upstream(sse_cut(&body, cut)).await;
         let (summary, events) = run(&runner(5_000, 5_000), input(protocol, base), false).await;
         let (status, code, text) = end(&events);
         assert_eq!(
@@ -700,7 +645,7 @@ async fn non_2xx_is_classified_and_sanitized() {
         (500, KitErrorCode::Upstream),
     ] {
         for protocol in PROTOCOLS {
-            let (base, _) = upstream(Reply::Status(status, leaky.clone())).await;
+            let (base, _server) = upstream(Reply::status(status, leaky.as_str())).await;
             let (summary, events) = run(&runner(5_000, 5_000), input(protocol, base), false).await;
             let (end_status, end_code, message) = end(&events);
             assert_eq!((end_status, end_code), (EndStatus::Failed, Some(code)));
@@ -730,8 +675,8 @@ fn bearer(raw: &str) -> String {
 #[tokio::test]
 async fn unauthorized_first_key_fails_over_to_the_next() {
     let protocol = Protocol::OpenaiChat;
-    let (base, seen) = script(vec![
-        Reply::Status(401, r#"{"error":{"message":"bad k1"}}"#.to_owned()),
+    let (base, server) = script(vec![
+        Reply::status(401, r#"{"error":{"message":"bad k1"}}"#),
         sse(fixture(protocol, "text")),
     ])
     .await;
@@ -742,18 +687,14 @@ async fn unauthorized_first_key_fails_over_to_the_next() {
     ];
     let (summary, _) = run(&runner(5_000, 5_000), req, false).await;
     assert_eq!(summary.status, EndStatus::Completed);
-    let auth: Vec<String> = seen.lock().await.iter().map(|raw| bearer(raw)).collect();
+    let auth: Vec<String> = requests(&server).iter().map(|raw| bearer(raw)).collect();
     assert_eq!(auth, ["k1", "k2"]);
 }
 
 #[tokio::test]
 async fn every_key_unauthorized_fails_with_the_last_reply() {
     let protocol = Protocol::OpenaiChat;
-    let (base, seen) = upstream(Reply::Status(
-        401,
-        r#"{"error":{"message":"bad key"}}"#.to_owned(),
-    ))
-    .await;
+    let (base, server) = upstream(Reply::status(401, r#"{"error":{"message":"bad key"}}"#)).await;
     let mut req = input(protocol, base);
     req.connection.api_keys = vec![
         Zeroizing::new("k1".to_owned()),
@@ -765,21 +706,15 @@ async fn every_key_unauthorized_fails_with_the_last_reply() {
         (end_status, end_code),
         (EndStatus::Failed, Some(KitErrorCode::Unauthorized))
     );
-    let auth: Vec<String> = seen.lock().await.iter().map(|raw| bearer(raw)).collect();
+    let auth: Vec<String> = requests(&server).iter().map(|raw| bearer(raw)).collect();
     assert_eq!(auth, ["k1", "k2"]);
 }
 
 #[tokio::test]
 async fn first_byte_timeout_fires_before_and_after_headers() {
     for protocol in PROTOCOLS {
-        for reply in [
-            Reply::Silent,
-            Reply::Sse {
-                body: fixture(protocol, "text"),
-                cut: 0,
-            },
-        ] {
-            let (base, _) = upstream(reply).await;
+        for reply in [Reply::silent(), sse_cut(&fixture(protocol, "text"), 0)] {
+            let (base, _server) = upstream(reply).await;
             let started = Instant::now();
             let (_, events) = run(&runner(300, 10_000), input(protocol, base), false).await;
             let (status, code, _) = end(&events);
@@ -818,7 +753,7 @@ async fn idle_timeout_fires_after_output_started() {
     for protocol in PROTOCOLS {
         let body = fixture(protocol, "text");
         let cut = after_first_delta(&body);
-        let (base, _) = upstream(Reply::Sse { body, cut }).await;
+        let (base, _server) = upstream(sse_cut(&body, cut)).await;
         let (summary, events) = run(&runner(10_000, 300), input(protocol, base), false).await;
         let (status, code, _) = end(&events);
         assert_eq!(
@@ -842,7 +777,7 @@ async fn cancel_mid_stream_ends_cancelled_at_once() {
     for protocol in PROTOCOLS {
         let body = fixture(protocol, "text");
         let cut = after_first_delta(&body);
-        let (base, _) = upstream(Reply::Sse { body, cut }).await;
+        let (base, _server) = upstream(sse_cut(&body, cut)).await;
         let started = Instant::now();
         let (summary, events) = run(&runner(10_000, 10_000), input(protocol, base), true).await;
         assert!(started.elapsed() < Duration::from_secs(5));
@@ -854,7 +789,7 @@ async fn cancel_mid_stream_ends_cancelled_at_once() {
 
 #[tokio::test]
 async fn dropped_run_still_emits_one_end() {
-    let (base, _) = upstream(Reply::Silent).await;
+    let (base, _server) = upstream(Reply::silent()).await;
     let input = input(Protocol::OpenaiChat, base);
     let runner = runner(10_000, 10_000);
     let cancel = CancellationToken::new();
@@ -874,11 +809,7 @@ async fn dropped_run_still_emits_one_end() {
 async fn stream_without_terminal_event_fails() {
     let body = fixture(Protocol::AnthropicMessages, "text");
     let cut = after_first_delta(&body);
-    let (base, _) = upstream(Reply::Sse {
-        body: body[..cut].to_owned(),
-        cut,
-    })
-    .await;
+    let (base, _server) = upstream(sse(body[..cut].to_owned())).await;
     let (summary, events) = run(
         &runner(5_000, 5_000),
         input(Protocol::AnthropicMessages, base),
@@ -899,7 +830,7 @@ fn png() -> ImagePart {
 #[tokio::test]
 async fn images_are_encoded_per_protocol_for_input_and_history() {
     for protocol in PROTOCOLS {
-        let (base, seen) = upstream(sse(fixture(protocol, "text"))).await;
+        let (base, server) = upstream(sse(fixture(protocol, "text"))).await;
         let mut with = input(protocol, base);
         with.images = vec![png()];
         with.history[0] = Message::UserImages {
@@ -908,7 +839,7 @@ async fn images_are_encoded_per_protocol_for_input_and_history() {
         };
         let (summary, _) = run(&runner(5_000, 5_000), with, false).await;
         assert_eq!(summary.status, EndStatus::Completed);
-        let body = request_body(&seen.lock().await[0]);
+        let body = request_body(&requests(&server)[0]);
         let list = if protocol == Protocol::OpenaiResponses {
             &body["input"]
         } else {
@@ -941,16 +872,16 @@ async fn images_are_encoded_per_protocol_for_input_and_history() {
 
 #[tokio::test]
 async fn non_vision_rejects_input_images_offline_and_strips_history_images() {
-    let (base, seen) = upstream(sse(fixture(Protocol::OpenaiChat, "text"))).await;
+    let (base, server) = upstream(sse(fixture(Protocol::OpenaiChat, "text"))).await;
     let mut rejected = input(Protocol::OpenaiChat, base);
     rejected.connection.can_vision = false;
     rejected.images = vec![png()];
     let (summary, events) = run(&runner(5_000, 5_000), rejected, false).await;
     assert_eq!(summary.status, EndStatus::Failed);
     assert_eq!(end(&events).1, Some(KitErrorCode::BadRequest));
-    assert!(seen.lock().await.is_empty(), "no request may leave");
+    assert!(server.seen().is_empty(), "no request may leave");
 
-    let (base, seen) = upstream(sse(fixture(Protocol::OpenaiChat, "text"))).await;
+    let (base, server) = upstream(sse(fixture(Protocol::OpenaiChat, "text"))).await;
     let mut stripped = input(Protocol::OpenaiChat, base);
     stripped.connection.can_vision = false;
     stripped.history[0] = Message::UserImages {
@@ -959,7 +890,26 @@ async fn non_vision_rejects_input_images_offline_and_strips_history_images() {
     };
     let (summary, _) = run(&runner(5_000, 5_000), stripped, false).await;
     assert_eq!(summary.status, EndStatus::Completed);
-    let body = request_body(&seen.lock().await[0]);
+    let body = request_body(&requests(&server)[0]);
     assert_eq!(body["messages"][1]["content"], "earlier");
     assert_eq!(body["messages"][3]["content"], "hi");
+}
+
+#[tokio::test]
+async fn last_context_is_estimated_without_reports_and_unknown_after_cancellation() {
+    let body = "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+    let (base, _server) = upstream(sse(body.to_owned())).await;
+    let mut request = input(Protocol::OpenaiChat, base.clone());
+    request.connection.context_window = Some(8192);
+    request.connection.endpoint_id = Some("endpoint".to_owned());
+    let (summary, _) = run(&runner(5000, 5000), request, false).await;
+    let context = summary.context_usage.unwrap();
+    assert_eq!(context.source, aether_support::ContextSource::Estimated);
+    assert!(context.tokens.is_some_and(|tokens| tokens > 0));
+    assert_eq!(context.context_window, Some(8192));
+    assert_eq!(context.endpoint_id.as_deref(), Some("endpoint"));
+    let (cancelled, _) = run(&runner(5000, 5000), input(Protocol::OpenaiChat, base), true).await;
+    let context = cancelled.context_usage.unwrap();
+    assert_eq!(context.source, aether_support::ContextSource::Unknown);
+    assert_eq!(context.tokens, None);
 }

@@ -129,13 +129,26 @@ function summary(text = 'answer'): RunSummary {
     exhausted: false,
   }
 }
-function setup(): { service: ConversationService; store: FakeStore; advance: (time: number) => void } {
+function setup(): {
+  service: ConversationService
+  store: FakeStore
+  advance: (time: number) => void
+  sleeps: number[]
+} {
   const store = new FakeStore()
+  const sleeps: number[] = []
   let now = 1000,
     id = 0
   return {
     store,
-    service: new ConversationService({ store, now: () => now, newId: () => `copy-${++id}` }),
+    sleeps,
+    service: new ConversationService({
+      store,
+      now: () => now,
+      newId: () => `copy-${++id}`,
+      // Record the backoff schedule instead of waiting on a real timer.
+      retry: { sleep: async (ms) => void sleeps.push(ms), random: () => 0.5 },
+    }),
     advance: (time) => {
       now = time
     },
@@ -282,6 +295,45 @@ test('CAS retries unrelated rename but enforces implicit selected head and singl
   )
   await service.selectTurn(first.conversationId, 'second', actor)
   await service.reserve(explicit, execution(explicit, 'explicit'), 'explicit', actor)
+})
+
+test('rename and image purge retry a concurrent write instead of failing; backoff doubles', async () => {
+  const { service, store, sleeps } = setup(),
+    first = await complete(service, 'first')
+  // Another writer commits between rename's read and its CAS.
+  store.beforeCas = async () => {
+    await service.rename(first.conversationId, 'other', actor)
+  }
+  const renamed = await service.rename(first.conversationId, 'mine', actor)
+  assert.equal(renamed.title, 'mine')
+  assert.equal((await service.get(first.conversationId, actor)).summary.title, 'mine')
+  assert.deepEqual(sleeps, [5])
+
+  const images = request({ images: [{ mime: 'image/png', data: 'iVBORw0KGgo=' }] })
+  await complete(service, 'with-image', images)
+  store.beforeCas = async () => {
+    await service.rename('with-image-conversation', 'renamed meanwhile', actor)
+  }
+  assert.equal(await service.purgeImages(1001, actor), 1)
+  const purged = await service.get('with-image-conversation', actor)
+  assert.equal(purged.summary.title, 'renamed meanwhile')
+  assert.equal(purged.turns[0]?.images[0]?.url, null)
+})
+
+test('only revision conflicts are retried; persistent contention ends as conversation_contended', async () => {
+  const { service, store, sleeps } = setup(),
+    first = await complete(service, 'first')
+  // A semantic conflict (the turn already finished) is not retried.
+  await assert.rejects(service.finish(first, summary('again'), actor), reason('turn_finished'))
+  assert.deepEqual(sleeps, [])
+  // A writer that wins every race exhausts the bounded schedule.
+  const cas = store.compareAndSet.bind(store)
+  store.compareAndSet = async () => {
+    throw new KitFailure('conflict', 'Revision conflict')
+  }
+  await assert.rejects(service.rename(first.conversationId, 'never', actor), reason('conversation_contended'))
+  assert.deepEqual(sleeps, [5, 10, 20, 40, 80, 160, 320])
+  store.compareAndSet = cas
 })
 
 test('edit CAS leaf restrictions, removal reparents and fixes supersedes, fork copies path and images', async () => {

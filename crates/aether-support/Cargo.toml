@@ -35,6 +35,7 @@ keyring = { workspace = true, features = ["apple-native"], optional = true }
 keyring = { workspace = true, features = ["sync-secret-service", "crypto-rust"], optional = true }
 
 [dev-dependencies]
+aether-testkit.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["net", "io-util"] }
