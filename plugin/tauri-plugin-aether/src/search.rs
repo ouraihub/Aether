@@ -1,6 +1,11 @@
 //! `search_*` commands and cancellation jobs.
 use aether_search::{
-    CheckResult, SearchCap, SearchPage, SearchPreferences, SearchResult, SearchSave,
+    CheckResult,
+    SearchCap,
+    SearchPage,
+    SearchPreferences,
+    SearchResult,
+    SearchSave,
     SearchSettings, Store,
 };
 use aether_support::KitError;
@@ -30,7 +35,10 @@ impl Search {
         }
     }
 }
-fn start<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<CancellationToken, KitError> {
+fn start<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+) -> Result<CancellationToken, KitError> {
     if id.len() > 64 {
         return Err(KitError::bad_request("jobId", "too_long"));
     }
@@ -38,7 +46,11 @@ fn start<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<CancellationToken, 
     app.state::<Search>()
         .jobs
         .lock()
-        .map_err(|_| KitError::internal(std::io::Error::other("search jobs lock poisoned")))?
+        .map_err(|_| {
+            KitError::internal(std::io::Error::other(
+                "search jobs lock poisoned",
+            ))
+        })?
         .insert(id.into(), token.clone());
     Ok(token)
 }
@@ -74,7 +86,9 @@ pub(crate) async fn search_set_default<R: Runtime>(
     provider: String,
 ) -> Result<SearchSettings, KitError> {
     let s = app.state::<Search>().store.clone();
-    tauri::async_runtime::spawn_blocking(move || s.set_default(capability, &provider))
+    tauri::async_runtime::spawn_blocking(move || {
+        s.set_default(capability, &provider)
+    })
         .await
         .map_err(KitError::internal)?
 }
@@ -86,7 +100,9 @@ pub(crate) async fn search_reveal<R: Runtime>(
     key_id: String,
 ) -> Result<String, KitError> {
     let s = app.state::<Search>().store.clone();
-    tauri::async_runtime::spawn_blocking(move || s.reveal(capability, &provider, &key_id))
+    tauri::async_runtime::spawn_blocking(move || {
+        s.reveal(capability, &provider, &key_id)
+    })
         .await
         .map_err(KitError::internal)?
 }
@@ -123,7 +139,9 @@ pub(crate) async fn search_remove_key<R: Runtime>(
     key_id: String,
 ) -> Result<SearchSettings, KitError> {
     let s = app.state::<Search>().store.clone();
-    tauri::async_runtime::spawn_blocking(move || s.remove_key(capability, &provider, &key_id))
+    tauri::async_runtime::spawn_blocking(move || {
+        s.remove_key(capability, &provider, &key_id)
+    })
         .await
         .map_err(KitError::internal)?
 }
@@ -136,7 +154,10 @@ pub(crate) async fn search_check<R: Runtime>(
 ) -> Result<CheckResult, KitError> {
     let token = start(&app, &job_id)?;
     let s = app.state::<Search>().store.clone();
-    let result = tokio::select! {r=s.check(capability,&provider)=>r,_=token.cancelled()=>Err(KitError::cancelled())};
+    let result = tokio::select! {
+        r = s.check(capability, &provider) => r,
+        _ = token.cancelled() => Err(KitError::cancelled()),
+    };
     finish(&app, &job_id);
     result
 }
@@ -149,7 +170,10 @@ pub(crate) async fn search_query<R: Runtime>(
     let token = start(&app, &job_id)?;
     let s = app.state::<Search>().store.clone();
     let result =
-        tokio::select! {r=s.search(&query)=>r,_=token.cancelled()=>Err(KitError::cancelled())};
+        tokio::select! {
+            r = s.search(&query) => r,
+            _ = token.cancelled() => Err(KitError::cancelled()),
+        };
     finish(&app, &job_id);
     result
 }
@@ -162,7 +186,10 @@ pub(crate) async fn search_fetch<R: Runtime>(
     let token = start(&app, &job_id)?;
     let s = app.state::<Search>().store.clone();
     let result =
-        tokio::select! {r=s.fetch(&url)=>r,_=token.cancelled()=>Err(KitError::cancelled())};
+        tokio::select! {
+            r = s.fetch(&url) => r,
+            _ = token.cancelled() => Err(KitError::cancelled()),
+        };
     finish(&app, &job_id);
     result
 }

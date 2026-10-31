@@ -7,7 +7,12 @@ use std::sync::LazyLock;
 
 static LOGS: LazyLock<(tempfile::TempDir, LogHandle)> = LazyLock::new(|| {
     let dir = tempfile::tempdir().unwrap();
-    let logs = aether_observability::init(dir.path(), LogConfig::default(), None).unwrap();
+    let logs = aether_observability::init(
+        dir.path(),
+        LogConfig::default(),
+        None,
+    )
+    .unwrap();
     (dir, logs)
 });
 
@@ -55,7 +60,9 @@ fn enabled_adapters_require_their_own_instances() {
 #[test]
 fn providers_only_needs_no_host_or_run_service() {
     let dir = tempfile::tempdir().unwrap();
-    let store = std::sync::Arc::new(aether_providers::Store::open(dir.path()).unwrap());
+    let store = std::sync::Arc::new(
+        aether_providers::Store::open(dir.path()).unwrap(),
+    );
     assert!(
         Builder::new(LOGS.1.clone())
             .providers(store)
@@ -78,11 +85,13 @@ fn providers_only_needs_no_host_or_run_service() {
 #[test]
 fn history_only_needs_no_host_or_run_service() {
     let dir = tempfile::tempdir().unwrap();
-    let store =
-        std::sync::Arc::new(aether_runtime::conversations::SqliteStore::open(dir.path()).unwrap());
-    let service = std::sync::Arc::new(aether_runtime::conversations::ConversationService::new(
-        store,
-    ));
+    let store = std::sync::Arc::new(
+        aether_runtime::conversations::SqliteStore::open(dir.path())
+            .unwrap(),
+    );
+    let service = std::sync::Arc::new(
+        aether_runtime::conversations::ConversationService::new(store),
+    );
     assert!(
         Builder::new(LOGS.1.clone())
             .conversations(service)

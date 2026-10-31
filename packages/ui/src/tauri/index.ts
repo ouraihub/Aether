@@ -1,4 +1,5 @@
-// The only directory allowed to import @tauri-apps/* (ESLint enforces): createTauriPorts() (docs/16 §2).
+// The only directory allowed to import @tauri-apps/* (ESLint enforces):
+// createTauriPorts() (docs/16 §2).
 // Argument names are the camelCase of the Rust command parameters (docs/15 §5).
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { KitClientError } from '../ports'
@@ -13,7 +14,8 @@ import type {
   SearchPort,
 } from '../ports'
 
-/** Which feature ports the host enabled; the rest stay absent so their UI areas are hidden. */
+/** Which feature ports the host enabled; the rest stay absent so their UI
+ * areas are hidden. */
 export interface TauriPortsOptions {
   providers?: boolean
   search?: boolean
@@ -21,7 +23,8 @@ export interface TauriPortsOptions {
   /** Independent conversation storage capability (`aether:chat-history`). */
   conversations?: boolean
   skills?: boolean
-  /** Read-only discovery/pickers; generation additionally requires chat and providers. */
+  /** Read-only discovery/pickers; generation additionally requires chat and
+   * providers. */
   skillSources?: boolean
   mcpClient?: boolean
   mcpServer?: boolean
@@ -29,8 +32,12 @@ export interface TauriPortsOptions {
 
 const CANCELLED: KitError = { code: 'cancelled', message: 'cancelled' }
 
-/** Invokes `plugin:aether|<command>` and turns any rejection into a KitClientError at the boundary. */
-async function call<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+/** Invokes `plugin:aether|<command>` and turns any rejection into a
+ * KitClientError at the boundary. */
+async function call<T>(
+  command: string,
+  args: Record<string, unknown> = {},
+): Promise<T> {
   try {
     return await invoke<T>(`plugin:aether|${command}`, args)
   } catch (error) {
@@ -39,11 +46,16 @@ async function call<T>(command: string, args: Record<string, unknown> = {}): Pro
       error !== null &&
       typeof (error as Partial<KitError>).code === 'string' &&
       typeof (error as Partial<KitError>).message === 'string'
-    throw new KitClientError(isKitError ? (error as KitError) : { code: 'internal', message: String(error) })
+    throw new KitClientError(
+      isKitError
+        ? (error as KitError)
+        : { code: 'internal', message: String(error) },
+    )
   }
 }
 
-/** The plugin always registers the log commands, so desktop hosts always get `logs`. */
+/** The plugin always registers the log commands, so desktop hosts always get
+ * `logs`. */
 export function createTauriPorts(
   options: TauriPortsOptions = {},
 ): KitPorts & { logs: LogsPort; desktop: DesktopActions } {
@@ -59,16 +71,20 @@ export function createTauriPorts(
   if (options.providers) {
     ports.providers = {
       list: () => call('providers_list'),
-      setEnabled: (id, enabled) => call('providers_set_enabled', { id, enabled }),
+      setEnabled: (id, enabled) =>
+        call('providers_set_enabled', { id, enabled }),
       save: (input) => call('providers_save', { input }),
       remove: (id) => call('providers_delete', { id }),
-      modelOptions: (filter = {}) => call('providers_model_options', { filter }),
-      // Aborting calls providers_cancel; the pending probe then rejects with `cancelled`.
+      modelOptions: (filter = {}) =>
+        call('providers_model_options', { filter }),
+      // Aborting calls providers_cancel; the pending probe then rejects with
+      // `cancelled`.
       probe: async (target, callOptions) => {
         const signal = callOptions?.signal
         if (signal?.aborted) throw new KitClientError(CANCELLED)
         const jobId = crypto.randomUUID()
-        const cancel = () => void call('providers_cancel', { jobId }).catch(() => undefined)
+        const cancel = () =>
+          void call('providers_cancel', { jobId }).catch(() => undefined)
         signal?.addEventListener('abort', cancel, { once: true })
         try {
           return await call('providers_probe', { jobId, target })
@@ -79,7 +95,8 @@ export function createTauriPorts(
       revealNeedsPassword: false,
       keyStrategies: false,
       saveKey: (input) => call('providers_key_save', { input }),
-      removeKey: (endpointId, keyId) => call('providers_key_delete', { endpointId, keyId }),
+      removeKey: (endpointId, keyId) =>
+        call('providers_key_delete', { endpointId, keyId }),
       revealKey: (keyId) => call('providers_key_reveal', { keyId }),
     }
   }
@@ -92,7 +109,8 @@ export function createTauriPorts(
       const signal = callOptions?.signal
       if (signal?.aborted) throw new KitClientError(CANCELLED)
       const jobId = crypto.randomUUID()
-      const cancel = () => void call('search_cancel', { jobId }).catch(() => undefined)
+      const cancel = () =>
+        void call('search_cancel', { jobId }).catch(() => undefined)
       signal?.addEventListener('abort', cancel, { once: true })
       try {
         return await call<T>(command, { ...args, jobId })
@@ -101,17 +119,34 @@ export function createTauriPorts(
       }
     }
     const search: SearchPort = {
-      settings: (capability, o) => searchCall('search_settings', { capability }, o),
+      settings: (capability, o) =>
+        searchCall('search_settings', { capability }, o),
       save: (input, o) => searchCall('search_save', { input }, o),
-      setDefault: (capability, provider, o) => searchCall('search_set_default', { capability, provider }, o),
-      savePreferences: (input, o) => searchCall('search_save_preferences', { input }, o),
+      setDefault: (capability, provider, o) =>
+        searchCall('search_set_default', { capability, provider }, o),
+      savePreferences: (input, o) =>
+        searchCall('search_save_preferences', { input }, o),
       saveKey: (capability, provider, value, keyId, o) =>
-        searchCall('search_save_key', { capability, provider, value, keyId: keyId ?? null }, o),
+        searchCall(
+          'search_save_key',
+          { capability, provider, value, keyId: keyId ?? null },
+          o,
+        ),
       removeKey: (capability, provider, keyId, o) =>
         searchCall('search_remove_key', { capability, provider, keyId }, o),
       reveal: (capability, provider, keyId, currentPassword, o) =>
-        searchCall('search_reveal', { capability, provider, keyId, currentPassword: currentPassword ?? null }, o),
-      check: (capability, provider, o) => searchCall('search_check', { capability, provider }, o),
+        searchCall(
+          'search_reveal',
+          {
+            capability,
+            provider,
+            keyId,
+            currentPassword: currentPassword ?? null,
+          },
+          o,
+        ),
+      check: (capability, provider, o) =>
+        searchCall('search_check', { capability, provider }, o),
       search: (query, o) => searchCall('search_query', { query }, o),
       fetch: (url, o) => searchCall('search_fetch', { url }, o),
     }
@@ -130,7 +165,9 @@ export function createTauriPorts(
         const dispatchCancel = () => {
           if (!accepted || ended || dispatched) return
           dispatched = true
-          void call('chat_cancel', { runId: accepted.runId }).catch(() => undefined)
+          void call('chat_cancel', { runId: accepted.runId }).catch(
+            () => undefined,
+          )
         }
         const cancel = () => {
           requested = true
@@ -146,7 +183,10 @@ export function createTauriPorts(
           onEvent(event)
         })
         try {
-          accepted = await call<RunAccepted>('chat_run', { request, onEvent: channel })
+          accepted = await call<RunAccepted>('chat_run', {
+            request,
+            onEvent: channel,
+          })
           if (requested || signal?.aborted) dispatchCancel()
           return accepted
         } catch (error) {
@@ -172,9 +212,12 @@ export function createTauriPorts(
       rename: (id, title) => call('chat_rename', { id, title }),
       editTurn: (conversationId, turnId, text, expectedText) =>
         call('chat_edit_turn', { conversationId, turnId, text, expectedText }),
-      removeTurn: (conversationId, turnId) => call('chat_remove_turn', { conversationId, turnId }),
-      fork: (conversationId, turnId) => call('chat_fork', { conversationId, turnId }),
-      selectTurn: (conversationId, turnId) => call('chat_select_turn', { conversationId, turnId }),
+      removeTurn: (conversationId, turnId) =>
+        call('chat_remove_turn', { conversationId, turnId }),
+      fork: (conversationId, turnId) =>
+        call('chat_fork', { conversationId, turnId }),
+      selectTurn: (conversationId, turnId) =>
+        call('chat_select_turn', { conversationId, turnId }),
     }
   }
   if (options.skills) {
@@ -183,7 +226,8 @@ export function createTauriPorts(
       get: (id) => call('skills_get', { id }),
       save: (input) => call('skills_save', { input }),
       preview: (source) => call('skills_preview', { source }),
-      install: (source, confirmedDigest, replace) => call('skills_install', { source, confirmedDigest, replace }),
+      install: (source, confirmedDigest, replace) =>
+        call('skills_install', { source, confirmedDigest, replace }),
       duplicate: (id, newName) => call('skills_duplicate', { id, newName }),
       reorder: (ids) => call('skills_reorder', { ids }),
       remove: (id) => call('skills_delete', { id }),
@@ -204,9 +248,11 @@ export function createTauriPorts(
       search: (query, o) => sourceCall('skills_source_search', { query }, o),
       prepare: (url, o) => sourceCall('skills_source_prepare', { url }, o),
       discover: (o) => sourceCall('skills_system_discover', {}, o),
-      prepareSystem: (path, o) => sourceCall('skills_system_prepare', { path }, o),
+      prepareSystem: (path, o) =>
+        sourceCall('skills_system_prepare', { path }, o),
       pickDirectory: (o) => sourceCall('skills_pick_directory', {}, o),
-      pickSearchDirectory: (o) => sourceCall('skills_pick_search_directory', {}, o),
+      pickSearchDirectory: (o) =>
+        sourceCall('skills_pick_search_directory', {}, o),
     }
     if (options.chat && options.providers) {
       ports.skillSources.authoring = {
@@ -218,7 +264,10 @@ export function createTauriPorts(
           let ended = false
           const cancel = () => {
             if (accepted && !ended)
-              void call('skills_authoring_cancel', { sessionId, runId: accepted.runId }).catch(() => undefined)
+              void call('skills_authoring_cancel', {
+                sessionId,
+                runId: accepted.runId,
+              }).catch(() => undefined)
           }
           signal?.addEventListener('abort', cancel, { once: true })
           const channel = new Channel<RunEvent>((event) => {
@@ -230,7 +279,12 @@ export function createTauriPorts(
             onEvent(event)
           })
           try {
-            accepted = await call<RunAccepted>('skills_authoring_send', { sessionId, input, model, onEvent: channel })
+            accepted = await call<RunAccepted>('skills_authoring_send', {
+              sessionId,
+              input,
+              model,
+              onEvent: channel,
+            })
             if (signal?.aborted) cancel()
             return accepted
           } catch (error) {
@@ -240,12 +294,22 @@ export function createTauriPorts(
           }
         },
         approve: async (sessionId, runId, callId, allow) => {
-          await call('skills_authoring_approve', { sessionId, runId, callId, allow })
+          await call('skills_authoring_approve', {
+            sessionId,
+            runId,
+            callId,
+            allow,
+          })
         },
         cancel: async (sessionId, runId) => {
           await call('skills_authoring_cancel', { sessionId, runId })
         },
-        prepare: (sessionId, o) => sourceCall<PreparedSkill>('skills_authoring_prepare', { sessionId }, o),
+        prepare: (sessionId, o) =>
+          sourceCall<PreparedSkill>(
+            'skills_authoring_prepare',
+            { sessionId },
+            o,
+          ),
         close: async (sessionId) => {
           await call('skills_authoring_close', { sessionId })
         },
@@ -270,7 +334,8 @@ export function createTauriPorts(
       start: () => call('mcp_server_start'),
       stop: () => call('mcp_server_stop'),
       setPort: (port) => call('mcp_server_set_port', { port }),
-      issueToken: (name, scopes) => call('mcp_server_issue_token', { name, scopes }),
+      issueToken: (name, scopes) =>
+        call('mcp_server_issue_token', { name, scopes }),
       revokeToken: async (id) => {
         await call('mcp_server_revoke_token', { id })
       },

@@ -173,8 +173,8 @@ importers:
         specifier: github:ouraihub/desktop-kit#c7c8281885dc0e88293abda4f67fd5570dee37db
         version: https://codeload.github.com/ouraihub/desktop-kit/tar.gz/c7c8281885dc0e88293abda4f67fd5570dee37db
       '@ouraihub/release-kit':
-        specifier: github:ouraihub/release-kit#f5703e5ee7c348e91d22178a3ba1a106da5fa0aa
-        version: https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa
+        specifier: github:ouraihub/release-kit#70aadb0fbbc5a3ad6989b9407422d2ebffbe8d9d
+        version: https://codeload.github.com/ouraihub/release-kit/tar.gz/70aadb0fbbc5a3ad6989b9407422d2ebffbe8d9d
       '@types/node':
         specifier: 26.6.5
         version: 26.6.5
@@ -977,9 +977,9 @@ packages:
     engines: {node: '>=22.18'}
     hasBin: true
 
-  '@ouraihub/release-kit@https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa':
-    resolution: {gitHosted: true, integrity: sha512-3EwXtN6QBYjuReIVtZljVO7OhCsk9u1TRqf4HIoXCqWAmxN3+pKQx56wZSvp4rr3vJB8BeCbxilTA0JqVwAEMQ==, tarball: https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa}
-    version: 0.1.1
+  '@ouraihub/release-kit@https://codeload.github.com/ouraihub/release-kit/tar.gz/70aadb0fbbc5a3ad6989b9407422d2ebffbe8d9d':
+    resolution: {gitHosted: true, integrity: sha512-S3XCpq0VCh7TzA/GLbAZ7w8malqiKphwbAOYfRMTu8gU5Q51HnnJBZQ8lIjyAOu0i48OXfGiDrby42auDrzVuQ==, tarball: https://codeload.github.com/ouraihub/release-kit/tar.gz/70aadb0fbbc5a3ad6989b9407422d2ebffbe8d9d}
+    version: 0.1.6
     engines: {node: '>=20'}
     hasBin: true
 
@@ -3187,7 +3187,7 @@ snapshots:
 
   '@ouraihub/desktop-kit@https://codeload.github.com/ouraihub/desktop-kit/tar.gz/c7c8281885dc0e88293abda4f67fd5570dee37db': {}
 
-  '@ouraihub/release-kit@https://codeload.github.com/ouraihub/release-kit/tar.gz/f5703e5ee7c348e91d22178a3ba1a106da5fa0aa': {}
+  '@ouraihub/release-kit@https://codeload.github.com/ouraihub/release-kit/tar.gz/70aadb0fbbc5a3ad6989b9407422d2ebffbe8d9d': {}
 
   '@oxc-project/types@0.153.0': {}
 

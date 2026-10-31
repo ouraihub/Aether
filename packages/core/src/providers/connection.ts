@@ -56,7 +56,9 @@ export function validateUrl(field: string, raw: string): void {
   )
     throw badRequest(field, 'invalid_url')
 }
-export function validateHeaders(input: Readonly<Record<string, string | undefined>>): Record<string, string> {
+export function validateHeaders(
+  input: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
   const entries = Object.entries(input)
   if (entries.length > 20) throw badRequest('headers', 'too_many')
   const headers: Record<string, string> = {}
@@ -70,7 +72,8 @@ export function validateHeaders(input: Readonly<Record<string, string | undefine
       /[\r\n]/.test(value)
     )
       throw badRequest('headers', 'invalid')
-    if (Object.hasOwn(RESERVED_HEADERS, name)) throw badRequest('headers', 'reserved')
+    if (Object.hasOwn(RESERVED_HEADERS, name))
+      throw badRequest('headers', 'reserved')
     headers[name] = value
   }
   return headers
@@ -82,7 +85,8 @@ export function authHeaders(
 ): Headers {
   const result = new Headers()
   for (const [name, value] of Object.entries(custom))
-    if (!Object.hasOwn(RESERVED_HEADERS, name.toLowerCase())) result.set(name, value)
+    if (!Object.hasOwn(RESERVED_HEADERS, name.toLowerCase()))
+      result.set(name, value)
   result.set('accept', 'application/json')
   if (protocol === 'anthropic-messages') {
     result.set('anthropic-version', '2023-06-01')
@@ -99,7 +103,8 @@ export function validateReasoning(
   modelType: string,
   maxOutput: number | null,
 ): void {
-  const switchStyle = config.dialect === 'thinking-type' || config.dialect === 'qwen'
+  const switchStyle =
+    config.dialect === 'thinking-type' || config.dialect === 'qwen'
   if (
     modelType !== 'chat' ||
     !config.efforts.length ||
@@ -109,7 +114,8 @@ export function validateReasoning(
   )
     throw badRequest('reasoning', 'invalid_efforts')
   const fits =
-    config.dialect === 'anthropic-budget' || config.dialect === 'anthropic-adaptive'
+    config.dialect === 'anthropic-budget' ||
+    config.dialect === 'anthropic-adaptive'
       ? protocol === 'anthropic-messages'
       : config.dialect === 'openai'
         ? protocol !== 'anthropic-messages'
@@ -117,13 +123,22 @@ export function validateReasoning(
   if (!fits) throw badRequest('reasoning', 'protocol_mismatch')
   const budget = config.budgetTokens
   if (config.dialect === 'anthropic-budget') {
-    if (budget == null || !Number.isSafeInteger(budget) || budget < 1024 || budget >= (maxOutput ?? 4096))
+    if (
+      budget == null ||
+      !Number.isSafeInteger(budget) ||
+      budget < 1024 ||
+      budget >= (maxOutput ?? 4096)
+    )
       throw badRequest('reasoning', 'invalid_budget')
   } else if (config.dialect === 'qwen') {
-    if (budget != null && (!Number.isSafeInteger(budget) || budget < 1)) throw badRequest('reasoning', 'invalid_budget')
+    if (budget != null && (!Number.isSafeInteger(budget) || budget < 1))
+      throw badRequest('reasoning', 'invalid_budget')
   } else if (budget != null) throw badRequest('reasoning', 'unexpected_budget')
 }
-export function validatePricing(pricing: ModelPricing | null, modelType: string): void {
+export function validatePricing(
+  pricing: ModelPricing | null,
+  modelType: string,
+): void {
   if (!pricing) return
   const valid = (value: number | null): boolean =>
     value === null || (Number.isFinite(value) && value >= 0 && value <= 1e6)
@@ -135,8 +150,12 @@ export function validatePricing(pricing: ModelPricing | null, modelType: string)
     pricing.tiers.some(
       (tier, index) =>
         !Number.isSafeInteger(tier.minInputTokens) ||
-        (index > 0 && tier.minInputTokens <= (pricing.tiers[index - 1]?.minInputTokens ?? 0)) ||
-        ![tier.input, tier.output, tier.cacheRead, tier.cacheWrite].every(valid),
+        (index > 0 &&
+          tier.minInputTokens <=
+            (pricing.tiers[index - 1]?.minInputTokens ?? 0)) ||
+        ![tier.input, tier.output, tier.cacheRead, tier.cacheWrite].every(
+          valid,
+        ),
     )
   )
     throw badRequest('pricing', 'invalid')
@@ -148,7 +167,10 @@ export function validateModel(model: Model, protocol: Protocol): void {
     ['contextWindow', model.contextWindow],
     ['maxOutput', model.maxOutput],
   ] as const)
-    if (value !== null && (!Number.isSafeInteger(value) || value < 1 || value > 0xffffffff))
+    if (
+      value !== null &&
+      (!Number.isSafeInteger(value) || value < 1 || value > 0xffffffff)
+    )
       throw badRequest(field, 'invalid')
   if (
     model.modelType === 'chat' &&
@@ -161,16 +183,30 @@ export function validateModel(model: Model, protocol: Protocol): void {
     ['name', model.name],
     ['groupName', model.groupName],
   ] as const)
-    if (value !== null && charCount(value.trim()) > 80) throw badRequest(field, 'too_long', 80)
-  if (model.nativeWebSearch && (model.modelType !== 'chat' || protocol === 'openai-chat'))
+    if (value !== null && charCount(value.trim()) > 80)
+      throw badRequest(field, 'too_long', 80)
+  if (
+    model.nativeWebSearch &&
+    (model.modelType !== 'chat' || protocol === 'openai-chat')
+  )
     throw badRequest('nativeWebSearch', 'unsupported_protocol')
-  if (model.reasoning) validateReasoning(model.reasoning, protocol, model.modelType, model.maxOutput)
+  if (model.reasoning)
+    validateReasoning(
+      model.reasoning,
+      protocol,
+      model.modelType,
+      model.maxOutput,
+    )
   validatePricing(model.pricing, model.modelType)
 }
 /** Prepares one immutable-by-ownership snapshot; network consumers still enforce address policy. */
 export function prepare(snapshot: ConnectionSnapshot): Connection {
   const { endpoint, model } = snapshot
-  if (!['anthropic-messages', 'openai-chat', 'openai-responses'].includes(endpoint.protocol))
+  if (
+    !['anthropic-messages', 'openai-chat', 'openai-responses'].includes(
+      endpoint.protocol,
+    )
+  )
     throw badRequest('protocol', 'invalid')
   validateUrl('baseUrl', endpoint.baseUrl)
   for (const [field, value] of [
@@ -184,12 +220,17 @@ export function prepare(snapshot: ConnectionSnapshot): Connection {
     if (
       !key.trim() ||
       new TextEncoder().encode(key).length > 4096 ||
-      [...key].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+      [...key].some(
+        (character) =>
+          character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+      )
     )
       throw badRequest('apiKey', 'invalid')
   if (model) {
     if (!endpoint.baseUrl.trim())
-      throw new KitFailure('needs_config', 'Missing endpoint URL', { reason: 'missing_url' })
+      throw new KitFailure('needs_config', 'Missing endpoint URL', {
+        reason: 'missing_url',
+      })
     validateModel(model, endpoint.protocol)
   }
   return {
@@ -206,7 +247,11 @@ export function prepare(snapshot: ConnectionSnapshot): Connection {
     reasoning: model?.reasoning ?? null,
     pricing: model?.pricing ?? null,
     nativeWebSearch: model?.nativeWebSearch ?? false,
-    ...(endpoint.imageBaseUrl?.trim() ? { imageBaseUrl: apiBase(endpoint.imageBaseUrl) } : {}),
-    ...(endpoint.imageEditBaseUrl?.trim() ? { imageEditBaseUrl: apiBase(endpoint.imageEditBaseUrl) } : {}),
+    ...(endpoint.imageBaseUrl?.trim()
+      ? { imageBaseUrl: apiBase(endpoint.imageBaseUrl) }
+      : {}),
+    ...(endpoint.imageEditBaseUrl?.trim()
+      ? { imageEditBaseUrl: apiBase(endpoint.imageEditBaseUrl) }
+      : {}),
   }
 }

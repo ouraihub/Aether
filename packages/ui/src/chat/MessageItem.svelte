@@ -1,4 +1,5 @@
 <script lang="ts">
+  import './MessageItem.css'
   // Full reply candidate; the panel groups shared user input by questionId.
   import { Button } from '#lib/components/ui/button/index.js'
   import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js'
@@ -68,7 +69,9 @@
     onTranslate?: (() => void) | undefined
     onDelete?: (() => void) | undefined
     onUseContext?: (() => void) | undefined
-    onSaveNote?: ((markdown: string, images: ImageRef[]) => Promise<void> | void) | undefined
+    onSaveNote?:
+      | ((markdown: string, images: ImageRef[]) => Promise<void> | void)
+      | undefined
     onExportMarkdown?: ((markdown: string) => Promise<void> | void) | undefined
   } = $props()
   const { i18n, notify } = getKitContext()
@@ -126,7 +129,9 @@
         await onExportMarkdown(turn.text)
         return
       }
-      url = URL.createObjectURL(new Blob([turn.text], { type: 'text/markdown;charset=utf-8' }))
+      url = URL.createObjectURL(
+        new Blob([turn.text], { type: 'text/markdown;charset=utf-8' }),
+      )
       const link = document.createElement('a')
       link.href = url
       link.download = `reply-${turn.id}.md`
@@ -149,7 +154,9 @@
     event.preventDefault()
     const comma = url.indexOf(',')
     const mime = url.slice(5, url.indexOf(';'))
-    const bytes = Uint8Array.from(atob(url.slice(comma + 1)), (c) => c.charCodeAt(0))
+    const bytes = Uint8Array.from(atob(url.slice(comma + 1)), (c) =>
+      c.charCodeAt(0),
+    )
     const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mime }))
     window.open(blobUrl, '_blank', 'noopener')
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000)
@@ -167,8 +174,10 @@
               rel="noopener"
               onclick={(event) => openImage(event, image.url)}
               aria-label={t('chat.openImage', { index: index + 1 })}
-              title={t('chat.openImage', { index: index + 1 })}><img src={image.url} alt="" /></a
-            >{:else}<span class="image-expired">{t('chat.imageExpired')}</span>{/if}
+              title={t('chat.openImage', { index: index + 1 })}
+              ><img src={image.url} alt="" /></a
+            >{:else}<span class="image-expired">{t('chat.imageExpired')}</span
+            >{/if}
         </li>
       {/each}
     </ul>
@@ -199,8 +208,10 @@
                 rel="noopener"
                 onclick={(event) => openImage(event, image.url)}
                 aria-label={t('chat.openGeneratedImage', { index: index + 1 })}
-                title={t('chat.openGeneratedImage', { index: index + 1 })}><img src={image.url} alt="" /></a
-              >{:else}<span class="image-expired">{t('chat.imageExpired')}</span>{/if}
+                title={t('chat.openGeneratedImage', { index: index + 1 })}
+                ><img src={image.url} alt="" /></a
+              >{:else}<span class="image-expired">{t('chat.imageExpired')}</span
+              >{/if}
           </li>
         {/each}
       </ul>
@@ -225,9 +236,16 @@
           </Button>
         {/if}
         {#if onRetry && turn.status !== 'running'}
-          {@const label = t(turn.status === 'failed' ? 'chat.retry' : 'chat.regenerate')}
-          <Button variant="ghost" size="icon-xs" title={label} aria-label={label} disabled={busy} onclick={onRetry}
-            ><RotateCcwIcon /></Button
+          {@const label = t(
+            turn.status === 'failed' ? 'chat.retry' : 'chat.regenerate',
+          )}
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            title={label}
+            aria-label={label}
+            disabled={busy}
+            onclick={onRetry}><RotateCcwIcon /></Button
           >
         {/if}
         {#if onSwitchModel}<ModelSelect
@@ -259,7 +277,10 @@
             aria-label={t('chat.useContext')}
             aria-pressed={chosen}
             disabled={busy || turn.status !== 'completed'}
-            onclick={onUseContext}><ThumbsUpIcon class={chosen ? 'fill-primary text-primary' : ''} /></Button
+            onclick={onUseContext}
+            ><ThumbsUpIcon
+              class={chosen ? 'fill-primary text-primary' : ''}
+            /></Button
           >{/if}
         {#if onSaveNote && savable}<Button
             variant="ghost"
@@ -303,36 +324,54 @@
             <DropdownMenu.Content class="w-auto">
               {#if onEdit || onBranch || onCopyConversation}
                 <DropdownMenu.Group>
-                  {#if onEdit}<DropdownMenu.Item disabled={busy || !editable} onSelect={() => onEdit?.()}
-                      ><FilePenLineIcon />{t('chat.editReply')}</DropdownMenu.Item
+                  {#if onEdit}<DropdownMenu.Item
+                      disabled={busy || !editable}
+                      onSelect={() => onEdit?.()}
+                      ><FilePenLineIcon />{t(
+                        'chat.editReply',
+                      )}</DropdownMenu.Item
                     >{/if}
-                  {#if onBranch}<DropdownMenu.Item disabled={busy} onSelect={() => onBranch?.()}
+                  {#if onBranch}<DropdownMenu.Item
+                      disabled={busy}
+                      onSelect={() => onBranch?.()}
                       ><SplitIcon />{t('chat.branch')}</DropdownMenu.Item
                     >{/if}
-                  {#if onCopyConversation}<DropdownMenu.Item disabled={busy} onSelect={() => onCopyConversation?.()}
-                      ><CopyPlusIcon />{t('chat.copyConversation')}</DropdownMenu.Item
+                  {#if onCopyConversation}<DropdownMenu.Item
+                      disabled={busy}
+                      onSelect={() => onCopyConversation?.()}
+                      ><CopyPlusIcon />{t(
+                        'chat.copyConversation',
+                      )}</DropdownMenu.Item
                     >{/if}
                 </DropdownMenu.Group>
                 <DropdownMenu.Separator />
               {/if}
               <DropdownMenu.Sub>
-                <DropdownMenu.SubTrigger disabled={!savable}><SaveIcon />{t('chat.save')}</DropdownMenu.SubTrigger>
+                <DropdownMenu.SubTrigger disabled={!savable}
+                  ><SaveIcon />{t('chat.save')}</DropdownMenu.SubTrigger
+                >
                 <DropdownMenu.SubContent>
-                  <DropdownMenu.Item disabled={!turn.text} onSelect={() => void download()}
+                  <DropdownMenu.Item
+                    disabled={!turn.text}
+                    onSelect={() => void download()}
                     >{t('chat.saveFile')}</DropdownMenu.Item
                   >
                   {#if onSaveNote}<DropdownMenu.Item
                       disabled={busy || turn.status === 'running' || !savable}
-                      onSelect={() => void saveNote()}>{t('chat.saveNote')}</DropdownMenu.Item
+                      onSelect={() => void saveNote()}
+                      >{t('chat.saveNote')}</DropdownMenu.Item
                     >{/if}
                 </DropdownMenu.SubContent>
               </DropdownMenu.Sub>
               <DropdownMenu.Separator />
               <DropdownMenu.Sub>
-                <DropdownMenu.SubTrigger disabled={!turn.text}><UploadIcon />{t('chat.export')}</DropdownMenu.SubTrigger
+                <DropdownMenu.SubTrigger disabled={!turn.text}
+                  ><UploadIcon />{t('chat.export')}</DropdownMenu.SubTrigger
                 >
                 <DropdownMenu.SubContent>
-                  <DropdownMenu.Item disabled={!turn.text} onSelect={() => void download()}
+                  <DropdownMenu.Item
+                    disabled={!turn.text}
+                    onSelect={() => void download()}
                     >{t('chat.exportMarkdown')}</DropdownMenu.Item
                   >
                 </DropdownMenu.SubContent>
@@ -340,11 +379,16 @@
             </DropdownMenu.Content>
           </DropdownMenu.Root>
         {/if}
-        <span class="text-muted-foreground text-kit-sm" role="status">{copied ? t('chat.copied') : ''}</span>
+        <span class="text-muted-foreground text-kit-sm" role="status"
+          >{copied ? t('chat.copied') : ''}</span
+        >
       </div>
     {/if}
     {#if turn.search.status === 'complete'}
-      <section class="flex flex-col gap-1 text-kit-sm" aria-label={t('chat.sources')}>
+      <section
+        class="flex flex-col gap-1 text-kit-sm"
+        aria-label={t('chat.sources')}
+      >
         <p class="text-muted-foreground">{t('chat.sources')}</p>
         {#each turn.search.hits as hit (hit.url)}
           {@const url = safeUrl(hit.url)}
@@ -353,17 +397,23 @@
               href={url}
               target="_blank"
               rel="noopener noreferrer"
-              ><ExternalLinkIcon data-icon="inline-start" /><span class="truncate">{hit.title || url}</span></a
+              ><ExternalLinkIcon data-icon="inline-start" /><span
+                class="truncate">{hit.title || url}</span
+              ></a
             >{/if}
         {/each}
       </section>
     {/if}
     {#if turn.status === 'cancelled'}
-      <p class="text-muted-foreground text-kit-sm" role="status">{t('chat.stopped')}</p>
+      <p class="text-muted-foreground text-kit-sm" role="status">
+        {t('chat.stopped')}
+      </p>
     {:else if turn.status === 'failed'}
       <div class="flex items-center gap-2">
         <p class="text-destructive text-kit-sm" role="alert">
-          {turn.error === 'interrupted' ? t('chat.interrupted') : t(`errors.${turn.error ?? 'internal'}`)}
+          {turn.error === 'interrupted'
+            ? t('chat.interrupted')
+            : t(`errors.${turn.error ?? 'internal'}`)}
         </p>
       </div>
     {:else if turn.exhausted}
@@ -371,213 +421,3 @@
     {/if}
   </div>
 </li>
-
-<style>
-  .message-turn,
-  .user-message,
-  .assistant-message,
-  .markdown {
-    box-sizing: border-box;
-    min-width: 0;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-  }
-  .user-images {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 0.375rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .generated-images {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
-    gap: 0.5rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .generated-images a {
-    display: block;
-    overflow: hidden;
-    border: 1px solid var(--color-border);
-    border-radius: var(--kit-radius, var(--radius));
-  }
-  .generated-images a:focus-visible {
-    outline: 2px solid var(--color-ring);
-    outline-offset: 2px;
-  }
-  .generated-images img {
-    display: block;
-    width: 100%;
-    height: auto;
-  }
-  .user-images a,
-  .image-expired {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 5rem;
-    height: 5rem;
-    overflow: hidden;
-    border: 1px solid var(--color-border);
-    border-radius: var(--kit-radius, var(--radius));
-  }
-  .user-images a:focus-visible {
-    outline: 2px solid var(--color-ring);
-    outline-offset: 2px;
-  }
-  .user-images img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .image-expired {
-    padding: 0.25rem;
-    color: var(--color-muted-foreground);
-    font-size: var(--kit-font-size-sm, 0.8125rem);
-    text-align: center;
-  }
-  .user-message {
-    align-self: flex-end;
-    margin: 0;
-    padding: 0.625rem 0.75rem;
-    border-radius: var(--kit-radius);
-    background: var(--color-primary);
-    color: var(--color-primary-foreground);
-    font-size: var(--kit-text-base);
-    white-space: pre-wrap;
-  }
-  .assistant-message {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    padding: 0.75rem;
-    border-radius: var(--kit-radius);
-    background: var(--color-muted);
-    color: var(--color-foreground);
-  }
-  .assistant-message.chosen {
-    outline: 1px solid var(--color-primary);
-  }
-  .reply-source {
-    font-size: var(--kit-text-sm);
-    color: var(--color-muted-foreground);
-    overflow-wrap: anywhere;
-  }
-  .thinking {
-    min-width: 0;
-  }
-  .message-actions {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    border-top: 1px solid var(--color-border);
-    padding-top: 0.5rem;
-  }
-  .markdown {
-    font-size: var(--kit-text-base);
-    line-height: 1.6;
-  }
-  .markdown :global(p),
-  .markdown :global(ul),
-  .markdown :global(ol),
-  .markdown :global(blockquote),
-  .markdown :global(pre),
-  .markdown :global(table) {
-    margin: 0.75em 0;
-  }
-  .markdown :global(h1),
-  .markdown :global(h2),
-  .markdown :global(h3),
-  .markdown :global(h4),
-  .markdown :global(h5),
-  .markdown :global(h6) {
-    margin: 1em 0 0.5em;
-    font-weight: 600;
-    line-height: 1.35;
-  }
-  .markdown :global(h1) {
-    font-size: 1.4em;
-  }
-  .markdown :global(h2) {
-    font-size: 1.25em;
-  }
-  .markdown :global(h3) {
-    font-size: 1.1em;
-  }
-  .markdown :global(ul),
-  .markdown :global(ol) {
-    padding-inline-start: 1.5em;
-  }
-  .markdown :global(ul) {
-    list-style: disc;
-  }
-  .markdown :global(ol) {
-    list-style: decimal;
-  }
-  .markdown :global(li) {
-    margin: 0.25em 0;
-  }
-  .markdown :global(li::marker) {
-    color: var(--color-muted-foreground);
-  }
-  .markdown :global(blockquote) {
-    border-inline-start: 3px solid var(--color-border);
-    padding-inline-start: 0.75em;
-    color: var(--color-muted-foreground);
-  }
-  .markdown :global(a) {
-    color: var(--color-primary);
-    text-decoration: underline;
-    overflow-wrap: anywhere;
-  }
-  .markdown :global(code) {
-    border-radius: var(--kit-radius-sm);
-    background: var(--color-background);
-    padding: 0.1em 0.3em;
-    font-size: 0.95em;
-  }
-  .markdown :global(pre) {
-    max-width: 100%;
-    overflow-x: auto;
-    padding: 0.75em;
-    border: 1px solid var(--color-border);
-    border-radius: var(--kit-radius-sm);
-    background: var(--color-background);
-    white-space: pre;
-    overflow-wrap: normal;
-  }
-  .markdown :global(pre code) {
-    padding: 0;
-    background: none;
-  }
-  .markdown :global(table) {
-    display: block;
-    max-width: 100%;
-    overflow-x: auto;
-    border-collapse: collapse;
-  }
-  .markdown :global(th),
-  .markdown :global(td) {
-    padding: 0.4em 0.6em;
-    border: 1px solid var(--color-border);
-  }
-  .markdown :global(th) {
-    font-weight: 600;
-  }
-  .markdown :global(img),
-  .markdown :global(video) {
-    max-width: 100%;
-    height: auto;
-  }
-  .markdown :global(:first-child) {
-    margin-top: 0;
-  }
-  .markdown :global(:last-child) {
-    margin-bottom: 0;
-  }
-</style>

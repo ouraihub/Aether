@@ -108,9 +108,9 @@ impl Store {
             last_used_at: None,
             revoked_at: None,
         };
-        let scopes_json = serde_json::to_string(&record.scopes).map_err(KitError::internal)?;
         self.lock()?.execute(
-            "INSERT INTO tokens (id, name, token_hash, scopes, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO tokens (id, name, token_hash, scopes, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![record.id, record.name, hash(&token), scopes_json, record.created_at],
         )?;
         Ok(IssuedToken { record, token })

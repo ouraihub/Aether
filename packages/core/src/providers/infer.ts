@@ -1,4 +1,8 @@
-import type { ModelType, Protocol, ReasoningConfig } from '@ouraihub/aether-contracts'
+import type {
+  ModelType,
+  Protocol,
+  ReasoningConfig,
+} from '@ouraihub/aether-contracts'
 
 export interface Inferred {
   modelType: ModelType
@@ -9,7 +13,11 @@ export interface Inferred {
   group: string | null
 }
 
-type Limits = readonly [contextWindow: number, maxOutput: number, vision: boolean]
+type Limits = readonly [
+  contextWindow: number,
+  maxOutput: number,
+  vision: boolean,
+]
 
 const TYPES: readonly (readonly [readonly string[], ModelType])[] = [
   [['embed'], 'embedding'],
@@ -20,7 +28,11 @@ const TYPES: readonly (readonly [readonly string[], ModelType])[] = [
   [['video', 'sora', 'veo'], 'video'],
 ]
 
-const FAMILIES: readonly (readonly [prefix: string, group: string, limits: Limits])[] = [
+const FAMILIES: readonly (readonly [
+  prefix: string,
+  group: string,
+  limits: Limits,
+])[] = [
   ['claude', 'claude', [200_000, 8_192, true]],
   ['gpt-3.5', 'gpt', [16_385, 4_096, false]],
   ['gpt', 'gpt', [128_000, 16_384, true]],
@@ -40,7 +52,9 @@ const VISION_MARKERS = ['vision', '-vl', 'vl-', '4v'] as const
 
 export function inferModel(modelId: string): Inferred {
   const id = modelId.toLowerCase()
-  const modelType = TYPES.find(([words]) => words.some((word) => id.includes(word)))?.[1] ?? 'chat'
+  const modelType =
+    TYPES.find(([words]) => words.some((word) => id.includes(word)))?.[1] ??
+    'chat'
   const name = id.slice(id.lastIndexOf('/') + 1)
   const known = FAMILIES.find(([prefix]) => name.startsWith(prefix))
   const family: readonly [string, Limits] | undefined = known
@@ -96,7 +110,9 @@ export function inferReasoning(
     const adaptive =
       newest ||
       families.some((family) => matches(`claude-${family}-5`)) ||
-      ['opus', 'sonnet'].some((family) => ['6', '7', '8'].some((minor) => matches(`claude-${family}-4-${minor}`)))
+      ['opus', 'sonnet'].some((family) =>
+        ['6', '7', '8'].some((minor) => matches(`claude-${family}-4-${minor}`)),
+      )
     if (adaptive)
       return {
         dialect: 'anthropic-adaptive',
@@ -140,17 +156,28 @@ export function inferReasoning(
   if (normalized.includes('non-reasoning')) return null
   const any = (...prefixes: string[]): boolean => prefixes.some(matches)
   if (
-    (matches('o1') && !normalized.includes('-mini') && !normalized.includes('-preview')) ||
+    (matches('o1') &&
+      !normalized.includes('-mini') &&
+      !normalized.includes('-preview')) ||
     any('o3', 'o4-mini', 'gpt-oss')
   )
     return openai(['low', 'medium', 'high'])
   if (any('grok-4-3')) return openai(['none', 'low', 'medium', 'high'])
-  if (any('grok-4-6', 'grok-4-7')) return openai(['low', 'medium', 'high', 'xhigh'])
+  if (any('grok-4-6', 'grok-4-7'))
+    return openai(['low', 'medium', 'high', 'xhigh'])
   if (any('grok-3-mini')) return openai(['low', 'high'])
   if (any('gpt-5-1-codex-max')) return openai(['medium', 'high', 'xhigh'])
   if (any('gpt-5-1-codex')) return openai(['medium', 'high'])
   if (any('gpt-5-codex')) return openai(['low', 'medium', 'high'])
-  if (any('gpt-5-2-codex', 'gpt-5-3-codex', 'gpt-5-4-codex', 'gpt-5-5-codex', 'gpt-5-6-codex'))
+  if (
+    any(
+      'gpt-5-2-codex',
+      'gpt-5-3-codex',
+      'gpt-5-4-codex',
+      'gpt-5-5-codex',
+      'gpt-5-6-codex',
+    )
+  )
     return openai(['low', 'medium', 'high', 'xhigh'])
   if (/-(?:chat|pro|codex)/.test(normalized)) return null
   if (any('gpt-5-1')) return openai(['none', 'low', 'medium', 'high'])
@@ -161,17 +188,24 @@ export function inferReasoning(
 }
 
 /** Official vendor endpoints switch reasoning with their own fields (docs/28 RT4); a relay serving the same model keeps the OpenAI dialect. */
-function vendorReasoning(name: string, baseUrl: string): ReasoningConfig | null {
-  const host = (baseUrl.split('://').at(-1) ?? '').split(/[/:?]/)[0]?.toLowerCase() ?? ''
-  const on = (...domains: string[]): boolean => domains.some((domain) => host === domain || host.endsWith(`.${domain}`))
-  const starts = (...prefixes: string[]): boolean => prefixes.some((prefix) => name.startsWith(prefix))
+function vendorReasoning(
+  name: string,
+  baseUrl: string,
+): ReasoningConfig | null {
+  const host =
+    (baseUrl.split('://').at(-1) ?? '').split(/[/:?]/)[0]?.toLowerCase() ?? ''
+  const on = (...domains: string[]): boolean =>
+    domains.some((domain) => host === domain || host.endsWith(`.${domain}`))
+  const starts = (...prefixes: string[]): boolean =>
+    prefixes.some((prefix) => name.startsWith(prefix))
   const thinking = (efforts: ReasoningConfig['efforts']): ReasoningConfig => ({
     dialect: 'thinking-type',
     efforts,
   })
   const toggle = thinking(['none', 'auto'])
   if (on('deepseek.com')) {
-    if (starts('deepseek-v4', 'deepseek-v5')) return thinking(['none', 'low', 'high', 'max'])
+    if (starts('deepseek-v4', 'deepseek-v5'))
+      return thinking(['none', 'low', 'high', 'max'])
     return starts('deepseek-chat', 'deepseek-v3') ? toggle : null
   }
   if (on('bigmodel.cn', 'z.ai')) {
@@ -181,7 +215,13 @@ function vendorReasoning(name: string, baseUrl: string): ReasoningConfig | null 
   if (on('volces.com')) return starts('doubao-seed') ? toggle : null
   if (on('moonshot.cn', 'moonshot.ai')) {
     if (starts('kimi-k3')) return thinking(['none', 'low', 'high', 'max'])
-    return starts('kimi-k2-5', 'kimi-k2-6', 'kimi-k2-7', 'kimi-k2-8', 'kimi-k2-9') && !name.includes('-code')
+    return starts(
+      'kimi-k2-5',
+      'kimi-k2-6',
+      'kimi-k2-7',
+      'kimi-k2-8',
+      'kimi-k2-9',
+    ) && !name.includes('-code')
       ? toggle
       : null
   }
@@ -194,7 +234,9 @@ function vendorReasoning(name: string, baseUrl: string): ReasoningConfig | null 
     return {
       dialect: 'qwen',
       efforts: ['none', 'auto', 'low', 'medium', 'high', 'max'],
-      budgetTokens: starts('qwen3-max', 'qwen3-5', 'qwen3-6', 'qwen3-7') ? 81_920 : 38_912,
+      budgetTokens: starts('qwen3-max', 'qwen3-5', 'qwen3-6', 'qwen3-7')
+        ? 81_920
+        : 38_912,
     }
   return null
 }

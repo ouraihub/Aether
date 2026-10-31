@@ -31,7 +31,7 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@ouraihub/desktop-kit": "github:ouraihub/desktop-kit#c7c8281885dc0e88293abda4f67fd5570dee37db",
-    "@ouraihub/release-kit": "github:ouraihub/release-kit#f5703e5ee7c348e91d22178a3ba1a106da5fa0aa",
+    "@ouraihub/release-kit": "github:ouraihub/release-kit#70aadb0fbbc5a3ad6989b9407422d2ebffbe8d9d",
     "@types/node": "26.6.5",
     "ajv": "8.20.0",
     "eslint": "10.11.0",

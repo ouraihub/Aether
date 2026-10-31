@@ -1,11 +1,12 @@
 //! Host tools of the example (docs/90 CH4-3): `read_note` (read-only, auto) and
-//! `write_note` (edits, ask) over one in-memory note. All five permission modes are offered.
+//! `write_note` (edits, ask) over one in-memory note. All five permission
+//! modes are offered.
 
 use std::sync::{Mutex, PoisonError};
 
 use aether_runtime::{
-    Approval, CancellationToken, HostTool, KitHost, PermissionMode, RunRequest, ToolCall,
-    ToolEffect, ToolError, ToolOutput, ToolSource, ToolSpec,
+    Approval, CancellationToken, HostTool, KitHost, PermissionMode, RunRequest,
+    ToolCall, ToolEffect, ToolError, ToolOutput, ToolSource, ToolSpec,
 };
 use serde_json::json;
 
@@ -48,7 +49,11 @@ impl KitHost for AssistantHost {
             tool(
                 "write_note",
                 "Replace the user's note with `text`.",
-                json!({ "type": "object", "properties": { "text": { "type": "string" } }, "required": ["text"] }),
+                json!({
+                    "type": "object",
+                    "properties": { "text": { "type": "string" } },
+                    "required": ["text"]
+                }),
                 Approval::Ask,
                 ToolEffect::Edit,
             ),
@@ -75,7 +80,8 @@ impl KitHost for AssistantHost {
             "read_note" if note.is_empty() => "(empty note)".to_owned(),
             "read_note" => note.clone(),
             "write_note" => {
-                let Some(text) = call.args.get("text").and_then(|t| t.as_str()) else {
+                let Some(text) = call.args.get("text").and_then(|t| t.as_str())
+                else {
                     return Err(ToolError {
                         code: "bad_args".to_owned(),
                         message: "`text` must be a string".to_owned(),

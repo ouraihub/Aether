@@ -16,10 +16,18 @@ const connection: ImageConnection = {
   baseUrl: 'https://images.example/v1',
   modelId: 'image-model',
   keys: ['first-secret', 'second-secret'],
-  headers: { Authorization: 'custom-secret', 'Content-Type': 'application/json', 'x-custom': 'yes' },
+  headers: {
+    Authorization: 'custom-secret',
+    'Content-Type': 'application/json',
+    'x-custom': 'yes',
+  },
   canVision: true,
 }
-const input: ImageRequest = { prompt: '  Draw a tree  ', size: '1024x1024', images: [] }
+const input: ImageRequest = {
+  prompt: '  Draw a tree  ',
+  size: '1024x1024',
+  images: [],
+}
 const signal = (): AbortSignal => new AbortController().signal
 const success = (): Response => Response.json({ data: [{ b64_json: PNG }] })
 
@@ -30,19 +38,36 @@ test('generation uses explicit transport, trimmed prompt, headers, and no respon
       calls++
       assert.equal(url, 'https://images.example/v1/images/generations')
       assert.equal(init.redirect, 'manual')
-      assert.equal(new Headers(init.headers).get('authorization'), 'Bearer first-secret')
+      assert.equal(
+        new Headers(init.headers).get('authorization'),
+        'Bearer first-secret',
+      )
       assert.equal(new Headers(init.headers).get('x-custom'), 'yes')
-      assert.equal(init.body, JSON.stringify({ model: 'image-model', prompt: 'Draw a tree', size: '1024x1024', n: 1 }))
+      assert.equal(
+        init.body,
+        JSON.stringify({
+          model: 'image-model',
+          prompt: 'Draw a tree',
+          size: '1024x1024',
+          n: 1,
+        }),
+      )
       return success()
     },
   }
-  assert.deepEqual(await generateImage(http, connection, input, signal()), { mime: 'image/png', data: PNG })
+  assert.deepEqual(await generateImage(http, connection, input, signal()), {
+    mime: 'image/png',
+    data: PNG,
+  })
   assert.equal(calls, 1)
 })
 
 for (const count of [1, 2, 4])
   test(`editing ${count} references uses native multipart MIME and filenames`, async () => {
-    const images = Array.from({ length: count }, () => ({ mime: 'image/png', data: PNG }))
+    const images = Array.from({ length: count }, () => ({
+      mime: 'image/png',
+      data: PNG,
+    }))
     const http: OutboundHttp = {
       async fetch(url, init) {
         assert.equal(url, 'https://edits.example/images/edits')
@@ -81,7 +106,9 @@ for (const status of [401, 403, 429])
     const http: OutboundHttp = {
       async fetch(_url, init) {
         keys.push(new Headers(init.headers).get('authorization'))
-        return keys.length === 1 ? new Response('secret upstream body', { status }) : success()
+        return keys.length === 1
+          ? new Response('secret upstream body', { status })
+          : success()
       },
     }
     await generateImage(http, connection, input, signal())
@@ -132,14 +159,20 @@ test('validation and pre-cancellation never dispatch', async () => {
   }
   const controller = new AbortController()
   controller.abort()
-  await assert.rejects(generateImage(http, connection, input, controller.signal), {
-    code: 'cancelled',
-    dispatch: 'not_dispatched',
-  })
-  await assert.rejects(generateImage(http, connection, { ...input, prompt: ' ' }, signal()), {
-    code: 'bad_request',
-    dispatch: 'not_dispatched',
-  })
+  await assert.rejects(
+    generateImage(http, connection, input, controller.signal),
+    {
+      code: 'cancelled',
+      dispatch: 'not_dispatched',
+    },
+  )
+  await assert.rejects(
+    generateImage(http, connection, { ...input, prompt: ' ' }, signal()),
+    {
+      code: 'bad_request',
+      dispatch: 'not_dispatched',
+    },
+  )
   await assert.rejects(
     generateImage(
       http,
@@ -153,7 +186,13 @@ test('validation and pre-cancellation never dispatch', async () => {
     generateImage(
       http,
       connection,
-      { ...input, images: Array.from({ length: 5 }, () => ({ mime: 'image/png', data: PNG })) },
+      {
+        ...input,
+        images: Array.from({ length: 5 }, () => ({
+          mime: 'image/png',
+          data: PNG,
+        })),
+      },
       signal(),
     ),
     { code: 'bad_request', dispatch: 'not_dispatched' },
@@ -166,7 +205,10 @@ test('download uses same injected policy without forwarding provider credentials
   const http: OutboundHttp = {
     async fetch(url, init) {
       calls.push(url)
-      if (calls.length === 1) return Response.json({ data: [{ url: 'https://cdn.example/image.png' }] })
+      if (calls.length === 1)
+        return Response.json({
+          data: [{ url: 'https://cdn.example/image.png' }],
+        })
       assert.equal(new Headers(init.headers).has('authorization'), false)
       assert.equal(init.redirect, 'manual')
       return new Response(
@@ -175,8 +217,14 @@ test('download uses same injected policy without forwarding provider credentials
       )
     },
   }
-  assert.deepEqual(await generateImage(http, connection, input, signal()), { mime: 'image/png', data: PNG })
-  assert.deepEqual(calls, ['https://images.example/v1/images/generations', 'https://cdn.example/image.png'])
+  assert.deepEqual(await generateImage(http, connection, input, signal()), {
+    mime: 'image/png',
+    data: PNG,
+  })
+  assert.deepEqual(calls, [
+    'https://images.example/v1/images/generations',
+    'https://cdn.example/image.png',
+  ])
 })
 
 test('download address rejection is never bypassed or retried', async () => {
@@ -184,12 +232,16 @@ test('download address rejection is never bypassed or retried', async () => {
   const http: OutboundHttp = {
     async fetch(url) {
       calls++
-      if (calls === 1) return Response.json({ data: [{ url: 'http://127.0.0.1/image' }] })
+      if (calls === 1)
+        return Response.json({ data: [{ url: 'http://127.0.0.1/image' }] })
       assert.equal(url, 'http://127.0.0.1/image')
       throw new ImageFailure('bad_request', 'Address blocked', 'not_dispatched')
     },
   }
-  await assert.rejects(generateImage(http, connection, input, signal()), { dispatch: 'unknown', code: 'bad_request' })
+  await assert.rejects(generateImage(http, connection, input, signal()), {
+    dispatch: 'unknown',
+    code: 'bad_request',
+  })
   assert.equal(calls, 2)
 })
 
@@ -198,7 +250,10 @@ test('redirects, unknown image bytes, MIME mismatch and oversized downloads fail
     generateImage(
       {
         async fetch() {
-          return new Response(null, { status: 302, headers: { location: 'http://localhost/' } })
+          return new Response(null, {
+            status: 302,
+            headers: { location: 'http://localhost/' },
+          })
         },
       },
       connection,
@@ -228,8 +283,14 @@ test('redirects, unknown image bytes, MIME mismatch and oversized downloads fail
         return calls === 1
           ? Response.json({ data: [{ url: 'https://cdn.example/image' }] })
           : new Response(
-              oversized ? new Uint8Array(MAX_IMAGE_BYTES + 1) : Uint8Array.from(atob(PNG), (c) => c.charCodeAt(0)),
-              { headers: { 'content-type': oversized ? 'image/png' : 'image/jpeg' } },
+              oversized
+                ? new Uint8Array(MAX_IMAGE_BYTES + 1)
+                : Uint8Array.from(atob(PNG), (c) => c.charCodeAt(0)),
+              {
+                headers: {
+                  'content-type': oversized ? 'image/png' : 'image/jpeg',
+                },
+              },
             )
       },
     }
@@ -257,7 +318,10 @@ test('stream failure after successful status never advances key', async () => {
       )
     },
   }
-  await assert.rejects(generateImage(http, connection, input, signal()), { code: 'network', dispatch: 'unknown' })
+  await assert.rejects(generateImage(http, connection, input, signal()), {
+    code: 'network',
+    dispatch: 'unknown',
+  })
   assert.equal(calls, 1)
 })
 
@@ -277,7 +341,10 @@ test('one 120s total deadline covers fallback and stalled body', async (context)
     },
   }
   const pending = generateImage(http, connection, input, signal())
-  const assertion = assert.rejects(pending, { code: 'timeout', dispatch: 'unknown' })
+  const assertion = assert.rejects(pending, {
+    code: 'timeout',
+    dispatch: 'unknown',
+  })
   context.mock.timers.tick(IMAGE_TIMEOUT_MS - 1)
   first.resolve(new Response(null, { status: 401 }))
   await secondStarted.promise
@@ -311,7 +378,10 @@ test('strict base validation rejects fields, MIME, nonstandard base64 and oversi
     { mime: 'image/png', data: 'Zg=' },
     { mime: 'image/png', data: 'Zh==' },
     { mime: 'image/png', data: PNG, injected: true },
-    { mime: 'image/png', data: 'A'.repeat(Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 4) },
+    {
+      mime: 'image/png',
+      data: 'A'.repeat(Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 4),
+    },
   ])
     assert.throws(() => checkImages([value]))
 })

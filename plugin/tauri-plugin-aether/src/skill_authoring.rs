@@ -1,17 +1,26 @@
-//! Window-owned skill-authoring sessions; the runtime owns workspaces, runs and cleanup.
+//! Window-owned skill-authoring sessions; the runtime owns workspaces,
+//! runs and cleanup.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use aether_runtime::{
-    Ack, EventSink, ModelRef, RunAccepted, RunContext, RunEvent, RunOwner, SkillAuthoringService,
+    Ack,
+    EventSink,
+    ModelRef,
+    RunAccepted,
+    RunContext,
+    RunEvent,
+    RunOwner,
+    SkillAuthoringService,
 };
 use aether_skills::sources::PreparedSkill;
 use aether_support::KitError;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, Runtime, Window};
 
-/// Window ownership for authoring sessions; a closed window never regains its owner.
+/// Window ownership for authoring sessions; a closed window never regains
+/// its owner.
 pub(crate) struct SkillAuthoring {
     pub(crate) service: Arc<SkillAuthoringService>,
     owners: Mutex<HashMap<String, RunOwner>>,
@@ -61,7 +70,9 @@ fn check_id(field: &str, value: &str) -> Result<(), KitError> {
     Ok(())
 }
 
-fn state<R: Runtime>(app: &AppHandle<R>) -> Result<tauri::State<'_, SkillAuthoring>, KitError> {
+fn state<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<tauri::State<'_, SkillAuthoring>, KitError> {
     app.try_state::<SkillAuthoring>()
         .ok_or_else(|| KitError::needs_config("skill_authoring"))
 }
@@ -100,7 +111,9 @@ pub(crate) async fn skills_authoring_send<R: Runtime>(
     let authoring = state(&app)?;
     let owner = authoring.owner(window.label())?;
     let service = authoring.service.clone();
-    let events: EventSink = Arc::new(move |event| on_event.send(event).map_err(KitError::internal));
+    let events: EventSink = Arc::new(move |event| {
+        on_event.send(event).map_err(KitError::internal)
+    });
     service
         .send(
             RunContext {
@@ -164,7 +177,8 @@ pub(crate) fn skills_authoring_cancel<R: Runtime>(
         .cancel(&authoring.owner(window.label())?, &session_id, &run_id)
 }
 
-/// Packages the session's skill directory for the normal preview + digest install.
+/// Packages the session's skill directory for the normal preview + digest
+/// install.
 #[tauri::command]
 #[tracing::instrument(
     skip_all,

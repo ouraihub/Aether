@@ -30,18 +30,28 @@ export async function execute<T>(
   validatePreferences(config.preferences)
   if (
     !Array.isArray(config.apiKeys) ||
-    config.apiKeys.some((key: unknown) => typeof key !== 'string' || !key.trim() || key.length > 4096)
+    config.apiKeys.some(
+      (key: unknown) =>
+        typeof key !== 'string' || !key.trim() || key.length > 4096,
+    )
   )
-    throw new KitFailure('needs_config', 'Invalid search credentials', { field: 'keys' })
+    throw new KitFailure('needs_config', 'Invalid search credentials', {
+      field: 'keys',
+    })
   if (spec.keyMode === 'required' && !config.apiKeys.length)
-    throw new KitFailure('needs_config', 'Search credentials required', { field: 'keys' })
+    throw new KitFailure('needs_config', 'Search credentials required', {
+      field: 'keys',
+    })
   const keys = config.provider === 'fetch' ? [] : config.apiKeys
   if (config.provider !== 'fetch') targetUrl(config.baseUrl)
   const controller = new AbortController()
   const abort = () => controller.abort()
   signal?.addEventListener('abort', abort, { once: true })
   if (signal?.aborted) controller.abort()
-  const timer = setTimeout(abort, cap === 'fetch' ? 20000 : provider.id === 'exa-mcp' ? 25000 : 15000)
+  const timer = setTimeout(
+    abort,
+    cap === 'fetch' ? 20000 : provider.id === 'exa-mcp' ? 25000 : 15000,
+  )
   const aborted = () =>
     new KitFailure(
       signal?.aborted ? 'cancelled' : 'timeout',
@@ -68,7 +78,9 @@ export async function execute<T>(
       disconnect?.()
       const connection = new AbortController()
       const abortConnection = () => connection.abort()
-      controller.signal.addEventListener('abort', abortConnection, { once: true })
+      controller.signal.addEventListener('abort', abortConnection, {
+        once: true,
+      })
       disconnect = () => {
         controller.signal.removeEventListener('abort', abortConnection)
         connection.abort()
@@ -77,7 +89,11 @@ export async function execute<T>(
       try {
         const { promise, resolve, reject } = Promise.withResolvers<Response>()
         const onAbort = () =>
-          reject(controller.signal.aborted ? aborted() : new KitFailure('timeout', 'Search connection timed out'))
+          reject(
+            controller.signal.aborted
+              ? aborted()
+              : new KitFailure('timeout', 'Search connection timed out'),
+          )
         connection.signal.addEventListener('abort', onAbort, { once: true })
         const request: RequestInit & { credentials: 'omit' } = {
           ...init,
@@ -88,7 +104,9 @@ export async function execute<T>(
         outbound
           .fetch(url, request)
           .then(resolve, reject)
-          .finally(() => connection.signal.removeEventListener('abort', onAbort))
+          .finally(() =>
+            connection.signal.removeEventListener('abort', onAbort),
+          )
           .catch(() => {})
         return await wait(promise)
       } finally {
@@ -101,8 +119,12 @@ export async function execute<T>(
       if (length !== null && /^\d+$/u.test(length) && Number(length) > limit) {
         await response.body?.cancel().catch(() => {})
         if (!response.ok)
-          throw new KitFailure('upstream', 'Search provider rejected request', { status: response.status })
-        throw new KitFailure('upstream', 'Search response exceeds size limit', { limit })
+          throw new KitFailure('upstream', 'Search provider rejected request', {
+            status: response.status,
+          })
+        throw new KitFailure('upstream', 'Search response exceeds size limit', {
+          limit,
+        })
       }
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
@@ -117,8 +139,16 @@ export async function execute<T>(
             if (size > limit) {
               await reader.cancel().catch(() => {})
               if (!response.ok)
-                throw new KitFailure('upstream', 'Search provider rejected request', { status: response.status })
-              throw new KitFailure('upstream', 'Search response exceeds size limit', { limit })
+                throw new KitFailure(
+                  'upstream',
+                  'Search provider rejected request',
+                  { status: response.status },
+                )
+              throw new KitFailure(
+                'upstream',
+                'Search response exceeds size limit',
+                { limit },
+              )
             }
             text += decoder.decode(value, { stream: true })
           }
@@ -130,7 +160,9 @@ export async function execute<T>(
         reader?.releaseLock()
       }
       if (!response.ok)
-        throw new KitFailure('upstream', 'Search provider rejected request', { status: response.status })
+        throw new KitFailure('upstream', 'Search provider rejected request', {
+          status: response.status,
+        })
       return text
     },
   }

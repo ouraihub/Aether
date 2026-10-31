@@ -1,4 +1,5 @@
-//! Tauri commands, ACL and lifecycle adapters for host-created application services.
+//! Tauri commands, ACL and lifecycle adapters for host-created application
+//! services.
 
 #[cfg(any(
     feature = "chat",
@@ -10,7 +11,6 @@
 ))]
 use std::sync::Arc;
 
-use aether_observability::LogHandle;
 use aether_support::KitError;
 use tauri::plugin::TauriPlugin;
 use tauri::{Manager, Runtime};
@@ -32,18 +32,22 @@ mod search;
 mod skill_authoring;
 #[cfg(feature = "skills")]
 mod skill_sources;
+mod lifecycle;
 #[cfg(feature = "skills")]
 mod skills;
 #[cfg(test)]
 mod tests;
 
-/// The host owns service construction and shares the same Arc with other consumers.
+/// The host owns service construction and shares the same Arc with other
+/// consumers.
 pub struct Builder {
     logs: LogHandle,
     #[cfg(feature = "chat")]
     runs: Option<Arc<aether_runtime::RunService>>,
     #[cfg(feature = "conversations")]
-    conversations: Option<Arc<aether_runtime::conversations::ConversationService>>,
+    conversations: Option<
+        Arc<aether_runtime::conversations::ConversationService>,
+    >,
     #[cfg(feature = "mcp-client")]
     mcp_client: Option<Arc<aether_mcp_client::McpRuntime>>,
     #[cfg(feature = "mcp-server")]
@@ -59,7 +63,8 @@ pub struct Builder {
 }
 
 impl Builder {
-    /// Creates the transport adapter with an existing shared diagnostic log handle.
+    /// Creates the transport adapter with an existing shared diagnostic log
+    /// handle.
     #[must_use]
     pub fn new(logs: LogHandle) -> Self {
         Self {
@@ -78,12 +83,17 @@ impl Builder {
             skills: None,
             #[cfg(feature = "search")]
             search: None,
-            #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+            #[cfg(all(
+                feature = "chat",
+                feature = "skills",
+                feature = "providers"
+            ))]
             skill_authoring: None,
         }
     }
 
-    /// Injects the already-constructed run service; the plugin does not assemble runs.
+    /// Injects the already-constructed run service; the plugin does not
+    /// assemble runs.
     #[cfg(feature = "chat")]
     #[must_use]
     pub fn runs(mut self, runs: Arc<aether_runtime::RunService>) -> Self {
@@ -91,7 +101,8 @@ impl Builder {
         self
     }
 
-    /// Enables history commands through the independent shared conversation service.
+    /// Enables history commands through the independent shared conversation
+    /// service.
     #[cfg(feature = "conversations")]
     #[must_use]
     pub fn conversations(
@@ -102,10 +113,14 @@ impl Builder {
         self
     }
 
-    /// Shares an MCP runtime with management commands and ordered application shutdown.
+    /// Shares an MCP runtime with management commands and ordered application
+    /// shutdown.
     #[cfg(feature = "mcp-client")]
     #[must_use]
-    pub fn mcp_client(mut self, runtime: Arc<aether_mcp_client::McpRuntime>) -> Self {
+    pub fn mcp_client(
+        mut self,
+        runtime: Arc<aether_mcp_client::McpRuntime>,
+    ) -> Self {
         self.mcp_client = Some(runtime);
         self
     }
@@ -118,7 +133,8 @@ impl Builder {
         self
     }
 
-    /// Shares provider configuration storage with the host's other Native services.
+    /// Shares provider configuration storage with the host's other Native
+    /// services.
     #[cfg(feature = "providers")]
     #[must_use]
     pub fn providers(mut self, store: Arc<aether_providers::Store>) -> Self {
@@ -137,7 +153,10 @@ impl Builder {
     /// Enables multi-turn skill authoring through a host-created service.
     #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
     #[must_use]
-    pub fn skill_authoring(mut self, service: Arc<aether_runtime::SkillAuthoringService>) -> Self {
+    pub fn skill_authoring(
+        mut self,
+        service: Arc<aether_runtime::SkillAuthoringService>,
+    ) -> Self {
         self.skill_authoring = Some(service);
         self
     }
@@ -153,7 +172,8 @@ impl Builder {
     /// Registers the enabled IPC adapters and their shared service instances.
     ///
     /// # Errors
-    /// Returns `bad_request/missing_instance` for each enabled but absent service.
+    /// Returns `bad_request/missing_instance` for each enabled but absent
+    /// service.
     pub fn build<R: Runtime>(self) -> Result<TauriPlugin<R>, KitError> {
         let Self {
             logs,
@@ -171,38 +191,59 @@ impl Builder {
             skills,
             #[cfg(feature = "search")]
             search,
-            #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+            #[cfg(all(
+                feature = "chat",
+                feature = "skills",
+                feature = "providers"
+            ))]
             skill_authoring,
         } = self;
         #[cfg(feature = "chat")]
         let runs =
-            runs::Runs::new(runs.ok_or_else(|| KitError::bad_request("runs", "missing_instance"))?);
+            runs::Runs::new(
+                runs.ok_or_else(|| {
+                    KitError::bad_request("runs", "missing_instance")
+                })?,
+            );
         #[cfg(feature = "conversations")]
         let conversations = conversations
-            .ok_or_else(|| KitError::bad_request("conversations", "missing_instance"))?;
+            .ok_or_else(|| {
+                KitError::bad_request("conversations", "missing_instance")
+            })?;
         #[cfg(feature = "providers")]
         let providers = providers::Providers::new(
-            providers.ok_or_else(|| KitError::bad_request("providers", "missing_instance"))?,
+            providers.ok_or_else(|| {
+                KitError::bad_request("providers", "missing_instance")
+            })?,
         );
         #[cfg(feature = "mcp-client")]
         let mcp_client = mcp_client::McpClient {
             runtime: mcp_client
-                .ok_or_else(|| KitError::bad_request("mcp-client", "missing_instance"))?,
+                .ok_or_else(|| {
+                    KitError::bad_request("mcp-client", "missing_instance")
+                })?,
             cancel: tokio_util::sync::CancellationToken::new(),
         };
         #[cfg(feature = "mcp-server")]
         let mcp_server =
-            mcp_server.ok_or_else(|| KitError::bad_request("mcp-server", "missing_instance"))?;
+            mcp_server.ok_or_else(|| {
+                KitError::bad_request("mcp-server", "missing_instance")
+            })?;
         #[cfg(feature = "skills")]
         let skills = skills::Skills {
-            store: skills.ok_or_else(|| KitError::bad_request("skills", "missing_instance"))?,
+            store: skills.ok_or_else(|| {
+                KitError::bad_request("skills", "missing_instance")
+            })?,
         };
         #[cfg(feature = "search")]
         let search = search::Search::from_arc(
-            search.ok_or_else(|| KitError::bad_request("search", "missing_instance"))?,
+            search.ok_or_else(|| {
+                KitError::bad_request("search", "missing_instance")
+            })?,
         );
         #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
-        let skill_authoring = skill_authoring.map(skill_authoring::SkillAuthoring::new);
+        let skill_authoring =
+            skill_authoring.map(skill_authoring::SkillAuthoring::new);
         let handler: Box<dyn Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync> =
             Box::new(tauri::generate_handler![
                 logs::logs_tail,
@@ -310,17 +351,41 @@ impl Builder {
                 skill_sources::skills_pick_directory,
                 #[cfg(feature = "skills")]
                 skill_sources::skills_pick_search_directory,
-                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                #[cfg(all(
+                    feature = "chat",
+                    feature = "skills",
+                    feature = "providers"
+                ))]
                 skill_authoring::skills_authoring_create,
-                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                #[cfg(all(
+                    feature = "chat",
+                    feature = "skills",
+                    feature = "providers"
+                ))]
                 skill_authoring::skills_authoring_send,
-                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                #[cfg(all(
+                    feature = "chat",
+                    feature = "skills",
+                    feature = "providers"
+                ))]
                 skill_authoring::skills_authoring_approve,
-                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                #[cfg(all(
+                    feature = "chat",
+                    feature = "skills",
+                    feature = "providers"
+                ))]
                 skill_authoring::skills_authoring_cancel,
-                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                #[cfg(all(
+                    feature = "chat",
+                    feature = "skills",
+                    feature = "providers"
+                ))]
                 skill_authoring::skills_authoring_prepare,
-                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                #[cfg(all(
+                    feature = "chat",
+                    feature = "skills",
+                    feature = "providers"
+                ))]
                 skill_authoring::skills_authoring_close,
                 #[cfg(feature = "search")]
                 search::search_settings,
@@ -348,7 +413,8 @@ impl Builder {
         Ok(tauri::plugin::Builder::<R>::new("aether")
             .invoke_handler(handler)
             .setup(move |app, _api| {
-                // Lands in the file only when the host called aether_observability::init first (docs/10 §8).
+                // Lands in the file only when the host called
+                // aether_observability::init first (docs/10 §8).
                 tracing::info!("aether.plugin.setup");
                 app.manage(logs);
                 #[cfg(feature = "chat")]
@@ -370,7 +436,11 @@ impl Builder {
                 app.manage(skills);
                 #[cfg(feature = "skills")]
                 app.manage(skill_sources::SearchRoots::default());
-                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
+                #[cfg(all(
+                    feature = "chat",
+                    feature = "skills",
+                    feature = "providers"
+                ))]
                 if let Some(authoring) = skill_authoring {
                     for label in app.webview_windows().keys() {
                         authoring.register(label);
@@ -384,84 +454,19 @@ impl Builder {
             .on_window_ready(|window| {
                 #[cfg(feature = "chat")]
                 window.state::<runs::Runs>().register(window.label());
-                #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
-                if let Some(authoring) = window.try_state::<skill_authoring::SkillAuthoring>() {
+                #[cfg(all(
+                    feature = "chat",
+                    feature = "skills",
+                    feature = "providers"
+                ))]
+                if let Some(authoring) =
+                    window.try_state::<skill_authoring::SkillAuthoring>()
+                {
                     authoring.register(window.label());
                 }
                 let _ = window;
             })
-            .on_event(on_event)
+            .on_event(lifecycle::on_event)
             .build())
-    }
-}
-
-/// Exit, unlike ExitRequested, cannot be vetoed by the host.
-fn on_event<R: Runtime>(app: &tauri::AppHandle<R>, event: &tauri::RunEvent) {
-    #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
-    if let tauri::RunEvent::WindowEvent {
-        label,
-        event: tauri::WindowEvent::Destroyed,
-        ..
-    } = event
-        && let Some(authoring) = app.try_state::<skill_authoring::SkillAuthoring>()
-    {
-        authoring.close(label);
-    }
-    #[cfg(feature = "skills")]
-    if let tauri::RunEvent::WindowEvent {
-        label,
-        event: tauri::WindowEvent::Destroyed,
-        ..
-    } = event
-    {
-        app.state::<skill_sources::SearchRoots>().close(label);
-    }
-    #[cfg(feature = "chat")]
-    if let tauri::RunEvent::WindowEvent {
-        label,
-        event: tauri::WindowEvent::Destroyed,
-        ..
-    } = event
-    {
-        app.state::<runs::Runs>().close(label);
-        tracing::info!("aether.plugin.window_destroyed.cancelled");
-    }
-    if matches!(event, tauri::RunEvent::Exit) {
-        tracing::info!("aether.plugin.shutdown.started");
-        // The event-loop thread waits while the executor asynchronously drains services;
-        // no executor thread spins or joins another runtime.
-        tauri::async_runtime::block_on(async {
-            #[cfg(feature = "chat")]
-            app.state::<runs::Runs>()
-                .service
-                .shutdown(std::time::Duration::from_secs(3))
-                .await;
-            #[cfg(all(feature = "chat", feature = "skills", feature = "providers"))]
-            if let Some(authoring) = app.try_state::<skill_authoring::SkillAuthoring>() {
-                authoring
-                    .service
-                    .shutdown(std::time::Duration::from_secs(3))
-                    .await;
-            }
-            #[cfg(feature = "mcp-client")]
-            {
-                let client = app.state::<mcp_client::McpClient>();
-                client.cancel.cancel();
-                client.runtime.shutdown().await;
-                tracing::info!("aether.plugin.mcp_client.shutdown.complete");
-            }
-            #[cfg(feature = "mcp-server")]
-            if let Err(error) = app.state::<aether_mcp_server::McpServer>().stop().await {
-                tracing::warn!(code = ?error.code(), "mcp_server.stop_failed");
-            }
-            #[cfg(feature = "providers")]
-            app.state::<providers::Providers>().cancel_all();
-            #[cfg(feature = "search")]
-            app.state::<search::Search>().cancel_all();
-            tracing::info!("aether.plugin.shutdown.finished");
-            if let Err(error) = app.state::<LogHandle>().flush() {
-                tracing::warn!(%error, "logs.flush_failed");
-            }
-        });
     }
 }

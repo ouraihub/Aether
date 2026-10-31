@@ -48,7 +48,12 @@ function privateLiteral(host: string): boolean {
     )
   }
   if (!/^\d+(?:\.\d+){3}$/u.test(host))
-    return host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || !host.includes('.')
+    return (
+      host === 'localhost' ||
+      host.endsWith('.localhost') ||
+      host.endsWith('.local') ||
+      !host.includes('.')
+    )
   const parts = host.split('.').map(Number)
   const a = parts[0],
     b = parts[1],
@@ -69,10 +74,13 @@ function privateLiteral(host: string): boolean {
     (a === 203 && b === 0 && c === 113)
   )
 }
-export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHttp {
+export function createWorkerOutbound(
+  options: WorkerOutboundOptions,
+): OutboundHttp {
   const limits = Object.freeze({ ...options.limits })
   for (const value of Object.values(limits))
-    if (!Number.isSafeInteger(value) || value <= 0) throw badRequest('outboundLimits', 'invalid')
+    if (!Number.isSafeInteger(value) || value <= 0)
+      throw badRequest('outboundLimits', 'invalid')
   const origins = new Set(
     options.allowedOrigins.map((origin) => {
       let url: URL
@@ -81,11 +89,16 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
       } catch {
         throw badRequest('allowedOrigins', 'invalid')
       }
-      if (url.origin !== origin || url.username || url.password) throw badRequest('allowedOrigins', 'invalid')
+      if (url.origin !== origin || url.username || url.password)
+        throw badRequest('allowedOrigins', 'invalid')
       return origin
     }),
   )
-  if (origins.size === 0) throw new KitFailure('needs_config', 'Outbound origins must be explicitly configured')
+  if (origins.size === 0)
+    throw new KitFailure(
+      'needs_config',
+      'Outbound origins must be explicitly configured',
+    )
   const privateOrigins = new Set(options.privateGateway?.allowedOrigins ?? [])
   for (const origin of privateOrigins) {
     let target: URL
@@ -109,14 +122,17 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
       } catch {
         throw badRequest('url', 'invalid')
       }
-      const local = options.allowLoopbackForTests === true && isLoopback(target.hostname)
+      const local =
+        options.allowLoopbackForTests === true && isLoopback(target.hostname)
       const privateTarget = privateOrigins.has(target.origin)
       if (
         target.username ||
         target.password ||
         target.hash ||
         (!local && !privateTarget && target.protocol !== 'https:') ||
-        ((local || privateTarget) && target.protocol !== 'https:' && target.protocol !== 'http:') ||
+        ((local || privateTarget) &&
+          target.protocol !== 'https:' &&
+          target.protocol !== 'http:') ||
         (!local && !privateTarget && privateLiteral(target.hostname)) ||
         !origins.has(target.origin)
       )
@@ -126,22 +142,32 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
         !local &&
         (!gateway ||
           gateway.security !==
-            (privateTarget ? 'explicit-private-targets-at-connect-time' : 'public-addresses-at-connect-time'))
+            (privateTarget
+              ? 'explicit-private-targets-at-connect-time'
+              : 'public-addresses-at-connect-time'))
       )
-        throw new KitFailure('needs_config', 'Trusted connect-time outbound gateway is required')
+        throw new KitFailure(
+          'needs_config',
+          'Trusted connect-time outbound gateway is required',
+        )
       const abort = new AbortController()
       let failure: KitFailure | null = null
       const firstTimer = setTimeout(
-        () => fail(new KitFailure('timeout', 'Outbound first-byte deadline exceeded')),
+        () =>
+          fail(
+            new KitFailure('timeout', 'Outbound first-byte deadline exceeded'),
+          ),
         limits.firstByteMs,
       )
       let idleTimer: ReturnType<typeof setTimeout> | undefined
       const totalTimer = setTimeout(
-        () => fail(new KitFailure('timeout', 'Outbound total deadline exceeded')),
+        () =>
+          fail(new KitFailure('timeout', 'Outbound total deadline exceeded')),
         limits.totalMs,
       )
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
-      let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined
+      let bodyController:
+        ReadableStreamDefaultController<Uint8Array> | undefined
       let finished = false
       function clean(): void {
         clearTimeout(firstTimer)
@@ -162,14 +188,19 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
       function onAbort(): void {
         if (finished) return
         finished = true
-        bodyController?.error(failure ?? new KitFailure('cancelled', 'Outbound request cancelled'))
+        bodyController?.error(
+          failure ?? new KitFailure('cancelled', 'Outbound request cancelled'),
+        )
         if (reader) void reader.cancel().catch(() => {})
         clean()
       }
       init.signal?.addEventListener('abort', callerAbort, { once: true })
       abort.signal.addEventListener('abort', onAbort, { once: true })
       if (init.signal?.aborted) callerAbort()
-      if (abort.signal.aborted) throw failure ?? new KitFailure('cancelled', 'Outbound request cancelled')
+      if (abort.signal.aborted)
+        throw (
+          failure ?? new KitFailure('cancelled', 'Outbound request cancelled')
+        )
       try {
         const headers = new Headers(init.headers)
         headers.set('User-Agent', 'Aether-Worker/1')
@@ -184,15 +215,24 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
         const pending = local
           ? (options.localFetch ?? fetch)(target.href, request)
           : gateway?.binding.fetch(target.href, request)
-        if (!pending) throw new KitFailure('needs_config', 'Trusted connect-time outbound gateway is required')
+        if (!pending)
+          throw new KitFailure(
+            'needs_config',
+            'Trusted connect-time outbound gateway is required',
+          )
         void pending.then(
           (response) => {
-            if (abort.signal.aborted) void response.body?.cancel().catch(() => {})
+            if (abort.signal.aborted)
+              void response.body?.cancel().catch(() => {})
           },
           () => {},
         )
         const aborted = Promise.withResolvers<never>()
-        const rejectAbort = () => aborted.reject(failure ?? new KitFailure('cancelled', 'Outbound request cancelled'))
+        const rejectAbort = () =>
+          aborted.reject(
+            failure ??
+              new KitFailure('cancelled', 'Outbound request cancelled'),
+          )
         abort.signal.addEventListener('abort', rejectAbort, { once: true })
         let response: Response
         try {
@@ -204,12 +244,18 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
           void response.body?.cancel().catch(() => {})
           throw failure
         }
-        if (response.redirected || (response.url && response.url !== target.href)) {
+        if (
+          response.redirected ||
+          (response.url && response.url !== target.href)
+        ) {
           void response.body?.cancel().catch(() => {})
           throw badRequest('url', 'redirect_forbidden')
         }
         const length = response.headers.get('content-length')
-        if (length !== null && (!/^\d+$/u.test(length) || Number(length) > limits.maxResponseBytes)) {
+        if (
+          length !== null &&
+          (!/^\d+$/u.test(length) || Number(length) > limits.maxResponseBytes)
+        ) {
           void response.body?.cancel().catch(() => {})
           throw badRequest('response', 'too_large', limits.maxResponseBytes)
         }
@@ -227,7 +273,10 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
           async pull(controller) {
             if (!reader || finished) return
             idleTimer = setTimeout(
-              () => fail(new KitFailure('timeout', 'Outbound idle deadline exceeded')),
+              () =>
+                fail(
+                  new KitFailure('timeout', 'Outbound idle deadline exceeded'),
+                ),
               limits.idleMs,
             )
             try {
@@ -244,7 +293,9 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
               clearTimeout(firstTimer)
               received += result.value.byteLength
               if (received > limits.maxResponseBytes) {
-                fail(badRequest('response', 'too_large', limits.maxResponseBytes))
+                fail(
+                  badRequest('response', 'too_large', limits.maxResponseBytes),
+                )
                 return
               }
               controller.enqueue(result.value)
@@ -285,11 +336,19 @@ export function createWorkerTargetCheck(options: {
   readonly checker: TrustedTargetChecker
   readonly allowLoopbackForTests?: boolean
 }): (url: URL, signal: AbortSignal) => Promise<void> {
-  if (!options.checker || options.checker.security !== 'all-dns-addresses-preflight')
-    throw new KitFailure('needs_config', 'Trusted DNS target checker is required')
+  if (
+    !options.checker ||
+    options.checker.security !== 'all-dns-addresses-preflight'
+  )
+    throw new KitFailure(
+      'needs_config',
+      'Trusted DNS target checker is required',
+    )
   return async (url: URL, signal: AbortSignal): Promise<void> => {
-    if (signal.aborted) throw new KitFailure('cancelled', 'Target check cancelled')
-    const local = options.allowLoopbackForTests === true && isLoopback(url.hostname)
+    if (signal.aborted)
+      throw new KitFailure('cancelled', 'Target check cancelled')
+    const local =
+      options.allowLoopbackForTests === true && isLoopback(url.hostname)
     if (
       url.username ||
       url.password ||
@@ -300,6 +359,7 @@ export function createWorkerTargetCheck(options: {
     )
       throw badRequest('url', 'outbound_policy')
     if (!local) await options.checker.checkTarget(new URL(url.href), signal)
-    if (signal.aborted) throw new KitFailure('cancelled', 'Target check cancelled')
+    if (signal.aborted)
+      throw new KitFailure('cancelled', 'Target check cancelled')
   }
 }

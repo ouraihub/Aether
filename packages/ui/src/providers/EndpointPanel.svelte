@@ -1,6 +1,7 @@
 <script lang="ts">
   // One endpoint's keys, address and models.
-  // Fields edit the draft in place; `oncommit` asks the parent to save (docs/33 §3); keys save on their own (docs/34).
+  // Fields edit the draft in place; oncommit asks the parent to save (docs/33 §3).
+  // Keys save on their own (docs/34).
   import BrainIcon from '@lucide/svelte/icons/brain'
   import ChevronRightIcon from '@lucide/svelte/icons/chevron-right'
   import ChevronsDownUpIcon from '@lucide/svelte/icons/chevrons-down-up'
@@ -91,14 +92,14 @@
 
   let url = $state(endpoint.baseUrl)
   let urlError = $state(false)
-  // A save replaces the draft object; only a changed committed address may overwrite what the user is typing.
+  // A save replaces the draft object; only a changed committed address may
+  // overwrite what the user is typing.
   let seenUrl = endpoint.baseUrl
   $effect.pre(() => {
     const next = endpoint.baseUrl
     if (next === seenUrl) return
     seenUrl = next
     url = next
-    urlError = false
   })
   let settingsOpen = $state(false)
   // A chat "open settings" action names this endpoint's model: open its dialog once.

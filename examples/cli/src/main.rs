@@ -1,25 +1,33 @@
 //! 不依赖 Tauri 的命令行宿主：保存一个服务商 → 解析模型 → 跑一次 Chat（docs/90 R6-1、R6-2）。
 //!
 //! 用法：`example-cli <消息>`，环境变量：
-//! `AETHER_BASE_URL`（必填）、`AETHER_MODEL`（必填）、`AETHER_PROTOCOL`（默认 `openai-chat`）、`AETHER_API_KEY`（可选；回环地址可省）、
+//! `AETHER_BASE_URL`（必填）、`AETHER_MODEL`（必填）、
+//! `AETHER_PROTOCOL`（默认 `openai-chat`）、
+//! `AETHER_API_KEY`（可选；回环地址可省）、
 //! `AETHER_TOOL=1`（提供只读工具 `get_secret_word`，自动执行，用于验证工具调用）。
 
 use aether_observability::LogConfig;
 use aether_providers::{
-    EndpointKeySave, EndpointSave, ModelRef, ModelSave, ModelType, Protocol, ProviderSave, Store,
-    TypeSource,
+    EndpointKeySave, EndpointSave, ModelRef, ModelSave, ModelType, Protocol,
+    ProviderSave, Store, TypeSource,
 };
 use aether_runtime::AddressPolicy;
 use aether_runtime::{
-    Approval, AuthorizeContext, CancellationToken, EndStatus, HostTool, KitHost, RunConfig,
-    RunContext, RunDependencies, RunEvent, RunOwner, RunRequest, RunService, ToolCall, ToolEffect,
-    ToolError, ToolOutput, ToolSource, ToolSpec,
+    Approval, AuthorizeContext, CancellationToken, EndStatus, HostTool, KitHost,
+    RunConfig, RunContext, RunDependencies, RunEvent, RunOwner, RunRequest,
+    RunService,
+    ToolCall,
+    ToolEffect,
+    ToolError,
+    ToolOutput,
+    ToolSource,
+    ToolSpec,
 };
 use std::io::Write;
 use std::sync::{Arc, Mutex, PoisonError};
 
-/// The only tool: read-only, so `Auto`. Its answer is not guessable, which proves the model
-/// really received the result.
+/// The only tool: read-only, so `Auto`. Its answer is not guessable, which
+/// proves the model really received the result.
 const TOOL: &str = "get_secret_word";
 const WORD: &str = "pelican-42";
 
@@ -38,7 +46,9 @@ impl KitHost for CliHost {
             spec: ToolSpec {
                 name: TOOL.to_owned(),
                 description: "Returns today's secret word.".to_owned(),
-                parameters: serde_json::json!({ "type": "object", "properties": {} }),
+                parameters: serde_json::json!({
+                    "type": "object", "properties": {}
+                }),
                 approval: Approval::Auto,
                 effect: ToolEffect::Read,
                 source: ToolSource::Host,
@@ -46,7 +56,11 @@ impl KitHost for CliHost {
         }]
     }
 
-    fn authorize(&self, call: &ToolCall, context: &AuthorizeContext<'_>) -> Approval {
+    fn authorize(
+        &self,
+        call: &ToolCall,
+        context: &AuthorizeContext<'_>,
+    ) -> Approval {
         if call.name == TOOL {
             context.proposed
         } else {
@@ -95,12 +109,17 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
     let base_url = var("AETHER_BASE_URL")?;
     let model_id = var("AETHER_MODEL")?;
     let protocol: Protocol = serde_json::from_value(serde_json::Value::String(
-        std::env::var("AETHER_PROTOCOL").unwrap_or_else(|_| "openai-chat".to_owned()),
+        std::env::var("AETHER_PROTOCOL")
+            .unwrap_or_else(|_| "openai-chat".to_owned()),
     ))?;
     let with_tool = std::env::var_os("AETHER_TOOL").is_some();
 
     let root = aether_observability::data_root("aether-cli")?;
-    let logs = aether_observability::init(&root.join("logs"), LogConfig::default(), None)?;
+    let logs = aether_observability::init(
+        &root.join("logs"),
+        LogConfig::default(),
+        None,
+    )?;
 
     // Providers: one provider named "cli", replaced as a whole on every start.
     let store = Store::open(&root)?;
@@ -179,9 +198,13 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
                 },
                 request,
                 Arc::new(move |event| {
-                    let mut out = out.lock().unwrap_or_else(PoisonError::into_inner);
+                    let mut out = out
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner);
                     let written = match &event {
-                        RunEvent::TextDelta { text } => out.write_all(text.as_bytes()),
+                        RunEvent::TextDelta { text } => {
+                            out.write_all(text.as_bytes())
+                        }
                         RunEvent::ToolResult {
                             call_id, outcome, ..
                         } => writeln!(out, "\n[tool {call_id}: {outcome:?}]"),
@@ -198,7 +221,8 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
                         | RunEvent::Context { .. }
                         | RunEvent::ReasoningDelta { .. } => Ok(()),
                     };
-                    // CLI policy: stdout closure loses the echo, not the run or its result.
+                    // CLI policy: stdout closure loses the echo, not the run
+                    // or its result.
                     let _ = written.and_then(|()| out.flush());
                     Ok(())
                 }),
@@ -206,7 +230,9 @@ fn run() -> Result<EndStatus, Box<dyn std::error::Error>> {
             .await;
         let status = match started {
             Ok(_) => ended.recv().await.ok_or_else(|| {
-                aether_runtime::KitError::internal(std::io::Error::other("run closed without End"))
+                aether_runtime::KitError::internal(std::io::Error::other(
+                    "run closed without End",
+                ))
             }),
             Err(error) => Err(error),
         };

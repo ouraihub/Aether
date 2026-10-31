@@ -1,11 +1,17 @@
-//! Fixed vectors for the byte contract in docs/14 §3.1; no store or filesystem.
+//! Fixed vectors for the byte contract in docs/14 §3.1; no store or
+//! filesystem.
 
 use super::{ContentIdentity, digest};
 
-const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+const EMPTY_SHA256: &str =
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+const ABC_SHA256: &str =
+    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
-fn identity<'a>(version: Option<&'a str>, license: Option<&'a str>) -> ContentIdentity<'a> {
+fn identity<'a>(
+    version: Option<&'a str>,
+    license: Option<&'a str>,
+) -> ContentIdentity<'a> {
     ContentIdentity {
         name: "guide",
         description: "test skill",

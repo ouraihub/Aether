@@ -8,7 +8,11 @@
     kit,
     mode = 'client',
     serverName = 'aether',
-  }: { kit: KitContext; mode?: 'client' | 'server'; serverName?: string } = $props()
+  }: {
+    kit: KitContext
+    mode?: 'client' | 'server'
+    serverName?: string
+  } = $props()
   // svelte-ignore state_referenced_locally
   setKitContext(kit)
 </script>

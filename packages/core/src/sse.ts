@@ -6,7 +6,10 @@ export interface SseEvent {
 }
 /** Limits count encoded bytes, including unterminated lines and multiline data. */
 export class SseParser {
-  private readonly decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false })
+  private readonly decoder = new TextDecoder('utf-8', {
+    fatal: true,
+    ignoreBOM: false,
+  })
   private line = ''
   private event: string | null = null
   private data: string[] = []
@@ -54,9 +57,18 @@ export class SseParser {
         continue
       }
       const firstUnit = char.charCodeAt(0)
-      this.lineBytes += firstUnit <= 0x7f ? 1 : firstUnit <= 0x7ff ? 2 : char.length === 2 ? 4 : 3
+      this.lineBytes +=
+        firstUnit <= 0x7f
+          ? 1
+          : firstUnit <= 0x7ff
+            ? 2
+            : char.length === 2
+              ? 4
+              : 3
       if (this.lineBytes > this.maxLineBytes)
-        throw new KitFailure('upstream', 'SSE line limit exceeded', { reason: 'sse_limit' })
+        throw new KitFailure('upstream', 'SSE line limit exceeded', {
+          reason: 'sse_limit',
+        })
       this.line += char
     }
     return events
@@ -67,7 +79,8 @@ export class SseParser {
     this.line = ''
     this.lineBytes = 0
     if (!line) {
-      if (this.hasData) events.push({ event: this.event, data: this.data.join('\n') })
+      if (this.hasData)
+        events.push({ event: this.event, data: this.data.join('\n') })
       this.data = []
       this.event = null
       this.eventBytes = 0
@@ -81,7 +94,9 @@ export class SseParser {
     if (field !== 'event' && field !== 'data') return
     this.eventBytes += size + 1
     if (this.eventBytes > this.maxEventBytes)
-      throw new KitFailure('upstream', 'SSE event limit exceeded', { reason: 'sse_limit' })
+      throw new KitFailure('upstream', 'SSE event limit exceeded', {
+        reason: 'sse_limit',
+      })
     if (field === 'event') this.event = value || null
     else {
       this.hasData = true

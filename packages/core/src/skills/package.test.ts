@@ -10,12 +10,21 @@ function crc32(bytes: Uint8Array): number {
   let crc = 0xffffffff
   for (const byte of bytes) {
     crc ^= byte
-    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0)
+    for (let bit = 0; bit < 8; bit++)
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0)
   }
   return (crc ^ 0xffffffff) >>> 0
 }
 /** Deterministic in-memory ZIP fixture; no filesystem operations. */
-function zip(entries: readonly { path: string; body: string; mode?: number; flags?: number; deflate?: boolean }[]) {
+function zip(
+  entries: readonly {
+    path: string
+    body: string
+    mode?: number
+    flags?: number
+    deflate?: boolean
+  }[],
+) {
   const chunks: Uint8Array[] = []
   const central: Uint8Array[] = []
   let offset = 0
@@ -65,7 +74,9 @@ function zip(entries: readonly { path: string; body: string; mode?: number; flag
   )
   ev.setUint32(16, offset, true)
   const all = [...chunks, ...central, end]
-  const bytes = new Uint8Array(all.reduce((size, chunk) => size + chunk.length, 0))
+  const bytes = new Uint8Array(
+    all.reduce((size, chunk) => size + chunk.length, 0),
+  )
   let position = 0
   for (const chunk of all) {
     bytes.set(chunk, position)
@@ -76,16 +87,28 @@ function zip(entries: readonly { path: string; body: string; mode?: number; flag
 
 describe('bounded ZIP skill packages', () => {
   it('reads deflated files and caps actual inflated bytes', async () => {
-    const content = await readSkillSource(zip([{ path: 'SKILL.md', body: markdown, deflate: true }]))
+    const content = await readSkillSource(
+      zip([{ path: 'SKILL.md', body: markdown, deflate: true }]),
+    )
     assert.equal(content.name, 'packed')
     await assert.rejects(
       readSkillSource(
         zip([
           { path: 'SKILL.md', body: markdown },
-          { path: 'assets/bomb', body: 'x'.repeat(1024 * 1024 + 1), deflate: true },
+          {
+            path: 'assets/bomb',
+            body: 'x'.repeat(1024 * 1024 + 1),
+            deflate: true,
+          },
         ]),
       ),
-      { details: { field: 'assets/bomb', reason: 'too_large', limit: 1024 * 1024 } },
+      {
+        details: {
+          field: 'assets/bomb',
+          reason: 'too_large',
+          limit: 1024 * 1024,
+        },
+      },
     )
   })
   it('retains sorted scripts/assets/license across install/manual edit/duplicate and pinned reads', async () => {
@@ -105,22 +128,48 @@ describe('bounded ZIP skill packages', () => {
       ],
     )
     const preview = await skills.preview([], content)
-    let catalog = await skills.install([], content, preview.digest, false, 'one', 1)
+    let catalog = await skills.install(
+      [],
+      content,
+      preview.digest,
+      false,
+      'one',
+      1,
+    )
     catalog = await skills.save(
       catalog,
-      { id: 'one', expectedRevision: 1, name: 'packed', description: 'package', body: 'edited' },
+      {
+        id: 'one',
+        expectedRevision: 1,
+        name: 'packed',
+        description: 'package',
+        body: 'edited',
+      },
       '',
       2,
     )
     catalog = await skills.duplicate(catalog, 'one', 'copy', 'two', 3)
     assert.equal(skills.get(catalog, 'two').license, 'MIT')
     assert.equal(skills.get(catalog, 'two').hasScripts, true)
-    assert.equal(new TextDecoder().decode(skills.file(catalog, 'two', 1, 'scripts/z.sh')), 'echo safe')
+    assert.equal(
+      new TextDecoder().decode(skills.file(catalog, 'two', 1, 'scripts/z.sh')),
+      'echo safe',
+    )
     assert.throws(() => skills.files(catalog, 'one', 1))
     assert.throws(() => skills.file(catalog, 'two', 1, 'missing'))
-    const changed = { ...content, files: content.files.filter((file) => file.kind !== 'script') }
+    const changed = {
+      ...content,
+      files: content.files.filter((file) => file.kind !== 'script'),
+    }
     const changedPreview = await skills.preview(catalog, changed)
-    catalog = await skills.install(catalog, changed, changedPreview.digest, true, '', 4)
+    catalog = await skills.install(
+      catalog,
+      changed,
+      changedPreview.digest,
+      true,
+      '',
+      4,
+    )
     assert.equal(skills.get(catalog, 'one').revision, 3)
   })
   it('rejects unsafe paths, duplicates, links, encryption, secrets, depth and size violations', async () => {
@@ -129,9 +178,12 @@ describe('bounded ZIP skill packages', () => {
       { path: '/SKILL.md', reason: 'absolute_path' },
       { path: 'a\\SKILL.md', reason: 'backslash_path' },
     ]) {
-      await assert.rejects(readSkillSource(zip([{ path: entry.path, body: markdown }])), {
-        details: { field: 'zip', reason: entry.reason },
-      })
+      await assert.rejects(
+        readSkillSource(zip([{ path: entry.path, body: markdown }])),
+        {
+          details: { field: 'zip', reason: entry.reason },
+        },
+      )
     }
     await assert.rejects(
       readSkillSource(
@@ -142,12 +194,20 @@ describe('bounded ZIP skill packages', () => {
       ),
       { details: { field: 'zip', reason: 'duplicate_path' } },
     )
-    await assert.rejects(readSkillSource(zip([{ path: 'SKILL.md', body: markdown, mode: 0xa1ff }])), {
-      details: { field: 'zip', reason: 'link' },
-    })
-    await assert.rejects(readSkillSource(zip([{ path: 'SKILL.md', body: markdown, flags: 1 }])), {
-      details: { field: 'zip', reason: 'encrypted' },
-    })
+    await assert.rejects(
+      readSkillSource(
+        zip([{ path: 'SKILL.md', body: markdown, mode: 0xa1ff }]),
+      ),
+      {
+        details: { field: 'zip', reason: 'link' },
+      },
+    )
+    await assert.rejects(
+      readSkillSource(zip([{ path: 'SKILL.md', body: markdown, flags: 1 }])),
+      {
+        details: { field: 'zip', reason: 'encrypted' },
+      },
+    )
     await assert.rejects(
       readSkillSource(
         zip([
@@ -164,7 +224,13 @@ describe('bounded ZIP skill packages', () => {
           { path: 'scripts/a/b/c/d/x.sh', body: 'x' },
         ]),
       ),
-      { details: { field: 'scripts/a/b/c/d/x.sh', reason: 'too_deep', limit: 4 } },
+      {
+        details: {
+          field: 'scripts/a/b/c/d/x.sh',
+          reason: 'too_deep',
+          limit: 4,
+        },
+      },
     )
     await assert.rejects(
       readSkillSource(
@@ -182,7 +248,13 @@ describe('bounded ZIP skill packages', () => {
           { path: 'assets/large', body: 'x'.repeat(1024 * 1024 + 1) },
         ]),
       ),
-      { details: { field: 'assets/large', reason: 'too_large', limit: 1024 * 1024 } },
+      {
+        details: {
+          field: 'assets/large',
+          reason: 'too_large',
+          limit: 1024 * 1024,
+        },
+      },
     )
   })
 })

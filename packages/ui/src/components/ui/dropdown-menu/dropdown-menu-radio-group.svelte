@@ -1,4 +1,6 @@
-<!-- Local change: `value as never` like select.svelte, as exactOptionalPropertyTypes rejects the bound `string | undefined` (docs/04 §4). -->
+<!-- Local change: `value as never` like select.svelte,
+  as exactOptionalPropertyTypes rejects the bound `string | undefined` " +
+    "(docs/04 §4). -->
 <script lang="ts">
 	import { DropdownMenu as DropdownMenuPrimitive } from "bits-ui";
 

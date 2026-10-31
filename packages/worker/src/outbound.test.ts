@@ -1,11 +1,22 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createWorkerOutbound, createWorkerTargetCheck, type OutboundLimits } from './outbound.ts'
-const limits: OutboundLimits = { firstByteMs: 40, idleMs: 30, totalMs: 100, maxResponseBytes: 16 }
+import {
+  createWorkerOutbound,
+  createWorkerTargetCheck,
+  type OutboundLimits,
+} from './outbound.ts'
+const limits: OutboundLimits = {
+  firstByteMs: 40,
+  idleMs: 30,
+  totalMs: 100,
+  maxResponseBytes: 16,
+}
 const origin = 'https://api.example.com'
 test('remote requests fail closed without a trusted connect-time binding', async () => {
   const outbound = createWorkerOutbound({ allowedOrigins: [origin], limits })
-  await assert.rejects(outbound.fetch(`${origin}/`, {}), { code: 'needs_config' })
+  await assert.rejects(outbound.fetch(`${origin}/`, {}), {
+    code: 'needs_config',
+  })
   for (const url of [
     'http://api.example.com',
     'https://user:secret@api.example.com',
@@ -30,7 +41,10 @@ test('gateway returns manual redirects without following; callers own per-hop au
         async fetch(_input, init) {
           calls++
           assert.equal(init?.redirect, 'manual')
-          return new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1' } })
+          return new Response(null, {
+            status: 302,
+            headers: { Location: 'http://127.0.0.1' },
+          })
         },
       },
     },
@@ -102,7 +116,9 @@ test('stream content limits, idle deadlines and cancellation close upstream', as
       },
     },
   })
-  await assert.rejects((await outbound.fetch(origin, {})).arrayBuffer(), { code: 'bad_request' })
+  await assert.rejects((await outbound.fetch(origin, {})).arrayBuffer(), {
+    code: 'bad_request',
+  })
   assert.equal(cancelled, true)
   const idle = createWorkerOutbound({
     allowedOrigins: [origin],
@@ -122,7 +138,9 @@ test('stream content limits, idle deadlines and cancellation close upstream', as
       },
     },
   })
-  await assert.rejects((await idle.fetch(origin, {})).arrayBuffer(), { code: 'timeout' })
+  await assert.rejects((await idle.fetch(origin, {})).arrayBuffer(), {
+    code: 'timeout',
+  })
 })
 
 test('private gateway permission is exact origin and port, never a global private bypass', async () => {
@@ -143,8 +161,12 @@ test('private gateway permission is exact origin and port, never a global privat
     },
   })
   assert.equal(await (await outbound.fetch(target, {})).text(), 'ok')
-  await assert.rejects(outbound.fetch('http://10.1.2.4:8080', {}), { code: 'bad_request' })
-  await assert.rejects(outbound.fetch('http://10.1.2.3:8081', {}), { code: 'bad_request' })
+  await assert.rejects(outbound.fetch('http://10.1.2.4:8080', {}), {
+    code: 'bad_request',
+  })
+  await assert.rejects(outbound.fetch('http://10.1.2.3:8081', {}), {
+    code: 'bad_request',
+  })
   assert.equal(calls, 1)
 })
 
@@ -167,7 +189,9 @@ test('total deadline and caller cancellation stop even unconsumed response strea
       },
     },
   })
-  await assert.rejects((await outbound.fetch(origin, {})).arrayBuffer(), { code: 'timeout' })
+  await assert.rejects((await outbound.fetch(origin, {})).arrayBuffer(), {
+    code: 'timeout',
+  })
   const controller = new AbortController()
   const response = await outbound.fetch(origin, { signal: controller.signal })
   controller.abort()
@@ -185,8 +209,13 @@ test('target checker actually invokes the trusted DNS policy and never substitut
     },
   })
   const signal = new AbortController().signal
-  await assert.rejects(check(new URL('https://public.example.com'), signal), /DNS rejected/u)
+  await assert.rejects(
+    check(new URL('https://public.example.com'), signal),
+    /DNS rejected/u,
+  )
   assert.equal(calls, 1)
-  await assert.rejects(check(new URL('https://10.0.0.1'), signal), { code: 'bad_request' })
+  await assert.rejects(check(new URL('https://10.0.0.1'), signal), {
+    code: 'bad_request',
+  })
   assert.equal(calls, 1)
 })

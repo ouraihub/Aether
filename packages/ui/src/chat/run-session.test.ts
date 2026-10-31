@@ -1,9 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createFakePorts, KitClientError } from '../ports'
-import type { ConversationClient, Conversation, RunAccepted, RunEvent, RunRequest, Turn } from '../ports'
+import type {
+  ConversationClient,
+  Conversation,
+  RunAccepted,
+  RunEvent,
+  RunRequest,
+  Turn,
+} from '../ports'
 import { RunSession, type RunBase } from './run-session.svelte'
 
-const sourceModel = { endpointId: 'original-endpoint', modelId: 'original-model' }
+const sourceModel = {
+  endpointId: 'original-endpoint',
+  modelId: 'original-model',
+}
 const pickedModel = { endpointId: 'picked-endpoint', modelId: 'picked-model' }
 const base: RunBase = {
   purpose: 'chat',
@@ -40,9 +50,19 @@ function stored(overrides: Partial<Turn> = {}): Turn {
   }
 }
 
-function conversation(turns: Turn[], selectedTurnId: string | null = 'source'): Conversation {
+function conversation(
+  turns: Turn[],
+  selectedTurnId: string | null = 'source',
+): Conversation {
   return {
-    summary: { id: 'conversation', title: 'Conversation', scope: null, createdAt: 0, updatedAt: 0, selectedTurnId },
+    summary: {
+      id: 'conversation',
+      title: 'Conversation',
+      scope: null,
+      createdAt: 0,
+      updatedAt: 0,
+      selectedTurnId,
+    },
     turns,
   }
 }
@@ -64,8 +84,14 @@ function deferred<T>(): Deferred<T> {
 }
 
 function setup(withHistory = true) {
-  const runs: { request: RunRequest; emit: (event: RunEvent) => void; accepted: Deferred<RunAccepted> }[] = []
-  const get = vi.fn<ConversationClient['get']>(() => Promise.resolve(conversation([stored()])))
+  const runs: {
+    request: RunRequest
+    emit: (event: RunEvent) => void
+    accepted: Deferred<RunAccepted>
+  }[] = []
+  const get = vi.fn<ConversationClient['get']>(() =>
+    Promise.resolve(conversation([stored()])),
+  )
   const cancel = vi.fn(() => Promise.resolve())
   const approve = vi.fn(() => Promise.resolve())
   const ports = createFakePorts({
@@ -82,10 +108,20 @@ function setup(withHistory = true) {
   const chat = required(ports.chat)
   if (withHistory) Object.assign(required(ports.conversations), { get })
   else delete ports.conversations
-  return { session: new RunSession(chat, ports.conversations), runs, get, cancel, approve }
+  return {
+    session: new RunSession(chat, ports.conversations),
+    runs,
+    get,
+    cancel,
+    approve,
+  }
 }
 
-const accepted: RunAccepted = { runId: 'run', conversationId: 'conversation', turnId: 'candidate' }
+const accepted: RunAccepted = {
+  runId: 'run',
+  conversationId: 'conversation',
+  turnId: 'candidate',
+}
 
 describe('RunSession candidate replies', () => {
   it('restores graph metadata and sends against the selected parent, not the last candidate', async () => {
@@ -103,8 +139,15 @@ describe('RunSession candidate replies', () => {
     })
     expect(session.selectedTurnId).toBe(source.id)
     const sent = session.send(base, 'Next question')
-    expect(required(runs[0]).request).toMatchObject({ replyToId: source.id, regenerate: false })
-    expect(session.turns[2]).toMatchObject({ parentId: source.id, kind: 'reply', ...pickedModel })
+    expect(required(runs[0]).request).toMatchObject({
+      replyToId: source.id,
+      regenerate: false,
+    })
+    expect(session.turns[2]).toMatchObject({
+      parentId: source.id,
+      kind: 'reply',
+      ...pickedModel,
+    })
     required(runs[0]).accepted.resolve(accepted)
     expect(await sent).toBe(true)
     expect(session.turns[2]).toMatchObject({
@@ -118,7 +161,12 @@ describe('RunSession candidate replies', () => {
   it('keeps the source and its question when retrying with its original model snapshot', async () => {
     const { session, runs, get } = setup()
     const source = stored({ parentId: 'parent' })
-    const candidate = stored({ id: 'candidate', parentId: 'parent', supersedesId: source.id, text: 'New answer' })
+    const candidate = stored({
+      id: 'candidate',
+      parentId: 'parent',
+      supersedesId: source.id,
+      text: 'New answer',
+    })
     session.show('conversation', [source], source.id)
     get.mockResolvedValue(conversation([source, candidate]))
     const retried = session.retry(base, source.id)
@@ -152,7 +200,11 @@ describe('RunSession candidate replies', () => {
 
   it('honors an explicit switch model while keeping the question and source reasoning effort', async () => {
     const { session, runs } = setup()
-    session.show('conversation', [stored({ reasoningEffort: 'high' })], 'source')
+    session.show(
+      'conversation',
+      [stored({ reasoningEffort: 'high' })],
+      'source',
+    )
     const retried = session.retry(base, 'source', pickedModel)
     expect(required(runs[0]).request).toMatchObject({
       model: pickedModel,
@@ -161,14 +213,22 @@ describe('RunSession candidate replies', () => {
     })
     required(runs[0]).accepted.resolve(accepted)
     await retried
-    expect(session.turns[1]).toMatchObject({ id: 'candidate', questionId: 'question', ...pickedModel })
+    expect(session.turns[1]).toMatchObject({
+      id: 'candidate',
+      questionId: 'question',
+      ...pickedModel,
+    })
   })
 
   it('translates the original reply with the real instruction and original model', async () => {
     const { session, runs } = setup()
     const source = stored()
     session.show('conversation', [source], source.id)
-    const translated = session.translate({ ...base, model: null }, source.id, ' French ')
+    const translated = session.translate(
+      { ...base, model: null },
+      source.id,
+      ' French ',
+    )
     const instruction = `Translate the following reply into French. Return only the translation, preserving Markdown formatting.\n\n${source.text}`
     expect(required(runs[0]).request).toMatchObject({
       translateTurnId: source.id,
@@ -202,7 +262,11 @@ describe('RunSession candidate replies', () => {
     const { session, runs } = setup()
     session.show('conversation', [stored({ kind: 'translation' })], 'source')
     const retried = session.retry(base, 'source')
-    expect(session.turns[1]).toMatchObject({ kind: 'translation', questionId: 'question', supersedesId: 'source' })
+    expect(session.turns[1]).toMatchObject({
+      kind: 'translation',
+      questionId: 'question',
+      supersedesId: 'source',
+    })
     required(runs[0]).accepted.resolve(accepted)
     await retried
   })
@@ -221,10 +285,27 @@ describe('RunSession candidate replies', () => {
     const sent = session.send(base, 'Next question', true)
     const run = required(runs[0])
     run.emit({ kind: 'text_delta', text: 'Streamed answer' })
-    run.emit({ kind: 'tool_call', callId: 'tool', name: 'read_note', source: 'host' })
-    run.emit({ kind: 'tool_result', callId: 'tool', outcome: 'ok', summary: 'Read note' })
-    const hits = [{ title: 'Source', url: 'https://example.com', snippet: 'Excerpt' }]
-    run.emit({ kind: 'search_result', query: 'Next question', provider: 'search-provider', hits })
+    run.emit({
+      kind: 'tool_call',
+      callId: 'tool',
+      name: 'read_note',
+      source: 'host',
+    })
+    run.emit({
+      kind: 'tool_result',
+      callId: 'tool',
+      outcome: 'ok',
+      summary: 'Read note',
+    })
+    const hits = [
+      { title: 'Source', url: 'https://example.com', snippet: 'Excerpt' },
+    ]
+    run.emit({
+      kind: 'search_result',
+      query: 'Next question',
+      provider: 'search-provider',
+      hits,
+    })
     run.emit({ kind: 'end', status: 'completed', exhausted: true })
     expect(get).not.toHaveBeenCalled()
     expect(session.running).toBe(true)
@@ -244,11 +325,21 @@ describe('RunSession candidate replies', () => {
     })
     expect(session.selectedTurnId).toBe(candidate.id)
     session.show('conversation', [source, candidate], source.id)
-    expect(required(required(session.turns[1]).tools[0]).summary).toBe('Read note')
+    expect(required(required(session.turns[1]).tools[0]).summary).toBe(
+      'Read note',
+    )
     expect(required(session.turns[1]).search.hits).toEqual(hits)
     session.show(
       'conversation',
-      [source, { ...candidate, text: 'Edited answer', reasoningText: null, contextUsage: null }],
+      [
+        source,
+        {
+          ...candidate,
+          text: 'Edited answer',
+          reasoningText: null,
+          contextUsage: null,
+        },
+      ],
       source.id,
     )
     expect(required(session.turns[1]).tools).toEqual([])
@@ -260,10 +351,19 @@ describe('RunSession candidate replies', () => {
     const source = stored()
     session.show('conversation', [source], source.id)
     const retry = session.retry(base, source.id)
-    required(runs[0]).accepted.reject(new KitClientError({ code: 'needs_config', message: 'Source model removed' }))
+    required(runs[0]).accepted.reject(
+      new KitClientError({
+        code: 'needs_config',
+        message: 'Source model removed',
+      }),
+    )
     expect(await retry).toBe(false)
     expect(session.actionError).toBe('needs_config')
-    expect(session.turns[0]).toMatchObject({ id: source.id, text: source.text, questionId: source.questionId })
+    expect(session.turns[0]).toMatchObject({
+      id: source.id,
+      text: source.text,
+      questionId: source.questionId,
+    })
     expect(session.turns).toHaveLength(1)
     expect(session.selectedTurnId).toBe(source.id)
     expect(get).not.toHaveBeenCalled()
@@ -273,11 +373,22 @@ describe('RunSession candidate replies', () => {
     expect(session.actionError).toBeNull()
     required(runs[1]).accepted.resolve(accepted)
     await translation
-    required(runs[1]).emit({ kind: 'end', status: 'failed', error: { code: 'upstream', message: 'Provider failed' } })
+    required(runs[1]).emit({
+      kind: 'end',
+      status: 'failed',
+      error: { code: 'upstream', message: 'Provider failed' },
+    })
     await vi.waitFor(() => expect(session.running).toBe(false))
     expect(session.actionError).toBeNull()
-    expect(session.turns[1]).toMatchObject({ status: 'failed', error: 'upstream' })
-    expect(session.turns[0]).toMatchObject({ id: source.id, text: source.text, questionId: source.questionId })
+    expect(session.turns[1]).toMatchObject({
+      status: 'failed',
+      error: 'upstream',
+    })
+    expect(session.turns[0]).toMatchObject({
+      id: source.id,
+      text: source.text,
+      questionId: source.questionId,
+    })
     expect(session.selectedTurnId).toBe(source.id)
   })
 
@@ -286,7 +397,9 @@ describe('RunSession candidate replies', () => {
     const source = stored()
     session.show('conversation', [source], source.id)
     const translated = session.translate(base, source.id, 'French')
-    required(runs[0]).accepted.reject(new KitClientError({ code: 'upstream', message: 'Provider unavailable' }))
+    required(runs[0]).accepted.reject(
+      new KitClientError({ code: 'upstream', message: 'Provider unavailable' }),
+    )
     expect(await translated).toBe(false)
     expect(session.actionError).toBe('upstream')
     expect(session.turns).toHaveLength(1)
@@ -304,7 +417,10 @@ describe('RunSession candidate replies', () => {
     required(runs[0]).emit({ kind: 'text_delta', text: 'Still visible' })
     required(runs[0]).emit({ kind: 'end', status: 'completed' })
     await vi.waitFor(() => expect(session.running).toBe(false))
-    expect(session.turns[1]).toMatchObject({ id: 'candidate', text: 'Still visible' })
+    expect(session.turns[1]).toMatchObject({
+      id: 'candidate',
+      text: 'Still visible',
+    })
     expect(session.actionError).toBeNull()
     expect(session.historyRefreshError).toBe('History unavailable')
   })
@@ -313,18 +429,31 @@ describe('RunSession candidate replies', () => {
     const { session, runs } = setup()
     session.show('conversation', [stored()], 'source')
     const sent = session.send(base, 'New question')
-    required(runs[0]).accepted.reject(new KitClientError({ code: 'upstream', message: 'Unavailable' }))
+    required(runs[0]).accepted.reject(
+      new KitClientError({ code: 'upstream', message: 'Unavailable' }),
+    )
     expect(await sent).toBe(false)
-    expect(session.turns[1]).toMatchObject({ persisted: false, status: 'failed' })
+    expect(session.turns[1]).toMatchObject({
+      persisted: false,
+      status: 'failed',
+    })
     expect(session.selectedTurnId).toBe('source')
     expect(session.actionError).toBeNull()
     const localId = required(session.turns[1]).id
     const retry = session.retry(base, localId)
-    expect(required(runs[1]).request).toMatchObject({ replyToId: 'source', input: 'New question', regenerate: false })
+    expect(required(runs[1]).request).toMatchObject({
+      replyToId: 'source',
+      input: 'New question',
+      regenerate: false,
+    })
     expect(required(runs[1]).request.retryTurnId).toBeUndefined()
     required(runs[1]).accepted.resolve(accepted)
     await retry
-    expect(session.turns[2]).toMatchObject({ id: 'candidate', questionId: 'candidate', persisted: true })
+    expect(session.turns[2]).toMatchObject({
+      id: 'candidate',
+      questionId: 'candidate',
+      persisted: true,
+    })
   })
 
   it('ignores delayed acceptance and history refresh when another conversation is shown', async () => {
@@ -363,7 +492,11 @@ describe('RunSession candidate replies', () => {
     })
     expect(required(runs[0]).request.retryTurnId).toBeUndefined()
     expect(required(runs[0]).request.replyToId).toBeUndefined()
-    required(runs[0]).accepted.resolve({ runId: 'run', conversationId: null, turnId: null })
+    required(runs[0]).accepted.resolve({
+      runId: 'run',
+      conversationId: null,
+      turnId: null,
+    })
     await retry
     required(runs[0]).emit({ kind: 'end', status: 'completed' })
     expect(session.turns).toHaveLength(2)
@@ -373,7 +506,11 @@ describe('RunSession candidate replies', () => {
     expect(required(runs[1]).request.translateTurnId).toBeUndefined()
     expect(required(runs[1]).request.targetLanguage).toBeUndefined()
     expect(required(runs[1]).request.input).toContain(source.text)
-    required(runs[1]).accepted.resolve({ runId: 'translated', conversationId: null, turnId: null })
+    required(runs[1]).accepted.resolve({
+      runId: 'translated',
+      conversationId: null,
+      turnId: null,
+    })
     await translation
     expect(session.turns).toHaveLength(3)
   })
@@ -397,11 +534,17 @@ describe('RunSession candidate replies', () => {
   it('uses the picked model for an unaccepted local reply without a source model snapshot', async () => {
     const { session, runs } = setup(false)
     const sent = session.send({ ...base, model: null }, 'Question')
-    required(runs[0]).accepted.reject(new KitClientError({ code: 'upstream', message: 'Unavailable' }))
+    required(runs[0]).accepted.reject(
+      new KitClientError({ code: 'upstream', message: 'Unavailable' }),
+    )
     await sent
     const retried = session.retry(base, required(session.turns[0]).id)
     expect(required(runs[1]).request.model).toEqual(pickedModel)
-    required(runs[1]).accepted.resolve({ runId: 'local', conversationId: null, turnId: null })
+    required(runs[1]).accepted.resolve({
+      runId: 'local',
+      conversationId: null,
+      turnId: null,
+    })
     await retried
   })
 
@@ -422,43 +565,90 @@ describe('RunSession candidate replies', () => {
     session.show('conversation', [stored()], 'source')
     void session.send(base, 'Plain')
     expect('images' in required(runs[0]).request).toBe(false)
-    required(runs[0]).accepted.reject(new KitClientError({ code: 'network', message: 'offline' }))
+    required(runs[0]).accepted.reject(
+      new KitClientError({ code: 'network', message: 'offline' }),
+    )
     await vi.waitFor(() => expect(session.running).toBe(false))
-    const sent = session.send(base, 'Look', false, [{ mime: 'image/png', data: 'AAAA' }])
-    expect(required(runs[1]).request.images).toEqual([{ mime: 'image/png', data: 'AAAA' }])
-    expect(session.turns.at(-1)?.images).toEqual([{ mime: 'image/png', url: 'data:image/png;base64,AAAA' }])
+    const sent = session.send(base, 'Look', false, [
+      { mime: 'image/png', data: 'AAAA' },
+    ])
+    expect(required(runs[1]).request.images).toEqual([
+      { mime: 'image/png', data: 'AAAA' },
+    ])
+    expect(session.turns.at(-1)?.images).toEqual([
+      { mime: 'image/png', url: 'data:image/png;base64,AAAA' },
+    ])
     const hosted = { mime: 'image/png', url: '/images/0' }
-    get.mockResolvedValue(conversation([stored(), stored({ id: 'candidate', images: [hosted] })]))
+    get.mockResolvedValue(
+      conversation([stored(), stored({ id: 'candidate', images: [hosted] })]),
+    )
     required(runs[1]).accepted.resolve(accepted)
     await sent
     required(runs[1]).emit({ kind: 'end', status: 'completed' })
-    await vi.waitFor(() => expect(session.turns.find((turn) => turn.id === 'candidate')?.images).toEqual([hosted]))
+    await vi.waitFor(() =>
+      expect(
+        session.turns.find((turn) => turn.id === 'candidate')?.images,
+      ).toEqual([hosted]),
+    )
   })
 
   it('retries a stored source by id only and an unstored one by resending its images', async () => {
     const { session, runs } = setup()
-    session.show('conversation', [stored({ images: [{ mime: 'image/png', url: '/images/0' }] })], 'source')
+    session.show(
+      'conversation',
+      [stored({ images: [{ mime: 'image/png', url: '/images/0' }] })],
+      'source',
+    )
     void session.retry(base, 'source')
     expect(required(runs[0]).request).toMatchObject({ retryTurnId: 'source' })
     expect('images' in required(runs[0]).request).toBe(false)
-    expect(session.turns[1]?.images).toEqual([{ mime: 'image/png', url: '/images/0' }])
+    expect(session.turns[1]?.images).toEqual([
+      { mime: 'image/png', url: '/images/0' },
+    ])
 
     const local = setup(false)
-    const sent = local.session.send(base, 'Look', false, [{ mime: 'image/gif', data: 'R0lG' }])
-    required(local.runs[0]).accepted.reject(new KitClientError({ code: 'upstream', message: 'Unavailable' }))
+    const sent = local.session.send(base, 'Look', false, [
+      { mime: 'image/gif', data: 'R0lG' },
+    ])
+    required(local.runs[0]).accepted.reject(
+      new KitClientError({ code: 'upstream', message: 'Unavailable' }),
+    )
     await sent
     void local.session.retry(base, required(local.session.turns[0]).id)
-    expect(required(local.runs[1]).request.images).toEqual([{ mime: 'image/gif', data: 'R0lG' }])
+    expect(required(local.runs[1]).request.images).toEqual([
+      { mime: 'image/gif', data: 'R0lG' },
+    ])
   })
 
   it('takes the streamed cost and sums known costs per currency', async () => {
     const { session, runs } = setup(false)
-    session.show(null, [stored({ cost: { amount: 0.5, currency: 'USD' } }), stored({ id: 'b', cost: null })], 'b')
+    session.show(
+      null,
+      [
+        stored({ cost: { amount: 0.5, currency: 'USD' } }),
+        stored({ id: 'b', cost: null }),
+      ],
+      'b',
+    )
     void session.send(base, 'Priced')
-    const usage = { inputTokens: 10, outputTokens: 2, cacheReadTokens: null, cacheWriteTokens: null }
-    required(runs[0]).emit({ kind: 'usage', ...usage, reasoningTokens: null, cost: { amount: 1, currency: 'CNY' } })
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 2,
+      cacheReadTokens: null,
+      cacheWriteTokens: null,
+    }
+    required(runs[0]).emit({
+      kind: 'usage',
+      ...usage,
+      reasoningTokens: null,
+      cost: { amount: 1, currency: 'CNY' },
+    })
     expect(session.turns.at(-1)?.cost).toEqual({ amount: 1, currency: 'CNY' })
-    session.turns.push({ ...required(session.turns.at(-1)), id: 'c', cost: { amount: 0.25, currency: 'USD' } })
+    session.turns.push({
+      ...required(session.turns.at(-1)),
+      id: 'c',
+      cost: { amount: 0.25, currency: 'USD' },
+    })
     expect(session.cumulativeCost).toEqual([
       { amount: 0.75, currency: 'USD' },
       { amount: 1, currency: 'CNY' },
@@ -479,7 +669,10 @@ describe('RunSession candidate replies', () => {
     expect(session.turns[0]).toMatchObject({ text: 'kept', status: 'running' })
     run.emit({ kind: 'end', status: 'cancelled' })
     expect(session.running).toBe(false)
-    expect(session.turns[0]).toMatchObject({ text: 'kept', status: 'cancelled' })
+    expect(session.turns[0]).toMatchObject({
+      text: 'kept',
+      status: 'cancelled',
+    })
   })
 
   it('cancels late acceptance and isolates old events after changing the displayed conversation', async () => {
@@ -488,7 +681,11 @@ describe('RunSession candidate replies', () => {
     const old = required(runs[0])
     session.show('new', [stored({ id: 'new-turn', text: 'New' })])
     old.emit({ kind: 'text_delta', text: 'old text' })
-    old.accepted.resolve({ runId: 'late', conversationId: 'old', turnId: 'old-turn' })
+    old.accepted.resolve({
+      runId: 'late',
+      conversationId: 'old',
+      turnId: 'old-turn',
+    })
     await sent
     old.emit({ kind: 'end', status: 'completed' })
     expect(cancel).toHaveBeenCalledWith('late')
@@ -505,8 +702,18 @@ describe('RunSession candidate replies', () => {
     const run = required(runs[0])
     run.accepted.resolve({ runId: 'r', conversationId: null, turnId: null })
     await sent
-    run.emit({ kind: 'tool_call', callId: 'call', name: 'tool', source: 'host' })
-    run.emit({ kind: 'approval_required', callId: 'call', name: 'tool', argsPreview: 'preview' })
+    run.emit({
+      kind: 'tool_call',
+      callId: 'call',
+      name: 'tool',
+      source: 'host',
+    })
+    run.emit({
+      kind: 'approval_required',
+      callId: 'call',
+      name: 'tool',
+      argsPreview: 'preview',
+    })
     const tool = required(session.turns[0]?.tools[0])
     session.approve(tool, true)
     failure.reject(new KitClientError({ code: 'conflict', message: 'expired' }))

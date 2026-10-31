@@ -5,15 +5,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use aether_mcp_server::{
-    CallContext, DEFAULT_MAX_REQUEST_BYTES, ExposedTool, KitError, McpServer, ScopeSpec,
-    ServerConfig, ToolHandler,
+    CallContext, DEFAULT_MAX_REQUEST_BYTES, ExposedTool, KitError, McpServer,
+    ScopeSpec, ServerConfig, ToolHandler,
 };
 use aether_observability::LogConfig;
 use serde_json::{Value, json};
 
 #[expect(
     clippy::print_stderr,
-    reason = "logging may not be initialised yet; this is the only way to report a startup failure"
+    reason = "logging may not be initialised yet; this is the only way to \
+              report a startup failure"
 )]
 fn main() {
     if let Err(error) = run() {
@@ -23,9 +24,14 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // Before `tauri::Builder`, so logs from other plugins' setup reach the file (docs/10 §8).
+    // Before `tauri::Builder`, so logs from other plugins' setup reach the
+    // file (docs/10 §8).
     let root = aether_observability::data_root("aether-mcp-server-only")?;
-    let logs = aether_observability::init(&root.join("logs"), LogConfig::default(), None)?;
+    let logs = aether_observability::init(
+        &root.join("logs"),
+        LogConfig::default(),
+        None,
+    )?;
     let server = McpServer::new(
         &root,
         ServerConfig {
@@ -54,8 +60,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .setup(|app| {
             tauri::Manager::add_capability(
                 app,
-                r#"{ "identifier": "aether", "windows": ["main"],
-                     "permissions": ["aether:logs", "aether:mcp-server-read", "aether:mcp-server-control"] }"#,
+                concat!(
+                    r#"{ "identifier": "aether", "windows": ["main"], "#,
+                    r#""permissions": ["aether:logs", "#,
+                    r#""aether:mcp-server-read", "#,
+                    r#""aether:mcp-server-control"] }"#,
+                ),
             )?;
             Ok(())
         })
@@ -63,7 +73,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// A shared counter: `counter_get` is read-only, `counter_reset` is control-class.
+/// A shared counter: `counter_get` is read-only, `counter_reset` is
+/// control-class.
 fn counter_tools() -> Vec<ExposedTool> {
     let counter = Arc::new(AtomicI64::new(0));
     let get = Arc::clone(&counter);
@@ -73,13 +84,16 @@ fn counter_tools() -> Vec<ExposedTool> {
     });
     let reset: ToolHandler = Arc::new(move |_args: Value, ctx: CallContext| {
         counter.store(0, Ordering::Relaxed);
-        Box::pin(async move { Ok(json!({ "reset": true, "by": ctx.token_id })) })
+        Box::pin(async move {
+            Ok(json!({ "reset": true, "by": ctx.token_id }))
+        })
     });
     let no_args = json!({ "type": "object", "properties": {} });
     vec![
         ExposedTool {
             name: "counter_get",
-            description: "Returns how many times the counter has been read (increments it).",
+            description: "Returns how many times the counter has been read \
+                          (increments it).",
             input_schema: no_args.clone(),
             scope: "counter.read",
             read_only: true,

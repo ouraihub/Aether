@@ -1,10 +1,14 @@
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
-export function at(value: unknown, ...path: readonly (string | number)[]): unknown {
+export function at(
+  value: unknown,
+  ...path: readonly (string | number)[]
+): unknown {
   let current = value
   for (const key of path) {
-    if (Array.isArray(current) && typeof key === 'number') current = current[key]
+    if (Array.isArray(current) && typeof key === 'number')
+      current = current[key]
     else if (isRecord(current)) current = current[String(key)]
     else return undefined
   }
@@ -22,10 +26,22 @@ export function canonicalJson(value: unknown): string {
   if (encoded === undefined) throw new TypeError('Not JSON')
   return encoded
 }
-export function truncate(text: string, limit: number, marker = '…(truncated)'): string {
+export function truncate(
+  text: string,
+  limit: number,
+  marker = '…(truncated)',
+): string {
   const chars = Array.from(text)
   if (chars.length <= limit) return text
-  return chars.slice(0, Math.max(0, limit - charCount(marker))).join('') + marker.slice(0, limit)
+  return (
+    chars.slice(0, Math.max(0, limit - charCount(marker))).join('') +
+    marker.slice(0, limit)
+  )
 }
 export const tokens = (value: unknown): number | null =>
-  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff ? value : null
+  typeof value === 'number' &&
+  Number.isInteger(value) &&
+  value >= 0 &&
+  value <= 0xffff_ffff
+    ? value
+    : null

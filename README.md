@@ -50,6 +50,11 @@ pnpm install
 pnpm run ci
 ```
 
+提交前执行 `pnpm exec release-kit check --base origin/main`：TS/Svelte 每行最多 80 字符，Rust 100，Python 79，每个源码文件最多 500 物理行（含空行、注释和测试）。Rust 优先将内联测试移到独立测试模块；业务代码仍超限时才按职责拆分，测试文件也按场景拆分，不能删测试或压行凑数。生成 DTO 在生成后按项目 Prettier 80 列格式化，再进行逐字比较。
+
+提交代码并保持工作区干净后，运行 `pnpm exec release-kit review-size --base origin/main`。超限按可独立验证的职责拆多个 PR，不能拆散接口和必要调用方；多几个 commit 不减少 PR 的完整 diff。然后由当前 AI 编码环境按 [release-kit 技能规则](https://github.com/ouraihub/release-kit/blob/main/skills/release-kit/SKILL.md#本地-ai-评审直接使用当前编码环境)审查完整变更和相关调用，不要求另配模型 API 或密钥。有独立评审能力时使用独立只读评审，否则注明自审；报告范围 SHA、证据、验证和未覆盖项，缺上下文不得称通过。修复验证后才能推送 PR，远端门禁与维护者审批保持不变。
+
+
 本地构建固定使用便携 MSVC（由 [desktop-kit](https://github.com/ouraihub/desktop-kit) 提供；默认 `D:\Applications\msvc-portable\msvc`，可用 `PORTABLE_MSVC_ROOT` 覆盖；首次运行 `node_modules\@ouraihub\desktop-kit\msvc\setup-msvc.bat` 安装）。
 
 合并到 `main` 必须通过确定性 `CI gate`，分支须包含最新 `main`，管理员也受约束。普通文档仅运行策略／提交检查；工作流、根 `AGENTS.md` 和 CI 调度／门禁脚本进入自动化检查（工作流语法、分类／门禁行为、提交规则），不因配置变化编译产品；纯 `packages/ui/src` 手写 TS/Svelte/CSS 运行前端 lint、格式、类型、测试、示例构建及 i18n；Rust、依赖、生成 DTO、产品构建脚本和未知路径运行 Windows 完整检查。混合改动取最高风险，无法确定范围完整执行；最终门禁要求所有适用任务真实成功，不把意外 skipped 算通过。自动化检查不能证明新编译命令有效；修改工具链或实际编译参数时须另行手动运行受影响平台的完整检查。

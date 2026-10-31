@@ -1,5 +1,5 @@
-// In-memory RunClient, ConversationClient and desktop actions for tests and demos (docs/16, docs/22).
-// Seed storage with initialConversations; override clients independently or omit a capability.
+// In-memory RunClient, ConversationClient and desktop actions for tests.
+// Seed storage with initialConversations; override clients or omit features.
 import { KitClientError } from './contract'
 import type {
   ConversationClient,
@@ -12,14 +12,21 @@ import type {
   ProvidersPort,
   SkillsPort,
 } from './contract'
-import type { Conversation, LogLevel, RunEvent, RunSnapshot, Turn } from '@ouraihub/aether-contracts'
+import type {
+  Conversation,
+  LogLevel,
+  RunEvent,
+  RunSnapshot,
+  Turn,
+} from '@ouraihub/aether-contracts'
 import type { SearchPort } from './search'
+import { createFakeConversationClient } from './fake-conversations'
 import type { SkillSourcesPort } from './skill-sources'
 
 type PortName = keyof KitPorts
 
 export interface FakePortsOptions {
-  /** Initial stored conversations, copied to isolate the caller from fake storage. */
+  /** Initial stored conversations, copied to isolate fake storage. */
   initialConversations?: readonly Conversation[]
   conversations?: Partial<ConversationClient>
   desktop?: Partial<DesktopActions>
@@ -58,7 +65,9 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       id = `${prefix}-${++sequence}`
     } while (
       [...conversations.values()].some((conversation) =>
-        conversation.turns.some((turn) => turn.id === id || turn.questionId === id),
+        conversation.turns.some(
+          (turn) => turn.id === id || turn.questionId === id,
+        ),
       )
     )
     return id
@@ -85,17 +94,22 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       run.cancelRequested = true
     }
     signal?.addEventListener('abort', cancel, { once: true })
-    // Leave an acceptance turn for callers to request cancellation or inspect the active run.
+    // Leave an acceptance turn for callers to inspect or request cancellation.
     queueMicrotask(() =>
       queueMicrotask(() => {
         if (signal?.aborted) cancel()
-        if (turn && !run.cancelRequested) onEvent({ kind: 'text_delta', text: turn.text })
+        if (turn && !run.cancelRequested)
+          onEvent({ kind: 'text_delta', text: turn.text })
         run.status = run.cancelRequested ? 'cancelled' : 'completed'
         if (turn && conversation) {
           turn.status = run.status
           if (run.status === 'cancelled') turn.text = ''
           if (select && run.status === 'completed')
-            conversation.summary = { ...conversation.summary, selectedTurnId: turn.id, updatedAt: Date.now() }
+            conversation.summary = {
+              ...conversation.summary,
+              selectedTurnId: turn.id,
+              updatedAt: Date.now(),
+            }
         }
         signal?.removeEventListener('abort', cancel)
         terminals.push(run.runId)
@@ -106,155 +120,50 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
         onEvent({ kind: 'end', status: run.status })
       }),
     )
-    return { runId: run.runId, conversationId: run.conversationId, turnId: run.turnId }
+    return {
+      runId: run.runId,
+      conversationId: run.conversationId,
+      turnId: run.turnId,
+    }
   }
-  const snapshot = (conversation: Conversation): Conversation => structuredClone(conversation)
+  const snapshot = (conversation: Conversation): Conversation =>
+    structuredClone(conversation)
   const getConversation = (id: string) => {
     const conversation = conversations.get(id)
-    if (!conversation) throw clientError('not_found', `conversation ${id}`, { entity: 'conversation' })
+    if (!conversation)
+      throw clientError('not_found', `conversation ${id}`, {
+        entity: 'conversation',
+      })
     if (conversation.turns.some((turn) => turn.status === 'running'))
-      throw clientError('conflict', 'conversation is active', { reason: 'active_run' })
+      throw clientError('conflict', 'conversation is active', {
+        reason: 'active_run',
+      })
     return conversation
   }
   const getTurn = (conversationId: string, turnId: string) => {
-    const turn = getConversation(conversationId).turns.find((candidate) => candidate.id === turnId)
-    if (!turn) throw clientError('not_found', `turn ${turnId}`, { entity: 'turn' })
+    const turn = getConversation(conversationId).turns.find(
+      (candidate) => candidate.id === turnId,
+    )
+    if (!turn)
+      throw clientError('not_found', `turn ${turnId}`, { entity: 'turn' })
     return turn
   }
-  const conversationClient: ConversationClient = {
-    list: (scope?: string) =>
-      Promise.resolve(
-        [...conversations.values()]
-          .filter(({ summary }) => !scope || summary.scope === scope)
-          .map(({ summary }) => ({ ...summary })),
-      ),
-    get: async (id: string) => {
-      const conversation = conversations.get(id)
-      if (!conversation) throw clientError('not_found', `conversation ${id}`, { entity: 'conversation' })
-      return snapshot(conversation)
-    },
-    remove: async (id: string) => {
-      getConversation(id)
-      conversations.delete(id)
-    },
-    rename: async (id: string, title: string) => {
-      const conversation = getConversation(id)
-      conversation.summary = { ...conversation.summary, title, updatedAt: Date.now() }
-      return { ...conversation.summary }
-    },
-    editTurn: async (conversationId: string, turnId: string, text: string, expectedText: string) => {
-      const conversation = getConversation(conversationId)
-      const turn = getTurn(conversationId, turnId)
-      if (turn.text !== expectedText) throw clientError('conflict', 'turn changed', { reason: 'text_changed' })
-      if (!text.trim() || Array.from(text).length > 24_000)
-        throw clientError('bad_request', 'invalid text', { field: 'text' })
-      if (conversation.turns.some((candidate) => candidate.parentId === turnId || candidate.supersedesId === turnId))
-        throw clientError('conflict', 'turn has children', { reason: 'has_children' })
-      turn.text = text
-      turn.reasoningText = null
-      turn.contextUsage = null
-      conversation.summary.updatedAt = Date.now()
-      return snapshot(conversation)
-    },
-    removeTurn: async (conversationId: string, turnId: string) => {
-      // Same rule as both hosts (AutoNote docs/35 §3.3): reparent onto the successor, then delete.
-      const conversation = getConversation(conversationId)
-      const turn = getTurn(conversationId, turnId)
-      if (turn.status === 'running') throw clientError('conflict', 'turn running', { reason: 'turn_running' })
-      // Turns are stored in creation order, which stands in for `seq`.
-      const at = conversation.turns.indexOf(turn)
-      const group = conversation.turns.filter(
-        (t) => t.kind === 'reply' && t.questionId === turn.questionId && t !== turn,
-      )
-      const sibling = group.find((t) => conversation.turns.indexOf(t) > at) ?? group.at(-1)
-      const successor = sibling?.id ?? turn.parentId
-      const removed = new Set([turnId])
-      for (const t of conversation.turns)
-        if (t.kind === 'translation' && removed.has(t.parentId ?? '')) removed.add(t.id)
-      conversation.turns = conversation.turns
-        .filter((t) => !removed.has(t.id))
-        .map((t) => ({
-          ...t,
-          parentId: removed.has(t.parentId ?? '') ? successor : t.parentId,
-          supersedesId: removed.has(t.supersedesId ?? '')
-            ? sibling && sibling.id !== t.id
-              ? sibling.id
-              : null
-            : t.supersedesId,
-        }))
-      if (removed.has(conversation.summary.selectedTurnId ?? '')) {
-        const rest = conversation.turns.filter((t) => t.kind === 'reply')
-        let head = successor ?? rest.filter((t) => t.parentId === null).at(-1)?.id ?? null
-        for (;;) {
-          const child = head === null ? undefined : rest.filter((t) => t.parentId === head).at(-1)
-          if (!child) break
-          head = child.id
-        }
-        conversation.summary.selectedTurnId = head
-      }
-      conversation.summary.updatedAt = Date.now()
-      return snapshot(conversation)
-    },
-    fork: async (conversationId: string, turnId: string) => {
-      const source = getConversation(conversationId)
-      const target = getTurn(conversationId, turnId)
-      const chain: Turn[] = []
-      const seen = new Set<string>()
-      let cursor: Turn | undefined = target
-      while (cursor) {
-        if (seen.has(cursor.id)) throw clientError('conflict', 'history cycle', { reason: 'history_cycle' })
-        seen.add(cursor.id)
-        chain.unshift(cursor)
-        if (!cursor.parentId) break
-        cursor = source.turns.find((turn) => turn.id === cursor?.parentId)
-        if (!cursor) throw clientError('not_found', 'history parent', { entity: 'turn' })
-      }
-      const ids = new Map<string, string>()
-      const questionIds = new Map<string, string>()
-      const turns = chain.map((turn) => {
-        const id = nextId('fake-turn')
-        ids.set(turn.id, id)
-        let questionId = questionIds.get(turn.questionId)
-        if (questionId === undefined) {
-          questionId = id
-          questionIds.set(turn.questionId, questionId)
-        }
-        return {
-          ...turn,
-          id,
-          questionId,
-          parentId: turn.parentId ? (ids.get(turn.parentId) ?? null) : null,
-          supersedesId: turn.supersedesId ? (ids.get(turn.supersedesId) ?? null) : null,
-        }
-      })
-      let id: string
-      do {
-        id = `fake-conversation-${++conversationSequence}`
-      } while (conversations.has(id))
-      const copy: Conversation = {
-        summary: {
-          ...source.summary,
-          id,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          selectedTurnId: ids.get(turnId) ?? null,
-        },
-        turns: structuredClone(turns),
-      }
-      conversations.set(id, copy)
-      return snapshot(copy)
-    },
-    selectTurn: async (conversationId: string, turnId: string) => {
-      const conversation = getConversation(conversationId)
-      getTurn(conversationId, turnId)
-      conversation.summary = { ...conversation.summary, selectedTurnId: turnId, updatedAt: Date.now() }
-      return snapshot(conversation)
-    },
+  const nextConversationId = () => {
+    let id: string
+    do id = `fake-conversation-${++conversationSequence}`
+    while (conversations.has(id))
+    return id
   }
+  const conversationClient = createFakeConversationClient(
+    { conversations, nextId, nextConversationId, getConversation, getTurn,
+      snapshot },
+    clientError,
+  )
   const ports: Required<Omit<KitPorts, 'search' | 'skillSources'>> = {
     logs: {
       tail: () => Promise.resolve([]),
-      ingest: (batch) => Promise.resolve({ accepted: batch.entries.length, rejected: 0 }),
+      ingest: (batch) =>
+        Promise.resolve({ accepted: batch.entries.length, rejected: 0 }),
       getLevel: () => Promise.resolve({ level, available: true }),
       setLevel: (next) => {
         level = next
@@ -270,7 +179,10 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     providers: {
       revealNeedsPassword: false,
       keyStrategies: false,
-      revealKey: () => Promise.reject(clientError('internal', 'Configure the fake provider reveal method')),
+      revealKey: () =>
+        Promise.reject(
+          clientError('internal', 'Configure the fake provider reveal method'),
+        ),
       list: () => Promise.resolve([]),
       setEnabled: () => Promise.resolve([]),
       save: () => Promise.resolve([]),
@@ -278,12 +190,19 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       removeKey: () => Promise.resolve([]),
       remove: () => Promise.resolve([]),
       modelOptions: () => Promise.resolve([]),
-      probe: () => Promise.resolve({ probeUrl: '', models: [], error: null, suggestedProtocol: null }),
+      probe: () =>
+        Promise.resolve({
+          probeUrl: '',
+          models: [],
+          error: null,
+          suggestedProtocol: null,
+        }),
       ...options.providers,
     },
     chat: {
       start: async (request, onEvent, callOptions) => {
-        if (callOptions?.signal?.aborted) throw clientError('cancelled', 'cancelled')
+        if (callOptions?.signal?.aborted)
+          throw clientError('cancelled', 'cancelled')
         const retry = request.retryTurnId != null || request.regenerate
         const translation = request.translateTurnId != null
         const action = request.retryTurnId != null || translation
@@ -293,16 +212,35 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
           (request.replyToId != null && (retry || translation)) ||
           (request.targetLanguage != null && !translation)
         )
-          throw clientError('bad_request', 'invalid graph request', { field: 'action' })
+          throw clientError('bad_request', 'invalid graph request', {
+            field: 'action',
+          })
         if (request.images?.length && (retry || translation))
-          throw clientError('bad_request', 'images on action', { field: 'images', reason: 'action_conflict' })
-        if (request.purpose === 'writing' && (request.replyToId != null || action || request.targetLanguage != null))
-          throw clientError('bad_request', 'writing graph fields', { field: 'action' })
-        if ((retry || translation || request.replyToId != null) && (!request.conversationId || !storesConversations))
-          throw clientError('bad_request', 'conversation required', { field: 'conversationId' })
+          throw clientError('bad_request', 'images on action', {
+            field: 'images',
+            reason: 'action_conflict',
+          })
+        if (
+          request.purpose === 'writing' &&
+          (request.replyToId != null ||
+            action ||
+            request.targetLanguage != null)
+        )
+          throw clientError('bad_request', 'writing graph fields', {
+            field: 'action',
+          })
+        if (
+          (retry || translation || request.replyToId != null) &&
+          (!request.conversationId || !storesConversations)
+        )
+          throw clientError('bad_request', 'conversation required', {
+            field: 'conversationId',
+          })
         const language = request.targetLanguage?.trim() ?? ''
         if (translation && (!language || Array.from(language).length > 80))
-          throw clientError('bad_request', 'invalid language', { field: 'targetLanguage' })
+          throw clientError('bad_request', 'invalid language', {
+            field: 'targetLanguage',
+          })
         if (!retry && !translation && !request.input.trim())
           throw clientError('bad_request', 'empty input', { field: 'input' })
         if (!storesConversations || request.purpose === 'writing')
@@ -328,30 +266,50 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
             }
         const selectedId =
           conversation.summary.selectedTurnId ??
-          [...conversation.turns].reverse().find((turn) => turn.status === 'completed')?.id ??
+          [...conversation.turns]
+            .reverse()
+            .find((turn) => turn.status === 'completed')?.id ??
           null
-        const sourceId = request.retryTurnId ?? request.translateTurnId ?? (retry ? selectedId : null)
+        const sourceId =
+          request.retryTurnId ??
+          request.translateTurnId ??
+          (retry ? selectedId : null)
         const source = sourceId ? getTurn(conversationId, sourceId) : undefined
-        if ((retry || translation) && !source) throw clientError('not_found', 'source turn', { entity: 'turn' })
+        if ((retry || translation) && !source)
+          throw clientError('not_found', 'source turn', { entity: 'turn' })
         if (request.replyToId) getTurn(conversationId, request.replyToId)
-        if (!retry && !translation && selectedId && !request.replyToId) getTurn(conversationId, selectedId)
+        if (!retry && !translation && selectedId && !request.replyToId)
+          getTurn(conversationId, selectedId)
         const model =
           request.model ??
-          (source?.endpointId && source.modelId ? { endpointId: source.endpointId, modelId: source.modelId } : null)
-        if (source && !model) throw clientError('needs_config', 'source model unavailable')
+          (source?.endpointId && source.modelId
+            ? { endpointId: source.endpointId, modelId: source.modelId }
+            : null)
+        if (source && !model)
+          throw clientError('needs_config', 'source model unavailable')
         if (source && model && options.providers?.modelOptions) {
           const models = await ports.providers.modelOptions()
-          if (!models.some((option) => option.endpointId === model.endpointId && option.modelId === model.modelId))
+          if (
+            !models.some(
+              (option) =>
+                option.endpointId === model.endpointId &&
+                option.modelId === model.modelId,
+            )
+          )
             throw clientError('needs_config', 'source model unavailable')
         }
-        if (callOptions?.signal?.aborted) throw clientError('cancelled', 'cancelled')
+        if (callOptions?.signal?.aborted)
+          throw clientError('cancelled', 'cancelled')
         if (request.conversationId) getConversation(conversationId)
         conversations.set(conversationId, conversation)
         const turnId = nextId('fake-turn')
         const translationSource = translation ? source : undefined
         const retrySource = retry ? source : undefined
         const input = translationSource
-          ? `Translate the following reply into ${language}. Return only the translation, preserving Markdown formatting.\n\n${translationSource.text}`
+          ? 'Translate the following reply into '
+            + `${language}. Return only the translation, preserving Markdown`
+            + ` formatting.`
+            + `\n\n${translationSource.text}`
           : retrySource
             ? retrySource.input
             : request.input
@@ -364,7 +322,11 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
               : (request.replyToId ?? selectedId),
           questionId: retrySource ? retrySource.questionId : turnId,
           supersedesId: retrySource ? retrySource.id : null,
-          kind: translationSource ? 'translation' : retrySource ? retrySource.kind : 'reply',
+          kind: translationSource
+            ? 'translation'
+            : retrySource
+              ? retrySource.kind
+              : 'reply',
           endpointId: model?.endpointId ?? null,
           modelId: model?.modelId ?? null,
           input,
@@ -381,7 +343,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
           status: 'running',
           errorCode: null,
           reasoningText: null,
-          reasoningEffort: request.reasoningEffort ?? source?.reasoningEffort ?? 'default',
+          reasoningEffort:
+            request.reasoningEffort ?? source?.reasoningEffort ?? 'default',
           usage: null,
           contextUsage: {
             tokens: input.length * 2 + 12,
@@ -392,27 +355,43 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
           },
         }
         conversation.turns.push(turn)
-        return acceptRun(conversation, turn, !retry, onEvent, callOptions?.signal)
+        return acceptRun(
+          conversation,
+          turn,
+          !retry,
+          onEvent,
+          callOptions?.signal,
+        )
       },
       cancel: async (runId) => {
         const run = runs.get(runId)
         if (run?.status === 'running') run.cancelRequested = true
       },
       approve: async (runId) => {
-        if (!runs.has(runId)) throw clientError('not_found', `run ${runId}`, { entity: 'run' })
-        throw clientError('conflict', 'no pending approval', { reason: 'approval_expired' })
+        if (!runs.has(runId))
+          throw clientError('not_found', `run ${runId}`, { entity: 'run' })
+        throw clientError('conflict', 'no pending approval', {
+          reason: 'approval_expired',
+        })
       },
       getSnapshot: async (runId) => {
         const run = runs.get(runId)
-        if (!run) throw clientError('not_found', `run ${runId}`, { entity: 'run' })
+        if (!run)
+          throw clientError('not_found', `run ${runId}`, { entity: 'run' })
         return { ...run }
       },
       ...options.chat,
     },
     skills: {
       list: () => Promise.resolve([]),
-      get: (id) => Promise.reject(clientError('not_found', `skill ${id}`, { entity: 'skill' })),
-      preview: () => Promise.reject(clientError('bad_request', 'no package', { field: 'SKILL.md' })),
+      get: (id) =>
+        Promise.reject(
+          clientError('not_found', `skill ${id}`, { entity: 'skill' }),
+        ),
+      preview: () =>
+        Promise.reject(
+          clientError('bad_request', 'no package', { field: 'SKILL.md' }),
+        ),
       install: () => Promise.resolve([]),
       save: () => Promise.resolve([]),
       duplicate: () => Promise.resolve([]),
@@ -452,7 +431,10 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
   }
   const result: KitPorts = { ...ports }
   if (options.search) {
-    const unavailable = () => Promise.reject(clientError('internal', 'Configure the fake search method'))
+    const unavailable = () =>
+      Promise.reject(
+        clientError('internal', 'Configure the fake search method'),
+      )
     result.search = {
       settings: unavailable,
       save: unavailable,
@@ -468,7 +450,10 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     }
   }
   if (options.skillSources) {
-    const unavailable = () => Promise.reject(clientError('internal', 'Configure the fake skill source method'))
+    const unavailable = () =>
+      Promise.reject(
+        clientError('internal', 'Configure the fake skill source method'),
+      )
     result.skillSources = {
       search: unavailable,
       prepare: unavailable,

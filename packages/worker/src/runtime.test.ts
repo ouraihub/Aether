@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { ModelRef, ModelSave, RunEvent, RunRequest } from '@ouraihub/aether-contracts'
+import type {
+  ModelRef,
+  ModelSave,
+  RunEvent,
+  RunRequest,
+} from '@ouraihub/aether-contracts'
 import { KitFailure } from '@ouraihub/aether-core/error'
-import type { ArgumentsValidator, OutboundHttp } from '@ouraihub/aether-core/ports'
+import type {
+  ArgumentsValidator,
+  OutboundHttp,
+} from '@ouraihub/aether-core/ports'
 import type { ToolExecution, ToolSpec } from '@ouraihub/aether-core/types'
 import type { Actor, WorkerContext } from './context.js'
 import { ConversationService } from './conversations/index.js'
@@ -51,7 +59,9 @@ const hostTool: ToolSpec = {
 }
 // This fixture schema has precisely one supported shape; unknown schemas and extra args fail closed.
 const validateArguments: ArgumentsValidator = (schema, args) =>
-  schema.type === 'object' && schema.additionalProperties === false && Object.keys(args).length === 0
+  schema.type === 'object' &&
+  schema.additionalProperties === false &&
+  Object.keys(args).length === 0
 const allowed = {
   async wait() {
     return true
@@ -61,13 +71,33 @@ class TestDocuments implements DocumentStore {
   readonly documents = new Map<string, StoredDocument>()
   failConversations = false
   private id(owner: Actor, collection: string, key: string): string {
-    return JSON.stringify([owner.applicationId, owner.tenantId, owner.subjectId, collection, key])
+    return JSON.stringify([
+      owner.applicationId,
+      owner.tenantId,
+      owner.subjectId,
+      collection,
+      key,
+    ])
   }
-  async get(owner: Actor, collection: string, key: string): Promise<StoredDocument | null> {
-    return structuredClone(this.documents.get(this.id(owner, collection, key)) ?? null)
+  async get(
+    owner: Actor,
+    collection: string,
+    key: string,
+  ): Promise<StoredDocument | null> {
+    return structuredClone(
+      this.documents.get(this.id(owner, collection, key)) ?? null,
+    )
   }
-  async list(owner: Actor, collection: string): Promise<readonly StoredDocument[]> {
-    const prefix = JSON.stringify([owner.applicationId, owner.tenantId, owner.subjectId, collection]).slice(0, -1)
+  async list(
+    owner: Actor,
+    collection: string,
+  ): Promise<readonly StoredDocument[]> {
+    const prefix = JSON.stringify([
+      owner.applicationId,
+      owner.tenantId,
+      owner.subjectId,
+      collection,
+    ]).slice(0, -1)
     return [...this.documents.entries()]
       .filter(([key]) => key.startsWith(prefix))
       .map(([, value]) => structuredClone(value))
@@ -83,20 +113,40 @@ class TestDocuments implements DocumentStore {
       throw new KitFailure('internal', 'secret-token database failure')
     const id = this.id(owner, collection, key),
       old = this.documents.get(id)
-    if ((old?.revision ?? null) !== expected) throw new KitFailure('conflict', 'Concurrent update')
-    const saved = { key, revision: (old?.revision ?? 0) + 1, value: structuredClone(value) }
+    if ((old?.revision ?? null) !== expected)
+      throw new KitFailure('conflict', 'Concurrent update')
+    const saved = {
+      key,
+      revision: (old?.revision ?? 0) + 1,
+      value: structuredClone(value),
+    }
     this.documents.set(id, saved)
     return structuredClone(saved)
   }
-  async remove(owner: Actor, collection: string, key: string, expected: number): Promise<void> {
+  async remove(
+    owner: Actor,
+    collection: string,
+    key: string,
+    expected: number,
+  ): Promise<void> {
     const id = this.id(owner, collection, key)
-    if (this.documents.get(id)?.revision !== expected) throw new KitFailure('conflict', 'Concurrent update')
+    if (this.documents.get(id)?.revision !== expected)
+      throw new KitFailure('conflict', 'Concurrent update')
     this.documents.delete(id)
   }
 }
 function response(tool = false): Response {
   const delta = tool
-    ? { tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'read_item', arguments: '{}' } }] }
+    ? {
+        tool_calls: [
+          {
+            index: 0,
+            id: 'call-1',
+            type: 'function',
+            function: { name: 'read_item', arguments: '{}' },
+          },
+        ],
+      }
     : { content: 'Visible answer' }
   return new Response(
     `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: tool ? 'tool_calls' : 'stop' }] })}\n\ndata: [DONE]\n\n`,
@@ -113,8 +163,15 @@ async function setup(
   },
 ) {
   const documents = new TestDocuments()
-  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
-  const credentials = createCredentialPort({ currentKeyId: 'key', keys: new Map([['key', key]]) })
+  const key = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  )
+  const credentials = createCredentialPort({
+    currentKeyId: 'key',
+    keys: new Map([['key', key]]),
+  })
   const providers = new ProviderService({
     documents,
     credentials,
@@ -125,11 +182,21 @@ async function setup(
   })
   const saved = await providers.save(actor, {
     name: 'Test',
-    endpoints: [{ slug: 'test', protocol: 'openai-chat', baseUrl: 'https://models.example', models: [model] }],
+    endpoints: [
+      {
+        slug: 'test',
+        protocol: 'openai-chat',
+        baseUrl: 'https://models.example',
+        models: [model],
+      },
+    ],
   })
   const endpoint = saved[0]?.endpoints[0]
   assert.ok(endpoint)
-  await providers.saveKey(actor, { endpointId: endpoint.id, key: 'secret-token' })
+  await providers.saveKey(actor, {
+    endpointId: endpoint.id,
+    key: 'secret-token',
+  })
   const reference: ModelRef = { endpointId: endpoint.id, modelId: model.id }
   const observed: RunRequest[] = []
   let cleanups = 0,
@@ -176,7 +243,12 @@ async function setup(
     validateArguments,
   })
   const post = new AbortController()
-  const context: WorkerContext = { actor, signal: post.signal, requestId: 'request', now: Date.now() }
+  const context: WorkerContext = {
+    actor,
+    signal: post.signal,
+    requestId: 'request',
+    now: Date.now(),
+  }
   return {
     runtime,
     conversations,
@@ -209,27 +281,55 @@ test('prepare failures leave no reservation and clean host exactly once', async 
 test('onPlan fails before CAS without residual', async () => {
   const state = await setup()
   await assert.rejects(
-    state.runtime.prepare('plan-fails', request, state.context, async (handle) => {
-      assert.ok(handle)
-      assert.deepEqual(await state.conversations.list(null, actor), [])
-      throw new Error('Metadata persistence failed')
-    }),
+    state.runtime.prepare(
+      'plan-fails',
+      request,
+      state.context,
+      async (handle) => {
+        assert.ok(handle)
+        assert.deepEqual(await state.conversations.list(null, actor), [])
+        throw new Error('Metadata persistence failed')
+      },
+    ),
   )
   assert.equal(state.cleanups(), 1)
   assert.deepEqual(await state.conversations.list(null, actor), [])
 })
 test('changed authoritative history after onPlan rejects reservation without a candidate', async () => {
   const state = await setup()
-  const first = await state.runtime.prepare('history-first', request, state.context, async () => {})
-  await state.runtime.execute(first, new AbortController().signal, () => {}, allowed)
+  const first = await state.runtime.prepare(
+    'history-first',
+    request,
+    state.context,
+    async () => {},
+  )
+  await state.runtime.execute(
+    first,
+    new AbortController().signal,
+    () => {},
+    allowed,
+  )
   const conversationId = first.accepted.conversationId
   assert.ok(conversationId)
   await assert.rejects(
-    state.runtime.prepare('changed-history', { ...request, conversationId }, state.context, async () => {
-      await state.conversations.editTurn(conversationId, 'history-first', 'Changed answer', 'Visible answer', actor)
-    }),
+    state.runtime.prepare(
+      'changed-history',
+      { ...request, conversationId },
+      state.context,
+      async () => {
+        await state.conversations.editTurn(
+          conversationId,
+          'history-first',
+          'Changed answer',
+          'Visible answer',
+          actor,
+        )
+      },
+    ),
     (error) =>
-      error instanceof KitFailure && error.code === 'conflict' && error.details?.reason === 'preparation_changed',
+      error instanceof KitFailure &&
+      error.code === 'conflict' &&
+      error.details?.reason === 'preparation_changed',
   )
   const conversation = await state.conversations.get(conversationId, actor)
   assert.equal(conversation.turns.length, 1)
@@ -238,13 +338,28 @@ test('changed authoritative history after onPlan rejects reservation without a c
 })
 test('source input and source model precede every host hook, secrets never project', async () => {
   const state = await setup()
-  const first = await state.runtime.prepare('first', request, state.context, async () => {})
-  const firstSnapshot = await state.runtime.execute(first, new AbortController().signal, () => {}, allowed)
+  const first = await state.runtime.prepare(
+    'first',
+    request,
+    state.context,
+    async () => {},
+  )
+  const firstSnapshot = await state.runtime.execute(
+    first,
+    new AbortController().signal,
+    () => {},
+    allowed,
+  )
   assert.equal(firstSnapshot.status, 'completed')
   state.observed.length = 0
   const retry = await state.runtime.prepare(
     'retry',
-    { ...request, input: '', conversationId: first.accepted.conversationId, retryTurnId: 'first' },
+    {
+      ...request,
+      input: '',
+      conversationId: first.accepted.conversationId,
+      retryTurnId: 'first',
+    },
     state.context,
     async () => {},
   )
@@ -265,7 +380,12 @@ test('source input and source model precede every host hook, secrets never proje
 })
 test('saving fails to one safe failed End, never a completed End', async () => {
   const state = await setup()
-  const prepared = await state.runtime.prepare('save-fails', request, state.context, async () => {})
+  const prepared = await state.runtime.prepare(
+    'save-fails',
+    request,
+    state.context,
+    async () => {},
+  )
   state.documents.failConversations = true
   const events: RunEvent[] = []
   const snapshot = await state.runtime.execute(
@@ -287,18 +407,35 @@ test('saving fails to one safe failed End, never a completed End', async () => {
 })
 test('POST abort after acceptance does not cancel runtime execution; no-history rejects actions', async () => {
   const state = await setup({}, false)
-  const prepared = await state.runtime.prepare('stateless', request, state.context, async (handle) => {
-    assert.equal(handle, null)
-  })
+  const prepared = await state.runtime.prepare(
+    'stateless',
+    request,
+    state.context,
+    async (handle) => {
+      assert.equal(handle, null)
+    },
+  )
   state.post.abort()
-  const snapshot = await state.runtime.execute(prepared, new AbortController().signal, () => {}, allowed)
+  const snapshot = await state.runtime.execute(
+    prepared,
+    new AbortController().signal,
+    () => {},
+    allowed,
+  )
   assert.equal(snapshot.status, 'completed')
   assert.equal(snapshot.conversationId, null)
   assert.deepEqual(await state.conversations.list(null, actor), [])
   const next = await setup({}, false)
   await assert.rejects(
-    next.runtime.prepare('unsupported', { ...request, conversationId: 'existing' }, next.context, async () => {}),
-    (error) => error instanceof KitFailure && error.details?.reason === 'history_disabled',
+    next.runtime.prepare(
+      'unsupported',
+      { ...request, conversationId: 'existing' },
+      next.context,
+      async () => {},
+    ),
+    (error) =>
+      error instanceof KitFailure &&
+      error.details?.reason === 'history_disabled',
   )
   assert.equal(next.cleanups(), 1)
 })
@@ -316,7 +453,12 @@ test('approval cancellation never dispatches tool and cleanup follows cancelled 
       },
     },
   )
-  const prepared = await state.runtime.prepare('approval-cancel', request, state.context, async () => {})
+  const prepared = await state.runtime.prepare(
+    'approval-cancel',
+    request,
+    state.context,
+    async () => {},
+  )
   const cancellation = new AbortController(),
     events: RunEvent[] = []
   const snapshot = await state.runtime.execute(
@@ -330,7 +472,9 @@ test('approval cancellation never dispatches tool and cleanup follows cancelled 
       async wait(_runId, _call, signal) {
         if (signal.aborted) return false
         const pending = Promise.withResolvers<boolean>()
-        signal.addEventListener('abort', () => pending.resolve(false), { once: true })
+        signal.addEventListener('abort', () => pending.resolve(false), {
+          once: true,
+        })
         return pending.promise
       },
     },
@@ -344,7 +488,10 @@ test('approval cancellation never dispatches tool and cleanup follows cancelled 
   )
   const conversationId = prepared.accepted.conversationId
   assert.ok(conversationId)
-  assert.equal((await state.conversations.get(conversationId, actor)).turns[0]?.status, 'cancelled')
+  assert.equal(
+    (await state.conversations.get(conversationId, actor)).turns[0]?.status,
+    'cancelled',
+  )
 })
 test('cancelled in-flight host work settles before finish and cleanup', async () => {
   const started = Promise.withResolvers<void>(),
@@ -367,8 +514,18 @@ test('cancelled in-flight host work settles before finish and cleanup', async ()
       },
     },
   )
-  const prepared = await state.runtime.prepare('inflight', request, state.context, async () => {})
-  const execution = state.runtime.execute(prepared, cancellation.signal, () => {}, allowed)
+  const prepared = await state.runtime.prepare(
+    'inflight',
+    request,
+    state.context,
+    async () => {},
+  )
+  const execution = state.runtime.execute(
+    prepared,
+    cancellation.signal,
+    () => {},
+    allowed,
+  )
   await started.promise
   cancellation.abort()
   assert.equal(state.cleanups(), 0)
@@ -386,12 +543,20 @@ test('abort during host preparation prevents reservation and cleans after hook s
       return release.promise
     },
   })
-  const preparation = state.runtime.prepare('preparation-abort', request, state.context, async () => {})
+  const preparation = state.runtime.prepare(
+    'preparation-abort',
+    request,
+    state.context,
+    async () => {},
+  )
   await entered.promise
   state.post.abort()
   assert.equal(state.cleanups(), 0)
   release.resolve(null)
-  await assert.rejects(preparation, (error) => error instanceof KitFailure && error.code === 'cancelled')
+  await assert.rejects(
+    preparation,
+    (error) => error instanceof KitFailure && error.code === 'cancelled',
+  )
   assert.equal(state.cleanups(), 1)
   assert.deepEqual(await state.conversations.list(null, actor), [])
 })

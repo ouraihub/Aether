@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use aether_providers::{
-    EndpointKeySave, ModelFilter, ModelOption, ProbeResult, ProbeTarget, Provider, ProviderSave,
-    Store,
+    EndpointKeySave, ModelFilter, ModelOption, ProbeResult, ProbeTarget,
+    Provider, ProviderSave, Store,
 };
 use aether_support::KitError;
 use tauri::{AppHandle, Manager, Runtime};
@@ -31,8 +31,11 @@ impl Providers {
         }
     }
 
-    fn jobs(&self) -> std::sync::MutexGuard<'_, HashMap<String, CancellationToken>> {
-        // A poisoned map only means a command panicked mid-update; entries are still valid.
+    fn jobs(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<String, CancellationToken>> {
+        // A poisoned map only means a command panicked mid-update; entries are
+        // still valid.
         self.jobs.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -52,7 +55,11 @@ async fn blocking<R: Runtime, T: Send + 'static>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "providers_list"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "providers_list"),
+    err(level = "warn")
+)]
 pub(crate) async fn providers_list<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<Vec<Provider>, KitError> {
@@ -60,7 +67,11 @@ pub(crate) async fn providers_list<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "providers_save"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "providers_save"),
+    err(level = "warn")
+)]
 pub(crate) async fn providers_save<R: Runtime>(
     app: AppHandle<R>,
     input: ProviderSave,
@@ -82,7 +93,11 @@ pub(crate) async fn providers_set_enabled<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "providers_delete"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "providers_delete"),
+    err(level = "warn")
+)]
 pub(crate) async fn providers_delete<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -91,7 +106,11 @@ pub(crate) async fn providers_delete<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "providers_key_save"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "providers_key_save"),
+    err(level = "warn")
+)]
 pub(crate) async fn providers_key_save<R: Runtime>(
     app: AppHandle<R>,
     input: EndpointKeySave,
@@ -142,9 +161,14 @@ pub(crate) async fn providers_model_options<R: Runtime>(
     blocking(&app, move |store| store.model_options(filter)).await
 }
 
-/// Fetches the model list; `providers_cancel(jobId)` aborts it with `cancelled`.
+/// Fetches the model list; `providers_cancel(jobId)` aborts it with
+/// `cancelled`.
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "providers_probe"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "providers_probe"),
+    err(level = "warn")
+)]
 pub(crate) async fn providers_probe<R: Runtime>(
     app: AppHandle<R>,
     job_id: String,
@@ -169,7 +193,11 @@ pub(crate) async fn providers_probe<R: Runtime>(
 
 /// Cancels a probe; unknown ids are fine (the probe may have just finished).
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "providers_cancel"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "providers_cancel"),
+    err(level = "warn")
+)]
 pub(crate) async fn providers_cancel<R: Runtime>(
     app: AppHandle<R>,
     job_id: String,

@@ -1,4 +1,5 @@
-//! Read-only acquisition. Installation remains the store's digest-confirmed operation.
+//! Read-only acquisition. Installation remains the store's digest-
+//! confirmed operation.
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -20,7 +21,9 @@ impl SearchRoots {
 }
 
 #[tauri::command]
-pub(crate) async fn skills_source_search(query: String) -> Result<Vec<RemoteSkill>, KitError> {
+pub(crate) async fn skills_source_search(
+    query: String,
+) -> Result<Vec<RemoteSkill>, KitError> {
     tokio::time::timeout(
         std::time::Duration::from_secs(60),
         aether_skills::sources::search(&query),
@@ -30,7 +33,9 @@ pub(crate) async fn skills_source_search(query: String) -> Result<Vec<RemoteSkil
 }
 
 #[tauri::command]
-pub(crate) async fn skills_source_prepare(url: String) -> Result<PreparedSkill, KitError> {
+pub(crate) async fn skills_source_prepare(
+    url: String,
+) -> Result<PreparedSkill, KitError> {
     tokio::time::timeout(
         std::time::Duration::from_secs(120),
         aether_skills::sources::prepare(&url),
@@ -40,7 +45,8 @@ pub(crate) async fn skills_source_prepare(url: String) -> Result<PreparedSkill, 
 }
 
 #[tauri::command]
-pub(crate) async fn skills_system_discover() -> Result<Vec<SystemSkill>, KitError> {
+pub(crate) async fn skills_system_discover(
+) -> Result<Vec<SystemSkill>, KitError> {
     tauri::async_runtime::spawn_blocking(aether_skills::system::discover)
         .await
         .map_err(KitError::internal)?
@@ -56,7 +62,9 @@ pub(crate) async fn skills_system_prepare<R: Runtime>(
         .state::<SearchRoots>()
         .0
         .lock()
-        .map_err(|_| KitError::internal(std::io::Error::other("skill roots unavailable")))?
+        .map_err(|_| {
+            KitError::internal(std::io::Error::other("skill roots unavailable"))
+        })?
         .get(window.label())
         .cloned()
         .unwrap_or_default();
@@ -64,7 +72,9 @@ pub(crate) async fn skills_system_prepare<R: Runtime>(
         for root in roots {
             let candidates = aether_skills::system::discover_directory(&root)?;
             if candidates.iter().any(|candidate| candidate.path == path) {
-                return aether_skills::system::prepare_directory(std::path::Path::new(&path));
+                return aether_skills::system::prepare_directory(
+                    std::path::Path::new(&path),
+                );
             }
         }
         aether_skills::system::prepare(&path)
@@ -74,7 +84,8 @@ pub(crate) async fn skills_system_prepare<R: Runtime>(
 }
 
 #[tauri::command]
-pub(crate) async fn skills_pick_directory() -> Result<Option<PreparedSkill>, KitError> {
+pub(crate) async fn skills_pick_directory(
+) -> Result<Option<PreparedSkill>, KitError> {
     let Some(selected) = rfd::AsyncFileDialog::new().pick_folder().await else {
         return Ok(None);
     };
@@ -105,7 +116,9 @@ pub(crate) async fn skills_pick_search_directory<R: Runtime>(
     let mut all = state
         .0
         .lock()
-        .map_err(|_| KitError::internal(std::io::Error::other("skill roots unavailable")))?;
+        .map_err(|_| {
+            KitError::internal(std::io::Error::other("skill roots unavailable"))
+        })?;
     let roots = all.entry(window.label().to_owned()).or_default();
     if !roots.contains(&root) {
         if roots.len() >= 16 {

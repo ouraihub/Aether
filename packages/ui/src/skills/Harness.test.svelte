@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Test-only host root: SkillsSettings, or a ChatPanel whose skill selection the "app" keeps.
+  // Test-only host root: SkillsSettings, or a ChatPanel whose skill
+  // selection the "app" keeps.
   import ChatPanel from '../chat/ChatPanel.svelte'
   import { setKitContext, type KitContext } from '../context'
   import type { SkillRef } from '../ports'
@@ -9,7 +10,11 @@
     kit,
     skills,
     onSkillsChange,
-  }: { kit: KitContext; skills?: SkillRef[]; onSkillsChange?: (refs: SkillRef[]) => void } = $props()
+  }: {
+    kit: KitContext
+    skills?: SkillRef[]
+    onSkillsChange?: (refs: SkillRef[]) => void
+  } = $props()
   // svelte-ignore state_referenced_locally
   setKitContext(kit)
   // svelte-ignore state_referenced_locally

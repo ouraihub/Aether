@@ -1,12 +1,22 @@
 <script>
-  // Host root: settings live in a dialog so the model picker stacks over it (docs/90 P2-3, docs/16 §3).
-  import { createDefaultNotify, createI18n, KitNotifier, setKitContext } from '@ouraihub/aether-ui'
+  // Host root: settings live in a dialog so the model picker stacks over it
+  // (docs/90 P2-3, docs/16 §3).
+  import {
+    createDefaultNotify,
+    createI18n,
+    KitNotifier,
+    setKitContext,
+  } from '@ouraihub/aether-ui'
   import { createLogger } from '@ouraihub/aether-ui/logs'
   import { ProvidersSettings } from '@ouraihub/aether-ui/providers'
   import { createTauriPorts } from '@ouraihub/aether-ui/tauri'
-  // Stands in for the host's own shadcn Dialog; the package does not export its UI primitives.
-  import { Button } from '../../../../packages/ui/src/components/ui/button/index.js'
-  import * as Dialog from '../../../../packages/ui/src/components/ui/dialog/index.js'
+  // Stands in for the host's own shadcn Dialog; the package does not export
+  // its UI primitives.
+  import {
+    Button,
+  } from '../../../../packages/ui/src/components/ui/button/index.js'
+  import * as Dialog from
+    '../../../../packages/ui/src/components/ui/dialog/index.js'
 
   const ports = createTauriPorts({ providers: true })
   const i18n = createI18n(navigator.language)

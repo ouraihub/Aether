@@ -1,7 +1,9 @@
-<!-- Local change: `theme` falls back to "system" before mode-watcher resolves, as exactOptionalPropertyTypes rejects `undefined` (docs/04 §4). -->
+<!-- Local change: `theme` falls back to "system" before mode-watcher resolves,
+  as exactOptionalPropertyTypes rejects `undefined` (docs/04 §4). -->
 <script lang="ts">
 	import { mode } from "mode-watcher";
-	import { Toaster as Sonner, type ToasterProps as SonnerProps } from "svelte-sonner";
+import { Toaster as Sonner, type ToasterProps as SonnerProps } from
+  "svelte-sonner";
 	import Loader2Icon from '@lucide/svelte/icons/loader-2';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
 	import OctagonXIcon from '@lucide/svelte/icons/octagon-x';
@@ -14,7 +16,11 @@
 <Sonner
 	theme={mode.current ?? "system"}
 	class="toaster group"
-	style="--normal-bg: var(--color-popover); --normal-text: var(--color-popover-foreground); --normal-border: var(--color-border);"
+style="
+  --normal-bg: var(--color-popover);
+  --normal-text: var(--color-popover-foreground);
+  --normal-border: var(--color-border);
+"
 	toastOptions={{
 		classes: {
 			toast: "cn-toast",

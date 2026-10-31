@@ -13,12 +13,22 @@ class TestDocuments implements DocumentStore {
   private key(actor: Actor, collection: string, key: string): string {
     return JSON.stringify([ownerKey(actor), collection, key])
   }
-  async get(actor: Actor, collection: string, key: string): Promise<StoredDocument | null> {
+  async get(
+    actor: Actor,
+    collection: string,
+    key: string,
+  ): Promise<StoredDocument | null> {
     return this.records.get(this.key(actor, collection, key)) ?? null
   }
-  async list(actor: Actor, collection: string): Promise<readonly StoredDocument[]> {
-    const prefix = JSON.stringify([ownerKey(actor), collection]).slice(0, -1) + ','
-    return [...this.records].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value)
+  async list(
+    actor: Actor,
+    collection: string,
+  ): Promise<readonly StoredDocument[]> {
+    const prefix =
+      JSON.stringify([ownerKey(actor), collection]).slice(0, -1) + ','
+    return [...this.records]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, value]) => value)
   }
   async compareAndSet(
     actor: Actor,
@@ -29,14 +39,25 @@ class TestDocuments implements DocumentStore {
   ): Promise<StoredDocument> {
     const address = this.key(actor, collection, key)
     const previous = this.records.get(address)
-    if ((previous?.revision ?? null) !== revision) throw new KitFailure('conflict', 'CAS conflict')
-    const document = { key, revision: (previous?.revision ?? 0) + 1, value: structuredClone(value) }
+    if ((previous?.revision ?? null) !== revision)
+      throw new KitFailure('conflict', 'CAS conflict')
+    const document = {
+      key,
+      revision: (previous?.revision ?? 0) + 1,
+      value: structuredClone(value),
+    }
     this.records.set(address, document)
     return document
   }
-  async remove(actor: Actor, collection: string, key: string, revision: number): Promise<void> {
+  async remove(
+    actor: Actor,
+    collection: string,
+    key: string,
+    revision: number,
+  ): Promise<void> {
     const address = this.key(actor, collection, key)
-    if (this.records.get(address)?.revision !== revision) throw new KitFailure('conflict', 'CAS conflict')
+    if (this.records.get(address)?.revision !== revision)
+      throw new KitFailure('conflict', 'CAS conflict')
     this.records.delete(address)
   }
 }
@@ -50,7 +71,12 @@ const actor: Actor = {
   scopes: ['mcp:access', 'files:read', 'files:write'],
 }
 function context(owner: Actor = actor): WorkerContext {
-  return { actor: owner, signal: new AbortController().signal, requestId: 'test', now: 1000 }
+  return {
+    actor: owner,
+    signal: new AbortController().signal,
+    requestId: 'test',
+    now: 1000,
+  }
 }
 function fixture(overrides: Partial<McpServiceOptions> = {}) {
   const store = new TestDocuments()
@@ -118,7 +144,12 @@ function fixture(overrides: Partial<McpServiceOptions> = {}) {
   })
   return { service, store, calls: () => calls }
 }
-function request(path: string, method = 'GET', data?: unknown, token?: string): Request {
+function request(
+  path: string,
+  method = 'GET',
+  data?: unknown,
+  token?: string,
+): Request {
   const headers = new Headers({ Origin: origin })
   if (data !== undefined) headers.set('Content-Type', 'application/json')
   if (token) headers.set('Authorization', `Bearer ${token}`)
@@ -128,7 +159,9 @@ function request(path: string, method = 'GET', data?: unknown, token?: string): 
     ...(data === undefined ? {} : { body: JSON.stringify(data) }),
   })
 }
-async function value(response: Response | null): Promise<Record<string, unknown>> {
+async function value(
+  response: Response | null,
+): Promise<Record<string, unknown>> {
   assert.ok(response)
   const result: unknown = await response.json()
   assert.ok(object(result))
@@ -136,21 +169,36 @@ async function value(response: Response | null): Promise<Record<string, unknown>
 }
 async function enable(service: McpService): Promise<void> {
   await service.handle(
-    request('/api/v1/mcp/settings', 'PUT', { enabled: true, enabledScopes: actor.scopes }),
+    request('/api/v1/mcp/settings', 'PUT', {
+      enabled: true,
+      enabledScopes: actor.scopes,
+    }),
     context(),
   )
 }
 async function key(service: McpService, scopes = ['mcp:access', 'files:read']) {
   const issued = await value(
-    await service.handle(request('/api/v1/mcp/api-keys', 'POST', { name: 'client', scopes }), context()),
+    await service.handle(
+      request('/api/v1/mcp/api-keys', 'POST', { name: 'client', scopes }),
+      context(),
+    ),
   )
   assert.equal(typeof issued.token, 'string')
   assert.ok(typeof issued.token === 'string')
   assert.ok(object(issued.record) && typeof issued.record.id === 'string')
   return { token: issued.token, id: issued.record.id }
 }
-async function rpc(service: McpService, token: string, method: string, params: unknown = {}) {
-  return value(await service.handlePublic(request('/mcp', 'POST', { jsonrpc: '2.0', id: 1, method, params }, token)))
+async function rpc(
+  service: McpService,
+  token: string,
+  method: string,
+  params: unknown = {},
+) {
+  return value(
+    await service.handlePublic(
+      request('/mcp', 'POST', { jsonrpc: '2.0', id: 1, method, params }, token),
+    ),
+  )
 }
 
 test('API keys reveal once; scope directory and call checks agree; revocation immediate', async () => {
@@ -158,23 +206,45 @@ test('API keys reveal once; scope directory and call checks agree; revocation im
   await enable(service)
   const issued = await key(service)
   assert.ok(!JSON.stringify([...store.records.values()]).includes(issued.token))
-  const listed = await service.handle(request('/api/v1/mcp/api-keys'), context())
+  const listed = await service.handle(
+    request('/api/v1/mcp/api-keys'),
+    context(),
+  )
   assert.ok(listed)
   assert.ok(!(await listed.text()).includes(issued.token))
   const tools = await rpc(service, issued.token, 'tools/list')
   assert.ok(object(tools.result) && Array.isArray(tools.result.tools))
   assert.equal(tools.result.tools.length, 1)
-  const denied = await rpc(service, issued.token, 'tools/call', { name: 'write_file', arguments: {} })
+  const denied = await rpc(service, issued.token, 'tools/call', {
+    name: 'write_file',
+    arguments: {},
+  })
   assert.ok(object(denied.error))
   assert.equal(denied.error.code, -32001)
   assert.equal(calls(), 0)
-  const accepted = await rpc(service, issued.token, 'tools/call', { name: 'read_file', arguments: { path: 'allowed' } })
-  assert.ok(object(accepted.result) && object(accepted.result.structuredContent))
+  const accepted = await rpc(service, issued.token, 'tools/call', {
+    name: 'read_file',
+    arguments: { path: 'allowed' },
+  })
+  assert.ok(
+    object(accepted.result) && object(accepted.result.structuredContent),
+  )
   assert.equal(calls(), 1)
-  await service.handle(request(`/api/v1/mcp/api-keys/${issued.id}/revoke`, 'POST', {}), context())
+  await service.handle(
+    request(`/api/v1/mcp/api-keys/${issued.id}/revoke`, 'POST', {}),
+    context(),
+  )
   assert.equal(
-    (await service.handlePublic(request('/mcp', 'POST', { jsonrpc: '2.0', id: 1, method: 'tools/list' }, issued.token)))
-      ?.status,
+    (
+      await service.handlePublic(
+        request(
+          '/mcp',
+          'POST',
+          { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+          issued.token,
+        ),
+      )
+    )?.status,
     401,
   )
 })
@@ -187,27 +257,49 @@ test('management is isolated by owner, tenant and deployment; unknown authorizat
     { ...actor, subjectId: 'other' },
     { ...actor, tenantId: 'other' },
   ]) {
-    const listed = await service.handle(request('/api/v1/mcp/api-keys'), context(other))
+    const listed = await service.handle(
+      request('/api/v1/mcp/api-keys'),
+      context(other),
+    )
     assert.ok(listed)
     assert.deepEqual(await listed.json(), [])
     await assert.rejects(
-      service.handle(request(`/api/v1/mcp/api-keys/${issued.id}/revoke`, 'POST', {}), context(other)),
-      (error: unknown) => error instanceof KitFailure && error.code === 'not_found',
+      service.handle(
+        request(`/api/v1/mcp/api-keys/${issued.id}/revoke`, 'POST', {}),
+        context(other),
+      ),
+      (error: unknown) =>
+        error instanceof KitFailure && error.code === 'not_found',
     )
   }
   await assert.rejects(
-    service.handle(request('/api/v1/mcp/api-keys'), context({ ...actor, applicationId: 'other' })),
-    (error: unknown) => error instanceof KitFailure && error.code === 'forbidden',
+    service.handle(
+      request('/api/v1/mcp/api-keys'),
+      context({ ...actor, applicationId: 'other' }),
+    ),
+    (error: unknown) =>
+      error instanceof KitFailure && error.code === 'forbidden',
   )
-  const denied = await rpc(service, issued.token, 'tools/call', { name: 'read_file', arguments: { path: 'private' } })
+  const denied = await rpc(service, issued.token, 'tools/call', {
+    name: 'read_file',
+    arguments: { path: 'private' },
+  })
   assert.ok(object(denied.error))
   assert.equal(denied.error.code, -32001)
   assert.equal(calls(), 0)
-  const switched = fixture({ applicationId: 'other', store: service.options.store }).service
+  const switched = fixture({
+    applicationId: 'other',
+    store: service.options.store,
+  }).service
   assert.equal(
     (
       await switched.handlePublic(
-        request('/mcp', 'POST', { jsonrpc: '2.0', id: 1, method: 'tools/list' }, issued.token),
+        request(
+          '/mcp',
+          'POST',
+          { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+          issued.token,
+        ),
       )
     )?.status,
     401,
@@ -217,10 +309,17 @@ test('management is isolated by owner, tenant and deployment; unknown authorizat
 test('enabled scopes are not granted scopes, and default server setting is disabled', async () => {
   const { service } = fixture()
   const issued = await key(service)
-  assert.equal((await service.handlePublic(request('/mcp', 'POST', {}, issued.token)))?.status, 401)
+  assert.equal(
+    (await service.handlePublic(request('/mcp', 'POST', {}, issued.token)))
+      ?.status,
+    401,
+  )
   await enable(service)
   await service.handle(
-    request('/api/v1/mcp/settings', 'PUT', { enabled: true, enabledScopes: ['mcp:access', 'files:write'] }),
+    request('/api/v1/mcp/settings', 'PUT', {
+      enabled: true,
+      enabledScopes: ['mcp:access', 'files:write'],
+    }),
     context(),
   )
   const tools = await rpc(service, issued.token, 'tools/list')
@@ -255,7 +354,8 @@ test('OAuth requires exact redirects, explicit consent, PKCE, one-time codes and
   bad.set('redirect_uri', 'https://client.example/callback/other')
   await assert.rejects(
     service.handlePublic(request(`/oauth/authorize?${bad}`)),
-    (error: unknown) => error instanceof KitFailure && error.code === 'bad_request',
+    (error: unknown) =>
+      error instanceof KitFailure && error.code === 'bad_request',
   )
   const consent = await service.handlePublic(request(path))
   assert.ok(consent)
@@ -263,7 +363,10 @@ test('OAuth requires exact redirects, explicit consent, PKCE, one-time codes and
   assert.ok(csrf)
   const approve = new Request(`${origin}${path}`, {
     method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: {
+      Origin: origin,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
     body: new URLSearchParams({ csrf, decision: 'approve' }),
   })
   const redirect = await service.handlePublic(approve)
@@ -289,9 +392,15 @@ test('OAuth requires exact redirects, explicit consent, PKCE, one-time codes and
     code,
     code_verifier: verifier,
   }
-  assert.equal((await exchange({ ...codeForm, code_verifier: 'y'.repeat(43) }))?.status, 400)
+  assert.equal(
+    (await exchange({ ...codeForm, code_verifier: 'y'.repeat(43) }))?.status,
+    400,
+  )
   const tokens = await value(await exchange(codeForm))
-  assert.ok(typeof tokens.refresh_token === 'string' && typeof tokens.access_token === 'string')
+  assert.ok(
+    typeof tokens.refresh_token === 'string' &&
+      typeof tokens.access_token === 'string',
+  )
   assert.equal((await exchange(codeForm))?.status, 400)
   const refreshForm = {
     grant_type: 'refresh_token',
@@ -301,18 +410,29 @@ test('OAuth requires exact redirects, explicit consent, PKCE, one-time codes and
   const rotated = await value(await exchange(refreshForm))
   assert.ok(typeof rotated.access_token === 'string')
   assert.equal((await exchange(refreshForm))?.status, 400)
-  const grantsResponse = await service.handle(request('/api/v1/mcp/grants'), context())
+  const grantsResponse = await service.handle(
+    request('/api/v1/mcp/grants'),
+    context(),
+  )
   assert.ok(grantsResponse)
   const grants: unknown = await grantsResponse.json()
   assert.ok(Array.isArray(grants))
   assert.equal(grants.length, 1)
   const grant: unknown = grants[0]
   assert.ok(object(grant) && typeof grant.id === 'string')
-  await service.handle(request(`/api/v1/mcp/grants/${grant.id}/revoke`, 'POST', {}), context())
+  await service.handle(
+    request(`/api/v1/mcp/grants/${grant.id}/revoke`, 'POST', {}),
+    context(),
+  )
   assert.equal(
     (
       await service.handlePublic(
-        request('/mcp', 'POST', { jsonrpc: '2.0', id: 1, method: 'tools/list' }, rotated.access_token),
+        request(
+          '/mcp',
+          'POST',
+          { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+          rotated.access_token,
+        ),
       )
     )?.status,
     401,
@@ -322,11 +442,22 @@ test('OAuth requires exact redirects, explicit consent, PKCE, one-time codes and
 test('consent host rejection cannot mint code, and hostile Origin never dispatches a tool', async () => {
   const { service, calls } = fixture({ authorizeConsent: async () => false })
   await assert.rejects(
-    service.handle(request('/api/v1/mcp/api-keys', 'POST', { name: 'client', scopes: ['mcp:access'] }), context()),
-    (error: unknown) => error instanceof KitFailure && error.code === 'forbidden',
+    service.handle(
+      request('/api/v1/mcp/api-keys', 'POST', {
+        name: 'client',
+        scopes: ['mcp:access'],
+      }),
+      context(),
+    ),
+    (error: unknown) =>
+      error instanceof KitFailure && error.code === 'forbidden',
   )
   const response = await service.handlePublic(
-    new Request(`${origin}/mcp`, { method: 'POST', headers: { Origin: 'https://evil.example' }, body: '{}' }),
+    new Request(`${origin}/mcp`, {
+      method: 'POST',
+      headers: { Origin: 'https://evil.example' },
+      body: '{}',
+    }),
   )
   assert.equal(response?.status, 403)
   assert.equal(calls(), 0)

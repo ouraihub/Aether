@@ -1,7 +1,13 @@
 <script>
-  // Native features retain their query flags. Explicit ?web=1 connects only to the
-  // local Worker via Vite; its manually entered demo bearer stays in page memory.
-  import { createDefaultNotify, createI18n, KitNotifier, setKitContext } from '@ouraihub/aether-ui'
+  // Native features retain their query flags. Explicit ?web=1 connects only
+  // to the local Worker via Vite; its manually entered demo bearer stays in
+  // page memory.
+  import {
+    createDefaultNotify,
+    createI18n,
+    KitNotifier,
+    setKitContext,
+  } from '@ouraihub/aether-ui'
   import { ChatPanel } from '@ouraihub/aether-ui/chat'
   import { createLogger, LogPanel, LogSettings } from '@ouraihub/aether-ui/logs'
   import { McpClientSettings } from '@ouraihub/aether-ui/mcp'
@@ -9,19 +15,29 @@
   import { SkillsSettings } from '@ouraihub/aether-ui/skills'
   import { createTauriPorts } from '@ouraihub/aether-ui/tauri'
   import { createWebPorts } from '@ouraihub/aether-ui/web'
-  // Stands in for the host's own shadcn components; the package does not export its UI primitives.
-  import { Button } from '../../../../packages/ui/src/components/ui/button/index.js'
-  import * as Dialog from '../../../../packages/ui/src/components/ui/dialog/index.js'
-  import { Input } from '../../../../packages/ui/src/components/ui/input/index.js'
-  import * as Field from '../../../../packages/ui/src/components/ui/field/index.js'
-  import * as Alert from '../../../../packages/ui/src/components/ui/alert/index.js'
+  // Stands in for the host's own shadcn components; the package does not
+  // export its UI primitives.
+  import {
+    Button,
+  } from '../../../../packages/ui/src/components/ui/button/index.js'
+  import * as Dialog from
+    '../../../../packages/ui/src/components/ui/dialog/index.js'
+  import {
+    Input,
+  } from '../../../../packages/ui/src/components/ui/input/index.js'
+  import * as Field from
+    '../../../../packages/ui/src/components/ui/field/index.js'
+  import * as Alert from
+    '../../../../packages/ui/src/components/ui/alert/index.js'
 
   const query = new URLSearchParams(location.search)
   const conversations = query.get('history') !== '0'
   const skills = query.get('skills') === '1'
   const mcpClient = query.get('mcp') === '1'
   const web = query.get('web') === '1'
-  const localWeb = import.meta.env.DEV && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+  const localWeb =
+    import.meta.env.DEV &&
+    ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
   let token = $state('')
   let connected = $state(false)
   let connecting = $state(false)
@@ -39,8 +55,8 @@
     ? createWebPorts({
         baseURL: location.origin,
         fetch: webFetch,
-        // This local example uses bearer actors, never cookie sessions or a fabricated CSRF token.
-        credentials: 'omit',
+        // This local example uses bearer actors, never cookie sessions or a
+        // fabricated CSRF token.
         csrf: '',
         providers: true,
         chat: true,
@@ -48,13 +64,23 @@
         skills,
         mcpClient,
         onStreamError: (runId, error) => {
-          streamError = `Run ${runId}: connection interrupted (${error.code}). Outcome is not confirmed; check history before retrying.`
+          streamError =
+            `Run ${runId}: connection interrupted (${error.code}). ` +
+            'Outcome is not confirmed; check history before retrying.'
         },
       })
-    : createTauriPorts({ providers: true, chat: true, conversations, skills, skillSources: skills, mcpClient })
+    : createTauriPorts({
+        providers: true,
+        chat: true,
+        conversations,
+        skills,
+        skillSources: skills,
+        mcpClient,
+      })
   const i18n = createI18n(navigator.language)
   const notify = createDefaultNotify()
-  // Web has no LogsPort: keep diagnostic event names only, never request data or credentials.
+  // Web has no LogsPort: keep diagnostic event names only, never request
+  // data or credentials.
   const logger = web
     ? {
         debug: (event) => console.debug(event),
@@ -77,20 +103,27 @@
     connecting = true
     connectionError = ''
     try {
-      const response = await webFetch(new URL('/health', location.origin).href, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-        credentials: 'omit',
-        redirect: 'error',
-      })
+      const response = await webFetch(
+        new URL('/health', location.origin).href,
+        {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          credentials: 'omit',
+          redirect: 'error',
+        },
+      )
       if (!response.ok) {
-        connectionError = `Worker connection rejected (HTTP ${response.status}). Check the token and local Worker origin.`
+        connectionError =
+          `Worker connection rejected (HTTP ${response.status}). ` +
+          'Check the token and local Worker origin.'
         return
       }
       connected = true
       connectionOpen = false
     } catch {
-      connectionError = 'Unable to reach the local Worker. Start it on 127.0.0.1:8787 and try again.'
+      connectionError =
+        'Unable to reach the local Worker. Start it on 127.0.0.1:8787 and ' +
+        'try again.'
     } finally {
       connecting = false
     }
@@ -101,19 +134,35 @@
   <header class="flex items-center gap-3">
     <h1 class="text-xl font-semibold">Aether · Assistant</h1>
     {#if !web || connected}
-      <Button class="ml-auto" variant="outline" onclick={() => (settings = true)}>{i18n.t('providers.title')}</Button>
+      <Button
+        class="ml-auto"
+        variant="outline"
+        onclick={() => (settings = true)}>{i18n.t('providers.title')}</Button
+      >
       {#if skills}
-        <Button variant="outline" onclick={() => (skillsOpen = true)}>{i18n.t('skills.title')}</Button>
+        <Button variant="outline" onclick={() => (skillsOpen = true)}
+          >{i18n.t('skills.title')}</Button
+        >
       {/if}
       {#if mcpClient}
-        <Button variant="outline" onclick={() => (mcpOpen = true)}>{i18n.t('mcp.client.title')}</Button>
+        <Button variant="outline" onclick={() => (mcpOpen = true)}
+          >{i18n.t('mcp.client.title')}</Button
+        >
       {/if}
-      <Button variant="outline" onclick={() => (chatOpen = !chatOpen)}>{i18n.t('chat.title')}</Button>
+      <Button variant="outline" onclick={() => (chatOpen = !chatOpen)}
+        >{i18n.t('chat.title')}</Button
+      >
       {#if !web}
-        <Button variant="outline" onclick={() => (logsOpen = !logsOpen)}>{i18n.t('logs.title')}</Button>
+        <Button variant="outline" onclick={() => (logsOpen = !logsOpen)}
+          >{i18n.t('logs.title')}</Button
+        >
       {/if}
     {:else}
-      <Button class="ml-auto" variant="outline" onclick={() => (connectionOpen = true)}>Connect Worker</Button>
+      <Button
+        class="ml-auto"
+        variant="outline"
+        onclick={() => (connectionOpen = true)}>Connect Worker</Button
+      >
     {/if}
   </header>
   {#if web && streamError}
@@ -142,14 +191,17 @@
       <Dialog.Header>
         <Dialog.Title>Connect local Worker</Dialog.Title>
         <Dialog.Description>
-          API: {location.origin}/api/v1. Vite forwards to 127.0.0.1:8787. Enter your configured demo bearer token. It
-          stays in memory until this page closes or reloads. Cookie authentication is not used.
+          API: {location.origin}/api/v1. Vite forwards to 127.0.0.1:8787. Enter
+          your configured demo bearer token. It stays in memory until this page
+          closes or reloads. Cookie authentication is not used.
         </Dialog.Description>
       </Dialog.Header>
       <form onsubmit={connect}>
         <Field.FieldGroup>
           <Field.Field data-invalid={!!connectionError}>
-            <Field.FieldLabel for="worker-token">Worker bearer token</Field.FieldLabel>
+            <Field.FieldLabel for="worker-token"
+              >Worker bearer token</Field.FieldLabel
+            >
             <Input
               id="worker-token"
               type="password"
@@ -162,8 +214,14 @@
               aria-invalid={!!connectionError}
               aria-describedby="worker-connection-status"
             />
-            <Field.FieldDescription id="worker-connection-status" role="status">
-              {localWeb ? connectionError : 'Web demo connections are available only on a loopback Vite dev server.'}
+            <Field.FieldDescription
+              id="worker-connection-status"
+              role="status"
+            >
+              {localWeb
+                ? connectionError
+                : 'Web demo connections are available only on a loopback ' +
+                  'Vite dev server.'}
             </Field.FieldDescription>
           </Field.Field>
           <Button type="submit" disabled={connecting || !localWeb || !token}>

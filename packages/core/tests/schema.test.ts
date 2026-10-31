@@ -18,7 +18,10 @@ test('Draft07 tools validate local refs, numeric bounds and exact object propert
     required: ['count', 'names'],
     additionalProperties: false,
   }
-  assert.equal(validateArguments(schema, { count: 2, names: ['one', 'two'] }), true)
+  assert.equal(
+    validateArguments(schema, { count: 2, names: ['one', 'two'] }),
+    true,
+  )
   for (const args of [
     { count: 0, names: ['one'] },
     { count: 2, names: ['a'] },
@@ -36,7 +39,11 @@ test('combinators, conditionals, tuple items, dependencies and formats are enfor
       mode: { enum: ['read', 'write'] },
       target: { type: 'string' },
       amount: { type: 'number', multipleOf: 0.5 },
-      tuple: { type: 'array', items: [{ type: 'string' }, { type: 'integer' }], additionalItems: false },
+      tuple: {
+        type: 'array',
+        items: [{ type: 'string' }, { type: 'integer' }],
+        additionalItems: false,
+      },
       email: { type: 'string', format: 'email' },
     },
     required: ['mode'],
@@ -45,16 +52,33 @@ test('combinators, conditionals, tuple items, dependencies and formats are enfor
     dependencies: { amount: ['target'] },
     additionalProperties: false,
   }
-  assert.equal(validateArguments(schema, { mode: 'read', tuple: ['x', 1], email: 'x@example.com' }), true)
+  assert.equal(
+    validateArguments(schema, {
+      mode: 'read',
+      tuple: ['x', 1],
+      email: 'x@example.com',
+    }),
+    true,
+  )
   assert.equal(validateArguments(schema, { mode: 'write' }), false)
   assert.equal(validateArguments(schema, { mode: 'read', amount: 1 }), false)
-  assert.equal(validateArguments(schema, { mode: 'read', email: 'invalid' }), false)
-  assert.equal(validateArguments(schema, { mode: 'read', tuple: ['x', 1, 2] }), false)
+  assert.equal(
+    validateArguments(schema, { mode: 'read', email: 'invalid' }),
+    false,
+  )
+  assert.equal(
+    validateArguments(schema, { mode: 'read', tuple: ['x', 1, 2] }),
+    false,
+  )
   assert.equal(
     validateArguments(
       {
         type: 'object',
-        properties: { value: { oneOf: [{ type: 'string' }, { type: 'number', minimum: 3 }] } },
+        properties: {
+          value: {
+            oneOf: [{ type: 'string' }, { type: 'number', minimum: 3 }],
+          },
+        },
         required: ['value'],
       },
       { value: 1 },
@@ -67,12 +91,23 @@ test('untrusted schemas fail closed for unsupported semantics and bounded resour
     { type: 'object', unknownConstraint: true },
     { type: 'object', $ref: 'https://remote.example/schema' },
     { type: 'object', $ref: '#' },
-    { type: 'object', properties: { value: { type: 'string', pattern: '(a+)+$' } } },
-    { type: 'object', properties: { value: { type: 'string', format: 'invented-security-format' } } },
+    {
+      type: 'object',
+      properties: { value: { type: 'string', pattern: '(a+)+$' } },
+    },
+    {
+      type: 'object',
+      properties: {
+        value: { type: 'string', format: 'invented-security-format' },
+      },
+    },
     { type: 'object', required: 'value' },
   ])
     assert.equal(validateArguments(schema, { value: 'x' }), false)
-  assert.equal(validateArguments({ type: 'object' }, { value: 'x'.repeat(262145) }), false)
+  assert.equal(
+    validateArguments({ type: 'object' }, { value: 'x'.repeat(262145) }),
+    false,
+  )
   const cyclic: Record<string, unknown> = {}
   cyclic.self = cyclic
   assert.equal(validateArguments({ type: 'object' }, cyclic), false)

@@ -1,11 +1,20 @@
-import type { ImagePart, KitErrorCode, Details } from '@ouraihub/aether-contracts'
+import type {
+  ImagePart,
+  KitErrorCode,
+  Details,
+} from '@ouraihub/aether-contracts'
 import { badRequest, KitFailure } from '../error.js'
 import type { OutboundHttp } from '../ports.js'
 import type { Connection } from '../types.js'
 
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024
 export const MAX_EDIT_IMAGES = 4
-export const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
+export const IMAGE_MIMES = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+] as const
 export const IMAGE_SIZES = ['1024x1024', '1024x1536', '1536x1024'] as const
 export const IMAGE_TIMEOUT_MS = 120_000
 const RESPONSE_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 64 * 1024
@@ -17,13 +26,25 @@ export interface ImageRequest {
 }
 export type ImageConnection = Pick<
   Connection,
-  'baseUrl' | 'modelId' | 'keys' | 'headers' | 'canVision' | 'imageBaseUrl' | 'imageEditBaseUrl'
+  | 'baseUrl'
+  | 'modelId'
+  | 'keys'
+  | 'headers'
+  | 'canVision'
+  | 'imageBaseUrl'
+  | 'imageEditBaseUrl'
 >
 /** Unknown means a dispatched request may have generated an image: never retry it automatically. */
-export type ImageDispatch = 'not_dispatched' | 'rejected' | 'unknown' | 'generated'
+export type ImageDispatch =
+  'not_dispatched' | 'rejected' | 'unknown' | 'generated'
 export class ImageFailure extends KitFailure {
   readonly dispatch: ImageDispatch
-  constructor(code: KitErrorCode, message: string, dispatch: ImageDispatch, details?: Details) {
+  constructor(
+    code: KitErrorCode,
+    message: string,
+    dispatch: ImageDispatch,
+    details?: Details,
+  ) {
     super(code, message, details)
     this.dispatch = dispatch
     this.name = 'ImageFailure'
@@ -63,10 +84,13 @@ export function decodeImage(image: ImagePart): Uint8Array<ArrayBuffer> {
     typeof image.data !== 'string'
   )
     throw badRequest('images', 'encoding')
-  if (!IMAGE_MIMES.some((mime) => mime === image.mime)) throw badRequest('images', 'mime')
+  if (!IMAGE_MIMES.some((mime) => mime === image.mime))
+    throw badRequest('images', 'mime')
   const data = image.data
-  if (data.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4) throw badRequest('images', 'size', MAX_IMAGE_BYTES)
-  if (data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(data)) throw badRequest('images', 'encoding')
+  if (data.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4)
+    throw badRequest('images', 'size', MAX_IMAGE_BYTES)
+  if (data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(data))
+    throw badRequest('images', 'encoding')
   let binary: string
   try {
     binary = atob(data)
@@ -75,7 +99,8 @@ export function decodeImage(image: ImagePart): Uint8Array<ArrayBuffer> {
   }
   // atob accepts noncanonical padding bits; standard base64 does not.
   if (btoa(binary) !== data) throw badRequest('images', 'encoding')
-  if (binary.length > MAX_IMAGE_BYTES) throw badRequest('images', 'size', MAX_IMAGE_BYTES)
+  if (binary.length > MAX_IMAGE_BYTES)
+    throw badRequest('images', 'size', MAX_IMAGE_BYTES)
   return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
@@ -87,16 +112,26 @@ export function encodeImage(bytes: Uint8Array): string {
 }
 
 function imageMime(bytes: Uint8Array): string {
-  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'image/png'
+  if (
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  )
+    return 'image/png'
   if (bytes[0] === 0xff && bytes[1] === 0xd8) return 'image/jpeg'
-  const signature = (start: number, end: number): string => String.fromCharCode(...bytes.subarray(start, end))
-  if (signature(0, 4) === 'RIFF' && signature(8, 12) === 'WEBP') return 'image/webp'
-  if (signature(0, 6) === 'GIF87a' || signature(0, 6) === 'GIF89a') return 'image/gif'
+  const signature = (start: number, end: number): string =>
+    String.fromCharCode(...bytes.subarray(start, end))
+  if (signature(0, 4) === 'RIFF' && signature(8, 12) === 'WEBP')
+    return 'image/webp'
+  if (signature(0, 6) === 'GIF87a' || signature(0, 6) === 'GIF89a')
+    return 'image/gif'
   throw badRequest('images', 'mime')
 }
 
 function interrupted(signal: AbortSignal): KitFailure {
-  return signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError'
+  return signal.reason instanceof DOMException &&
+    signal.reason.name === 'TimeoutError'
     ? new KitFailure('timeout', 'Image request deadline exceeded')
     : new KitFailure('cancelled', 'Image request cancelled')
 }
@@ -109,11 +144,17 @@ function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   }
   signal.addEventListener('abort', abort, { once: true })
   pending.then(resolve, reject)
-  void promise.finally(() => signal.removeEventListener('abort', abort)).catch(() => {})
+  void promise
+    .finally(() => signal.removeEventListener('abort', abort))
+    .catch(() => {})
   return promise
 }
 
-async function bounded(response: Response, limit: number, signal: AbortSignal): Promise<Uint8Array> {
+async function bounded(
+  response: Response,
+  limit: number,
+  signal: AbortSignal,
+): Promise<Uint8Array> {
   const length = response.headers.get('content-length')
   if (length !== null && (!/^\d+$/u.test(length) || Number(length) > limit)) {
     void response.body?.cancel().catch(() => {})
@@ -131,7 +172,8 @@ async function bounded(response: Response, limit: number, signal: AbortSignal): 
         complete = true
         break
       }
-      if (chunk.value.length > limit - size) throw badRequest('images', 'size', limit)
+      if (chunk.value.length > limit - size)
+        throw badRequest('images', 'size', limit)
       chunks.push(chunk.value)
       size += chunk.value.length
     }
@@ -151,11 +193,19 @@ async function bounded(response: Response, limit: number, signal: AbortSignal): 
 function endpoint(base: string, edit: boolean): string {
   let url: URL
   try {
-    url = new URL(`${base.replace(/\/+$/u, '')}/images/${edit ? 'edits' : 'generations'}`)
+    url = new URL(
+      `${base.replace(/\/+$/u, '')}/images/${edit ? 'edits' : 'generations'}`,
+    )
   } catch {
     throw badRequest('url', 'invalid')
   }
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)
+  if (
+    !['https:', 'http:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  )
     throw badRequest('url', 'invalid')
   return url.href
 }
@@ -167,7 +217,12 @@ function downloadTarget(value: string): string {
   } catch {
     throw badRequest('url', 'invalid')
   }
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.hash)
+  if (
+    !['https:', 'http:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.hash
+  )
     throw badRequest('url', 'invalid')
   return url.href
 }
@@ -189,19 +244,30 @@ export async function generateImage(
   signal.addEventListener('abort', cancel, { once: true })
   if (signal.aborted) cancel()
   const timer = setTimeout(
-    () => controller.abort(new DOMException('Image request deadline exceeded', 'TimeoutError')),
+    () =>
+      controller.abort(
+        new DOMException('Image request deadline exceeded', 'TimeoutError'),
+      ),
     IMAGE_TIMEOUT_MS,
   )
   const active = controller.signal
   try {
     if (active.aborted) throw interrupted(active)
     const prompt = input.prompt.trim()
-    if (!prompt || [...prompt].length > 4000) throw badRequest('prompt', 'invalid')
-    if (!IMAGE_SIZES.some((size) => size === input.size)) throw badRequest('size', 'invalid')
-    if (input.images.length > MAX_EDIT_IMAGES) throw badRequest('images', 'count', MAX_EDIT_IMAGES)
+    if (!prompt || [...prompt].length > 4000)
+      throw badRequest('prompt', 'invalid')
+    if (!IMAGE_SIZES.some((size) => size === input.size))
+      throw badRequest('size', 'invalid')
+    if (input.images.length > MAX_EDIT_IMAGES)
+      throw badRequest('images', 'count', MAX_EDIT_IMAGES)
     const edit = input.images.length > 0
-    if (edit && !connection.canVision) throw new KitFailure('unsupported', 'Image editing unsupported')
-    const target = endpoint((edit ? connection.imageEditBaseUrl : connection.imageBaseUrl) ?? connection.baseUrl, edit)
+    if (edit && !connection.canVision)
+      throw new KitFailure('unsupported', 'Image editing unsupported')
+    const target = endpoint(
+      (edit ? connection.imageEditBaseUrl : connection.imageBaseUrl) ??
+        connection.baseUrl,
+      edit,
+    )
     let payload: BodyInit
     if (edit) {
       const form = new FormData()
@@ -212,7 +278,8 @@ export async function generateImage(
       for (const [index, raw] of input.images.entries()) {
         const image = raw
         const bytes = decodeImage(image)
-        const extension = image.mime === 'image/jpeg' ? 'jpg' : image.mime.slice(6)
+        const extension =
+          image.mime === 'image/jpeg' ? 'jpg' : image.mime.slice(6)
         form.append(
           input.images.length === 1 ? 'image' : 'image[]',
           new Blob([bytes], { type: image.mime }),
@@ -221,7 +288,12 @@ export async function generateImage(
       }
       payload = form
     } else {
-      payload = JSON.stringify({ model: connection.modelId, prompt, size: input.size, n: 1 })
+      payload = JSON.stringify({
+        model: connection.modelId,
+        prompt,
+        size: input.size,
+        n: 1,
+      })
     }
     const baseHeaders = new Headers(connection.headers)
     // Never allow a custom JSON header to break the platform multipart boundary.
@@ -235,19 +307,37 @@ export async function generateImage(
       if (key !== undefined) headers.set('authorization', `Bearer ${key}`)
       dispatch = 'unknown'
       const response = await abortable(
-        http.fetch(target, { method: 'POST', headers, body: payload, redirect: 'manual', signal: active }),
+        http.fetch(target, {
+          method: 'POST',
+          headers,
+          body: payload,
+          redirect: 'manual',
+          signal: active,
+        }),
         active,
       )
-      if (response.redirected || (response.status >= 300 && response.status < 400)) {
+      if (
+        response.redirected ||
+        (response.status >= 300 && response.status < 400)
+      ) {
         void response.body?.cancel().catch(() => {})
-        throw new KitFailure('upstream', 'Image redirect refused', { status: response.status })
+        throw new KitFailure('upstream', 'Image redirect refused', {
+          status: response.status,
+        })
       }
       if (!response.ok) dispatch = 'rejected'
-      const bytes = await bounded(response, response.ok ? RESPONSE_BYTES : 8192, active)
+      const bytes = await bounded(
+        response,
+        response.ok ? RESPONSE_BYTES : 8192,
+        active,
+      )
       if (!response.ok) {
-        if ([401, 403, 429].includes(response.status) && attempt + 1 < attempts) continue
+        if ([401, 403, 429].includes(response.status) && attempt + 1 < attempts)
+          continue
         // Deliberately never surface provider bodies: they can contain credentials.
-        throw new KitFailure('upstream', 'Image provider rejected request', { status: response.status })
+        throw new KitFailure('upstream', 'Image provider rejected request', {
+          status: response.status,
+        })
       }
       let body: unknown
       try {
@@ -255,27 +345,43 @@ export async function generateImage(
       } catch {
         throw new KitFailure('upstream', 'Invalid image response')
       }
-      const first: unknown = record(body) && Array.isArray(body.data) ? body.data[0] : undefined
-      if (!record(first)) throw new KitFailure('upstream', 'No image in response')
+      const first: unknown =
+        record(body) && Array.isArray(body.data) ? body.data[0] : undefined
+      if (!record(first))
+        throw new KitFailure('upstream', 'No image in response')
       let imageBytes: Uint8Array
       if (typeof first.b64_json === 'string') {
         imageBytes = decodeImage({ mime: 'image/png', data: first.b64_json })
       } else if (typeof first.url === 'string') {
         const image = await abortable(
-          http.fetch(downloadTarget(first.url), { method: 'GET', redirect: 'manual', signal: active }),
+          http.fetch(downloadTarget(first.url), {
+            method: 'GET',
+            redirect: 'manual',
+            signal: active,
+          }),
           active,
         )
         if (image.redirected || !image.ok) {
           void image.body?.cancel().catch(() => {})
-          throw new KitFailure('upstream', 'Image download failed', { status: image.status })
+          throw new KitFailure('upstream', 'Image download failed', {
+            status: image.status,
+          })
         }
-        const mime = image.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase()
-        if (mime !== undefined && !IMAGE_MIMES.some((allowed) => allowed === mime)) {
+        const mime = image.headers
+          .get('content-type')
+          ?.split(';')[0]
+          ?.trim()
+          .toLowerCase()
+        if (
+          mime !== undefined &&
+          !IMAGE_MIMES.some((allowed) => allowed === mime)
+        ) {
           void image.body?.cancel().catch(() => {})
           throw badRequest('images', 'mime')
         }
         imageBytes = await bounded(image, MAX_IMAGE_BYTES, active)
-        if (mime !== undefined && imageMime(imageBytes) !== mime) throw badRequest('images', 'mime')
+        if (mime !== undefined && imageMime(imageBytes) !== mime)
+          throw badRequest('images', 'mime')
       } else throw new KitFailure('upstream', 'No image in response')
       return { mime: imageMime(imageBytes), data: encodeImage(imageBytes) }
     }
@@ -286,7 +392,12 @@ export async function generateImage(
       : error instanceof KitFailure
         ? error
         : new KitFailure('network', 'Image provider unreachable')
-    throw new ImageFailure(failure.code, failure.message, dispatch, failure.details)
+    throw new ImageFailure(
+      failure.code,
+      failure.message,
+      dispatch,
+      failure.details,
+    )
   } finally {
     clearTimeout(timer)
     signal.removeEventListener('abort', cancel)

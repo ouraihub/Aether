@@ -161,7 +161,8 @@ mod dpapi {
         let bytes = unsafe { std::slice::from_raw_parts_mut(out.pbData, out.cbData as usize) };
         let value = copy(bytes);
         bytes.zeroize();
-        // SAFETY: `pbData` was LocalAlloc'ed by DPAPI and is freed exactly once, after its last use.
+        // SAFETY: `pbData` was LocalAlloc'ed by DPAPI and is freed exactly once,
+        // after its last use.
         unsafe { LocalFree(Some(HLOCAL(out.pbData.cast()))) };
         value
     }

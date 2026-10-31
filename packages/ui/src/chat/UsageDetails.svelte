@@ -15,12 +15,24 @@
   let { context, usage, total, cost, totalCost }: Props = $props()
   const { t } = getKitContext().i18n
   const percent = $derived(
-    context?.tokens != null && context.contextWindow != null && context.contextWindow > 0
-      ? Math.min(100, Math.max(0, (context.tokens / context.contextWindow) * 100))
+    context?.tokens != null &&
+      context.contextWindow != null &&
+      context.contextWindow > 0
+      ? Math.min(
+          100,
+          Math.max(0, (context.tokens / context.contextWindow) * 100),
+        )
       : null,
   )
-  const fields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const
-  const money = ({ amount, currency }: Cost) => `${currency === 'CNY' ? '¥' : '$'}${amount.toFixed(4)}`
+  const fields = [
+    'inputTokens',
+    'outputTokens',
+    'cacheReadTokens',
+    'cacheWriteTokens',
+    'reasoningTokens',
+  ] as const
+  const money = ({ amount, currency }: Cost) =>
+    `${currency === 'CNY' ? '¥' : '$'}${amount.toFixed(4)}`
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Esc closes this disclosure first) -->
@@ -38,11 +50,14 @@
 >
   <summary aria-label={t('chat.usage')} title={t('chat.contextUsage')}>
     <ChartNoAxesColumnIcon aria-hidden="true" />
-    <span>{percent === null ? t('chat.unknown') : `${percent.toFixed(1)}%`}</span>
+    <span
+      >{percent === null ? t('chat.unknown') : `${percent.toFixed(1)}%`}</span
+    >
   </summary>
   <div class="usage-content">
     <p>
-      {t('chat.contextUsage')}: {context?.tokens ?? t('chat.unknown')}{#if context?.contextWindow != null}
+      {t('chat.contextUsage')}: {context?.tokens ??
+        t('chat.unknown')}{#if context?.contextWindow != null}
         / {context.contextWindow}{/if} · {t(
         context?.source === 'reported'
           ? 'chat.reported'
@@ -51,23 +66,32 @@
             : 'chat.unknown',
       )}
     </p>
-    {#if percent !== null}<meter min="0" max="100" value={percent} aria-label={t('chat.contextUsage')}></meter>{/if}
+    {#if percent !== null}<meter
+        min="0"
+        max="100"
+        value={percent}
+        aria-label={t('chat.contextUsage')}
+      ></meter>{/if}
     <table>
       <thead
         ><tr
-          ><th scope="col">{t('chat.usage')}</th><th scope="col">{t('chat.currentUsage')}</th><th scope="col"
-            >{t('chat.totalUsage')}</th
-          ></tr
+          ><th scope="col">{t('chat.usage')}</th><th scope="col"
+            >{t('chat.currentUsage')}</th
+          ><th scope="col">{t('chat.totalUsage')}</th></tr
         ></thead
       >
       <tbody
         >{#each fields as field (field)}<tr
-            ><th scope="row">{t(`chat.usage.${field}`)}</th><td>{usage?.[field] ?? t('chat.unknown')}</td><td
-              >{total[field] ?? t('chat.unknown')}</td
-            ></tr
+            ><th scope="row">{t(`chat.usage.${field}`)}</th><td
+              >{usage?.[field] ?? t('chat.unknown')}</td
+            ><td>{total[field] ?? t('chat.unknown')}</td></tr
           >{/each}<tr
-          ><th scope="row">{t('chat.cost')}</th><td>{cost ? money(cost) : t('chat.unknown')}</td><td
-            >{totalCost.length ? totalCost.map(money).join(' + ') : t('chat.unknown')}</td
+          ><th scope="row">{t('chat.cost')}</th><td
+            >{cost ? money(cost) : t('chat.unknown')}</td
+          ><td
+            >{totalCost.length
+              ? totalCost.map(money).join(' + ')
+              : t('chat.unknown')}</td
           ></tr
         ></tbody
       >

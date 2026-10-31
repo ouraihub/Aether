@@ -1,16 +1,22 @@
-//! Explicit per-request configuration and the shared deadline/key-fallback boundary.
-use crate::{AddressPolicy, SearchCap, SearchHit, SearchPage, SearchPreferences, policy, vendor};
+//! Explicit per-request configuration and the shared deadline/key-fallback
+//! boundary.
+use crate::{
+    AddressPolicy, SearchCap, SearchHit, SearchPage, SearchPreferences, policy,
+    vendor,
+};
 use aether_support::{KitError, KitErrorCode, net};
 use std::time::Duration;
 use zeroize::Zeroizing;
 
-/// A single execution's owned inputs; credentials are never serialized or debug-printed.
+/// A single execution's owned inputs; credentials are never serialized or
+/// debug-printed.
 pub struct ResolvedConfig {
     /// Explicit provider identifier for the requested capability.
     pub provider: String,
     /// Resolved API address; ignored by direct fetching.
     pub base_url: String,
-    /// Credential attempt order; an empty vector requests one anonymous attempt.
+    /// Credential attempt order; an empty vector requests one anonymous
+    /// attempt.
     pub api_keys: Vec<Zeroizing<String>>,
     /// Optional SearXNG Basic-auth username.
     pub basic_auth_username: Option<String>,
@@ -25,7 +31,8 @@ pub(crate) enum Output {
     Page(SearchPage),
 }
 
-/// Borrowed attempt data avoids copying clear credentials into another configuration.
+/// Borrowed attempt data avoids copying clear credentials into another
+/// configuration.
 pub(crate) struct Attempt<'a> {
     pub(crate) provider: &'a str,
     pub(crate) base: &'a str,
@@ -44,7 +51,9 @@ fn validate(config: &ResolvedConfig, cap: SearchCap) -> Result<(), KitError> {
         && config
             .api_keys
             .iter()
-            .any(|key| key.trim().is_empty() || key.encode_utf16().count() > 4096)
+            .any(|key| {
+                key.trim().is_empty() || key.encode_utf16().count() > 4096
+            })
     {
         return Err(KitError::bad_request("value", "invalid"));
     }
@@ -103,18 +112,26 @@ pub(crate) async fn execute(
                 max: config.preferences.max_results,
             };
             let result = match cap {
-                SearchCap::Search => vendor::search(&config.address_policy, &attempt, input)
-                    .await
-                    .map(Output::Hits),
-                SearchCap::Fetch => {
-                    vendor::fetch(&config.address_policy, &attempt, input, &config.preferences)
-                        .await
-                        .map(Output::Page)
-                }
+                SearchCap::Search => vendor::search(
+                    &config.address_policy,
+                    &attempt,
+                    input,
+                )
+                .await
+                .map(Output::Hits),
+                SearchCap::Fetch => vendor::fetch(
+                    &config.address_policy,
+                    &attempt,
+                    input,
+                    &config.preferences,
+                )
+                .await
+                .map(Output::Page),
             };
             match result {
                 Ok(out) => return Ok(out),
-                Err(error) if index + 1 < attempts && net::next_key(&error) => {}
+                Err(error)
+                    if index + 1 < attempts && net::next_key(&error) => {}
                 Err(error) => return Err(error),
             }
         }
@@ -123,5 +140,7 @@ pub(crate) async fn execute(
         )))
     })
     .await
-    .map_err(|_| KitError::new(KitErrorCode::Timeout, "search execution timed out"))?
+    .map_err(|_| {
+        KitError::new(KitErrorCode::Timeout, "search execution timed out")
+    })?
 }

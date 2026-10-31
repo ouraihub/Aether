@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Skill list, import → full-text preview → confirm, view, edit, duplicate, reorder, delete (docs/16 §4.3).
+  // Skill list, import → full-text preview → confirm, view, edit, duplicate,
+  // reorder, delete (docs/16 §4.3).
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Empty from '#lib/components/ui/empty/index.js'
   import { getKitContext } from '../context'
@@ -51,7 +52,10 @@
 
   function duplicate(skill: SkillMeta) {
     if (!port) return
-    void act(async () => void (skills = await port.duplicate(skill.id, `${skill.name}-copy`)))
+    void act(
+      async () =>
+        void (skills = await port.duplicate(skill.id, `${skill.name}-copy`)),
+    )
   }
 
   function move(index: number, by: number) {
@@ -76,7 +80,11 @@
 
 {#if port}
   <section class="flex flex-col gap-4" aria-label={t('skills.title')}>
-    <SkillAdd disabled={busy} oninstalled={(next) => (skills = next)} onmanual={() => edit(null)} />
+    <SkillAdd
+      disabled={busy}
+      oninstalled={(next) => (skills = next)}
+      onmanual={() => edit(null)}
+    />
     {#if skills.length === 0}
       <Empty.Root>
         <Empty.Header>
@@ -92,13 +100,22 @@
               <span class="flex min-w-0 items-center gap-2">
                 <span class="truncate font-mono text-sm">{skill.name}</span>
                 {#if skill.hasScripts}
-                  <span class="shrink-0 rounded border px-1.5 text-xs">{t('skills.has_scripts')}</span>
+                  <span class="shrink-0 rounded border px-1.5 text-xs"
+                    >{t('skills.has_scripts')}</span
+                  >
                 {/if}
               </span>
               <span class="text-muted-foreground truncate text-xs">
-                {skill.version ?? t('skills.unversioned')} · {t(`skills.origin.${skill.origin}`)} ·
-                {t('skills.revision', { revision: skill.revision })} · {t('skills.chars', { count: skill.bodyChars })}
-                {#if skill.fileCount > 0}· {t('skills.file_count', { count: skill.fileCount })}{/if}
+                {skill.version ?? t('skills.unversioned')} · {t(
+                  `skills.origin.${skill.origin}`,
+                )} ·
+                {t('skills.revision', { revision: skill.revision })} · {t(
+                  'skills.chars',
+                  { count: skill.bodyChars },
+                )}
+                {#if skill.fileCount > 0}· {t('skills.file_count', {
+                    count: skill.fileCount,
+                  })}{/if}
               </span>
             </div>
             <Button
@@ -115,19 +132,31 @@
               aria-label={t('skills.down', { name: skill.name })}
               onclick={() => move(index, 1)}>↓</Button
             >
-            <Button size="sm" variant="outline" disabled={busy} onclick={() => view(skill.id)}
-              >{t('skills.view')}</Button
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onclick={() => view(skill.id)}>{t('skills.view')}</Button
             >
             {#if skill.origin === 'builtin'}
-              <Button size="sm" variant="outline" disabled={busy} onclick={() => duplicate(skill)}
-                >{t('skills.duplicate')}</Button
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onclick={() => duplicate(skill)}>{t('skills.duplicate')}</Button
               >
             {:else}
-              <Button size="sm" variant="outline" disabled={busy} onclick={() => edit(skill.id)}
-                >{t('skills.edit')}</Button
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onclick={() => edit(skill.id)}>{t('skills.edit')}</Button
               >
-              <Button size="sm" variant="destructive" disabled={busy} onclick={() => void remove(skill)}
-                >{t('skills.delete')}</Button
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={busy}
+                onclick={() => void remove(skill)}>{t('skills.delete')}</Button
               >
             {/if}
           </li>
@@ -135,6 +164,15 @@
       </ul>
     {/if}
   </section>
-  <SkillPreviewDialog bind:open={viewOpen} skill={viewing} title={viewing?.name ?? ''} />
-  <SkillEditor bind:open={editOpen} {port} skill={editing} onsaved={(next) => (skills = next)} />
+  <SkillPreviewDialog
+    bind:open={viewOpen}
+    skill={viewing}
+    title={viewing?.name ?? ''}
+  />
+  <SkillEditor
+    bind:open={editOpen}
+    {port}
+    skill={editing}
+    onsaved={(next) => (skills = next)}
+  />
 {/if}

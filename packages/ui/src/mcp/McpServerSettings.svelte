@@ -1,7 +1,12 @@
 <script lang="ts">
-  // External MCP server settings (docs/16 §4.4): status, start/stop, port, scope switches, tokens.
+  // External MCP server settings (docs/16 §4.4): status, start/stop, port,
+  // scope switches, tokens.
   import { onDestroy } from 'svelte'
-  import { Alert, AlertDescription, AlertTitle } from '#lib/components/ui/alert/index.js'
+  import {
+    Alert,
+    AlertDescription,
+    AlertTitle,
+  } from '#lib/components/ui/alert/index.js'
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Field from '#lib/components/ui/field/index.js'
   import { Input } from '#lib/components/ui/input/index.js'
@@ -61,7 +66,8 @@
     }
   }
 
-  // JSON accepts dynamic keys; Claude CLI names must also satisfy its naming rules.
+  // JSON accepts dynamic keys; Claude CLI names must also satisfy its naming
+  // rules.
   const configInput = $derived.by(() => {
     const url = status?.url
     const token = issued?.token
@@ -70,7 +76,8 @@
   })
   const claudeNameValid = $derived(/^[A-Za-z0-9_-]+$/.test(serverName))
 
-  // Actions only render when the port exists; the throw marks a host wiring bug.
+  // Actions only render when the port exists; the throw marks a host wiring
+  // bug.
   function need() {
     if (!server) throw new Error('mcpServer port missing')
     return server
@@ -101,7 +108,11 @@
 
   async function load() {
     if (!server) return
-    const [nextStatus, nextScopes, nextTokens] = await Promise.all([server.status(), server.scopes(), server.tokens()])
+    const [nextStatus, nextScopes, nextTokens] = await Promise.all([
+      server.status(),
+      server.scopes(),
+      server.tokens(),
+    ])
     setStatus(nextStatus)
     scopes = nextScopes
     tokens = nextTokens
@@ -111,9 +122,13 @@
     void act(load)
   })
 
-  const toggleRunning = () => act(async () => setStatus(status?.running ? await need().stop() : await need().start()))
+  const toggleRunning = () =>
+    act(async () =>
+      setStatus(status?.running ? await need().stop() : await need().start()),
+    )
 
-  const savePort = () => act(async () => setStatus(await need().setPort(Number(port))))
+  const savePort = () =>
+    act(async () => setStatus(await need().setPort(Number(port))))
 
   async function toggleScope(scope: ScopeState, on: boolean) {
     if (on && scope.destructive) {
@@ -124,7 +139,9 @@
       })
       if (!ok) return
     }
-    const ids = scopes.filter((s) => (s.id === scope.id ? on : s.enabled)).map((s) => s.id)
+    const ids = scopes
+      .filter((s) => (s.id === scope.id ? on : s.enabled))
+      .map((s) => s.id)
     await act(async () => {
       scopes = await need().setScopes(ids)
     })
@@ -132,7 +149,9 @@
 
   function toggleTokenScope(id: string, on: boolean) {
     tokenRevision++
-    tokenScopes = on ? [...tokenScopes, id] : tokenScopes.filter((s) => s !== id)
+    tokenScopes = on
+      ? [...tokenScopes, id]
+      : tokenScopes.filter((s) => s !== id)
   }
 
   async function issue() {
@@ -143,7 +162,10 @@
     const revision = tokenRevision
     const name = tokenName
     const grants = [...tokenScopes]
-    const current = () => tokenSession.isCurrent(token) && targetName === serverName && targetUrl === status?.url
+    const current = () =>
+      tokenSession.isCurrent(token) &&
+      targetName === serverName &&
+      targetUrl === status?.url
     issuing = true
     try {
       const next = await need().issueToken(name, grants)
@@ -184,7 +206,10 @@
       serverName === input.serverName &&
       status?.url === input.url &&
       issued?.token === input.token
-    const text = format === 'json' ? buildMcpJsonConfig(input) : buildClaudePosixCommand(input)
+    const text =
+      format === 'json'
+        ? buildMcpJsonConfig(input)
+        : buildClaudePosixCommand(input)
     if (!current()) return
     try {
       await navigator.clipboard.writeText(text)
@@ -194,7 +219,8 @@
     }
   }
 
-  const date = (ms: number | null) => (ms === null ? '—' : new Date(ms).toLocaleString(i18n.locale))
+  const date = (ms: number | null) =>
+    ms === null ? '—' : new Date(ms).toLocaleString(i18n.locale)
 </script>
 
 {#if server && status}
@@ -204,7 +230,9 @@
         <Field.Content>
           <Field.Label>{t('mcp.server.title')}</Field.Label>
           <Field.Description>
-            {status.running ? t('mcp.server.running', { url: status.url }) : t('mcp.server.stopped')}
+            {status.running
+              ? t('mcp.server.running', { url: status.url })
+              : t('mcp.server.stopped')}
             · {t('mcp.server.toolCount', { count: status.toolCount })}
           </Field.Description>
         </Field.Content>
@@ -218,7 +246,14 @@
       </Field.Field>
       <Field.Field orientation="horizontal">
         <Field.Label for="kit-mcp-port">{t('mcp.server.port')}</Field.Label>
-        <Input id="kit-mcp-port" class="w-32" type="number" min="1024" max="65535" bind:value={port} />
+        <Input
+          id="kit-mcp-port"
+          class="w-32"
+          type="number"
+          min="1024"
+          max="65535"
+          bind:value={port}
+        />
         <Button
           disabled={busy || issuing || port === String(status.port)}
           variant="outline"
@@ -237,10 +272,14 @@
           <Field.Field orientation="horizontal">
             <Switch
               id={`kit-mcp-scope-${scope.id}`}
-              bind:checked={() => scope.enabled, (on) => void toggleScope(scope, on)}
+              bind:checked={
+                () => scope.enabled, (on) => void toggleScope(scope, on)
+              }
               disabled={busy || issuing}
             />
-            <Field.Label for={`kit-mcp-scope-${scope.id}`}>{t(scope.labelKey)} ({scope.id})</Field.Label>
+            <Field.Label for={`kit-mcp-scope-${scope.id}`}
+              >{t(scope.labelKey)} ({scope.id})</Field.Label
+            >
           </Field.Field>
         {/each}
       </Field.Group>
@@ -250,8 +289,15 @@
       <Field.Legend>{t('mcp.server.newToken')}</Field.Legend>
       <Field.Group>
         <Field.Field>
-          <Field.Label for="kit-mcp-token-name">{t('mcp.server.tokenName')}</Field.Label>
-          <Input id="kit-mcp-token-name" bind:value={tokenName} maxlength={200} oninput={() => tokenRevision++} />
+          <Field.Label for="kit-mcp-token-name"
+            >{t('mcp.server.tokenName')}</Field.Label
+          >
+          <Input
+            id="kit-mcp-token-name"
+            bind:value={tokenName}
+            maxlength={200}
+            oninput={() => tokenRevision++}
+          />
         </Field.Field>
         {#each scopes as scope (scope.id)}
           <Field.Field orientation="horizontal">
@@ -260,12 +306,17 @@
               checked={tokenScopes.includes(scope.id)}
               onCheckedChange={(on) => toggleTokenScope(scope.id, on)}
             />
-            <Field.Label for={`kit-mcp-grant-${scope.id}`}>{t(scope.labelKey)} ({scope.id})</Field.Label>
+            <Field.Label for={`kit-mcp-grant-${scope.id}`}
+              >{t(scope.labelKey)} ({scope.id})</Field.Label
+            >
           </Field.Field>
         {/each}
         <Field.Field orientation="horizontal">
           <Button
-            disabled={busy || issuing || tokenName.trim() === '' || tokenScopes.length === 0}
+            disabled={busy ||
+              issuing ||
+              tokenName.trim() === '' ||
+              tokenScopes.length === 0}
             onclick={() => void issue()}
           >
             {t('mcp.server.issue')}
@@ -276,7 +327,9 @@
 
     {#if issued}
       <Alert>
-        <AlertTitle>{t('mcp.server.issuedTitle', { name: issued.name })}</AlertTitle>
+        <AlertTitle
+          >{t('mcp.server.issuedTitle', { name: issued.name })}</AlertTitle
+        >
         <AlertDescription class="flex flex-col gap-2">
           <p>{t('mcp.server.issuedOnce')}</p>
           <code class="break-all">{issued.token}</code>
@@ -289,10 +342,17 @@
             >
               {t('mcp.server.copyClaude')}
             </Button>
-            <Button size="sm" variant="outline" disabled={!configInput} onclick={() => void copy('json')}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!configInput}
+              onclick={() => void copy('json')}
+            >
               {t('mcp.server.copyJson')}
             </Button>
-            <Button size="sm" variant="ghost" onclick={clearIssued}>{t('mcp.server.dismiss')}</Button>
+            <Button size="sm" variant="ghost" onclick={clearIssued}
+              >{t('mcp.server.dismiss')}</Button
+            >
           </div>
         </AlertDescription>
       </Alert>
@@ -305,19 +365,31 @@
       {/if}
       <ul class="flex flex-col gap-2">
         {#each tokens as token (token.id)}
-          <li class="flex items-center justify-between gap-4 rounded-md border p-3">
+          <li
+            class="flex items-center justify-between gap-4 rounded-md border
+              p-3"
+          >
             <div class="flex min-w-0 flex-col">
               <span class="truncate font-medium">{token.name}</span>
               <span class="text-muted-foreground text-sm">
-                {token.scopes.join(', ')} · {t('mcp.server.lastUsed')}: {date(token.lastUsedAt)}
+                {token.scopes.join(', ')} · {t('mcp.server.lastUsed')}: {date(
+                  token.lastUsedAt,
+                )}
               </span>
             </div>
             {#if token.revokedAt === null}
-              <Button size="sm" variant="destructive" disabled={busy || issuing} onclick={() => void revoke(token)}>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={busy || issuing}
+                onclick={() => void revoke(token)}
+              >
                 {t('mcp.server.revoke')}
               </Button>
             {:else}
-              <span class="text-muted-foreground text-sm">{t('mcp.server.revoked')}</span>
+              <span class="text-muted-foreground text-sm"
+                >{t('mcp.server.revoked')}</span
+              >
             {/if}
           </li>
         {/each}

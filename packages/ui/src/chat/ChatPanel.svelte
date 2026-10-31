@@ -1,4 +1,5 @@
 <script lang="ts">
+  import './ChatPanel.css'
   import { onDestroy, tick, untrack } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
   import XIcon from '@lucide/svelte/icons/x'
@@ -50,7 +51,10 @@
     type PermissionMode,
   } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
-  import { providersRevision, settingsTarget } from '../providers/revision.svelte'
+  import {
+    providersRevision,
+    settingsTarget,
+  } from '../providers/revision.svelte'
   import { RunSession, type ChatTurn } from './run-session.svelte'
   import UsageDetails from './UsageDetails.svelte'
   import MessageItem from './MessageItem.svelte'
@@ -123,30 +127,49 @@
   let modelError = $state<string | null>(null)
   let modelReload = $state(0)
   const capability = $derived(
-    modelOptions?.find((item) => item.endpointId === picked?.endpointId && item.modelId === picked?.modelId) ?? null,
+    modelOptions?.find(
+      (item) =>
+        item.endpointId === picked?.endpointId &&
+        item.modelId === picked?.modelId,
+    ) ?? null,
   )
   // The saved choice survives model switches; each model sends its nearest allowed effort (docs/28 RT3).
   // svelte-ignore state_referenced_locally
   let chosenEffort = $state<ReasoningEffort>(reasoningEffortProp ?? 'default')
-  const allowedEfforts = $derived(REASONING_EFFORTS.filter((effort) => capability?.reasoning?.efforts.includes(effort)))
+  const allowedEfforts = $derived(
+    REASONING_EFFORTS.filter((effort) =>
+      capability?.reasoning?.efforts.includes(effort),
+    ),
+  )
   const reasoningEffort = $derived(nearestEffort(chosenEffort, allowedEfforts))
   function chooseEffort(effort: ReasoningEffort) {
     if (session?.running || effort === chosenEffort) return
     chosenEffort = effort
     onReasoningEffortChange?.(effort)
   }
-  const MODES: PermissionMode[] = ['default', 'plan', 'accept_edits', 'auto', 'full_access']
-  const allowedModes = $derived(MODES.filter((mode) => permissionModes.includes(mode)))
+  const MODES: PermissionMode[] = [
+    'default',
+    'plan',
+    'accept_edits',
+    'auto',
+    'full_access',
+  ]
+  const allowedModes = $derived(
+    MODES.filter((mode) => permissionModes.includes(mode)),
+  )
   let fullAccess = $state(false)
   const mode: PermissionMode = $derived(
     fullAccess && allowedModes.includes('full_access')
       ? 'full_access'
-      : permissionMode !== 'full_access' && allowedModes.includes(permissionMode)
+      : permissionMode !== 'full_access' &&
+          allowedModes.includes(permissionMode)
         ? permissionMode
-        : (allowedModes.find((option) => option !== 'full_access') ?? 'default'),
+        : (allowedModes.find((option) => option !== 'full_access') ??
+          'default'),
   )
   async function chooseMode(next: PermissionMode) {
-    if (session?.running || next === mode || !allowedModes.includes(next)) return
+    if (session?.running || next === mode || !allowedModes.includes(next))
+      return
     const generation = viewGeneration
     if (next === 'full_access') {
       if (
@@ -157,7 +180,12 @@
         }))
       )
         return
-      if (!disposed && generation === viewGeneration && !session?.running && allowedModes.includes(next))
+      if (
+        !disposed &&
+        generation === viewGeneration &&
+        !session?.running &&
+        allowedModes.includes(next)
+      )
         fullAccess = true
     } else {
       fullAccess = false
@@ -169,10 +197,13 @@
   let reasoningTrigger = $state<HTMLButtonElement | null>(null)
   const effortLabel = $derived(t(`chat.effort.${reasoningEffort}`))
   const effortIndex = $derived(
-    reasoningEffort === 'default' ? Math.floor(allowedEfforts.length / 2) : allowedEfforts.indexOf(reasoningEffort),
+    reasoningEffort === 'default'
+      ? Math.floor(allowedEfforts.length / 2)
+      : allowedEfforts.indexOf(reasoningEffort),
   )
   const noModels = $derived(modelOptions !== null && modelOptions.length === 0)
-  const errorText = (error: unknown) => t(`errors.${isKitClientError(error) ? error.code : 'internal'}`)
+  const errorText = (error: unknown) =>
+    t(`errors.${isKitClientError(error) ? error.code : 'internal'}`)
   $effect(() => {
     void modelReload
     void providersRevision.value
@@ -200,7 +231,8 @@
     if (capability?.supportsTools === false) generateImage = false
   })
   function commitReasoning(event: Event) {
-    const effort = allowedEfforts[Number((event.currentTarget as HTMLInputElement).value)]
+    const effort =
+      allowedEfforts[Number((event.currentTarget as HTMLInputElement).value)]
     if (effort) chooseEffort(effort)
   }
   function pickModel(next: ModelRef) {
@@ -221,7 +253,9 @@
   }
   let droppedKey = $state<string | null>(null)
   const contextKey = $derived(context ? `${context.kind}:${context.id}` : null)
-  const activeContext = $derived(context && contextKey !== droppedKey ? context : null)
+  const activeContext = $derived(
+    context && contextKey !== droppedKey ? context : null,
+  )
   let webSearch = $state(false)
   let generateImage = $state(false)
   const base = $derived({
@@ -233,7 +267,9 @@
     reasoningEffort,
     permissionMode: mode,
     generateImage: purpose === 'chat' && generateImage && paintingModel,
-    context: activeContext ? { kind: activeContext.kind, id: activeContext.id } : null,
+    context: activeContext
+      ? { kind: activeContext.kind, id: activeContext.id }
+      : null,
   })
   // Consume before awaiting run acceptance, including retries and translations. Never persist full access.
   function consumeBase() {
@@ -252,7 +288,9 @@
   let conversations = $state<ConversationSummary[]>([])
   let shownSummary = $state<ConversationSummary | null>(null)
   const title = $derived(
-    (shownSummary?.id === session?.conversationId ? shownSummary?.title : null) ??
+    (shownSummary?.id === session?.conversationId
+      ? shownSummary?.title
+      : null) ??
       conversations.find((c) => c.id === session?.conversationId)?.title ??
       t('chat.newConversation'),
   )
@@ -376,7 +414,11 @@
     const generation = viewGeneration
     historyBusy = true
     try {
-      const ok = await notify.confirm({ title: t('chat.deleteTitle'), body: t('chat.deleteBody'), danger: true })
+      const ok = await notify.confirm({
+        title: t('chat.deleteTitle'),
+        body: t('chat.deleteBody'),
+        danger: true,
+      })
       if (!ok || disposed || generation !== viewGeneration) return
       await history.remove(id)
       if (disposed || generation !== viewGeneration) return
@@ -407,7 +449,9 @@
     }
     return [...grouped.entries()]
   })
-  const actionBusy = $derived(historyBusy || session?.running === true || restoreBlocked)
+  const actionBusy = $derived(
+    historyBusy || session?.running === true || restoreBlocked,
+  )
   let replyDialog = $state<'edit' | 'translate' | null>(null)
   let replyOpen = $state(false)
   let sourceReply = $state<ChatTurn | null>(null)
@@ -418,14 +462,21 @@
   let replyError = $state<string | null>(null)
   const validReplyModel = $derived(
     modelOptions?.some(
-      (option) => option.endpointId === replyModel?.endpointId && option.modelId === replyModel?.modelId,
+      (option) =>
+        option.endpointId === replyModel?.endpointId &&
+        option.modelId === replyModel?.modelId,
     ) === true,
   )
   function sourceModel(turn: ChatTurn): ModelRef | null {
-    return turn.endpointId && turn.modelId ? { endpointId: turn.endpointId, modelId: turn.modelId } : null
+    return turn.endpointId && turn.modelId
+      ? { endpointId: turn.endpointId, modelId: turn.modelId }
+      : null
   }
   function sourceLabel(turn: ChatTurn) {
-    const option = modelOptions?.find((item) => item.endpointId === turn.endpointId && item.modelId === turn.modelId)
+    const option = modelOptions?.find(
+      (item) =>
+        item.endpointId === turn.endpointId && item.modelId === turn.modelId,
+    )
     return option
       ? (option.name ?? option.modelId)
       : turn.modelId
@@ -433,7 +484,11 @@
         : t('chat.noSourceModel')
   }
   function hasChildren(turn: ChatTurn) {
-    return session?.turns.some((child) => child.parentId === turn.id || child.supersedesId === turn.id) === true
+    return (
+      session?.turns.some(
+        (child) => child.parentId === turn.id || child.supersedesId === turn.id,
+      ) === true
+    )
   }
   function canEdit(turn: ChatTurn) {
     return turn.status !== 'running' && !hasChildren(turn)
@@ -457,11 +512,18 @@
   function showConversation(conversation: Conversation) {
     viewGeneration++
     fullAccess = false
-    session?.show(conversation.summary.id, conversation.turns, conversation.summary.selectedTurnId)
+    session?.show(
+      conversation.summary.id,
+      conversation.turns,
+      conversation.summary.selectedTurnId,
+    )
     shownSummary = conversation.summary
     follow = true
   }
-  async function mutateReply(turn: ChatTurn, action: 'select' | 'remove' | 'branch' | 'copy') {
+  async function mutateReply(
+    turn: ChatTurn,
+    action: 'select' | 'remove' | 'branch' | 'copy',
+  ) {
     const id = session?.conversationId
     if (!history || !session || !id || actionBusy) return
     let generation = viewGeneration
@@ -469,7 +531,9 @@
     try {
       if (action === 'remove') {
         if (turn.status === 'running') return
-        const reparent = session.turns.some((child) => child.parentId === turn.id)
+        const reparent = session.turns.some(
+          (child) => child.parentId === turn.id,
+        )
         if (
           !(await notify.confirm({
             title: t('chat.deleteReplyTitle'),
@@ -513,7 +577,11 @@
       }
       if (
         !source ||
-        !modelOptions.some((option) => option.endpointId === source.endpointId && option.modelId === source.modelId)
+        !modelOptions.some(
+          (option) =>
+            option.endpointId === source.endpointId &&
+            option.modelId === source.modelId,
+        )
       ) {
         notify.toast('error', t('chat.sourceModelUnavailable'))
         return
@@ -536,10 +604,22 @@
     replyError = null
     if (replyDialog === 'edit') {
       const id = session.conversationId
-      if (!history || !id || !editDraft.trim() || editDraft.length > 24_000 || !canEdit(turn)) return
+      if (
+        !history ||
+        !id ||
+        !editDraft.trim() ||
+        editDraft.length > 24_000 ||
+        !canEdit(turn)
+      )
+        return
       historyBusy = true
       try {
-        const conversation = await history.editTurn(id, turn.id, editDraft, expectedText)
+        const conversation = await history.editTurn(
+          id,
+          turn.id,
+          editDraft,
+          expectedText,
+        )
         if (disposed || generation !== viewGeneration) return
         showConversation(conversation)
         generation = viewGeneration
@@ -553,10 +633,17 @@
     } else {
       if (!validReplyModel || !replyModel) return
       if (!targetLanguage.trim() || targetLanguage.trim().length > 80) return
-      const accepted = await session.translate({ ...consumeBase(), model: replyModel }, turn.id, targetLanguage.trim())
+      const accepted = await session.translate(
+        { ...consumeBase(), model: replyModel },
+        turn.id,
+        targetLanguage.trim(),
+      )
       if (disposed || generation !== viewGeneration) return
       if (accepted) replyOpen = false
-      else replyError = session.actionError ? t(`errors.${session.actionError}`) : t('errors.internal')
+      else
+        replyError = session.actionError
+          ? t(`errors.${session.actionError}`)
+          : t('errors.internal')
     }
   }
 
@@ -565,7 +652,8 @@
   let lastScrollTop = 0
   function onscroll() {
     if (!scroller) return
-    const nearBottom = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 48
+    const nearBottom =
+      scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 48
     follow = nearBottom && scroller.scrollTop >= lastScrollTop
     lastScrollTop = scroller.scrollTop
   }
@@ -603,7 +691,9 @@
     if (
       reasoningOpen ||
       historyOpen ||
-      document.querySelector('[data-popover-content], [data-slot="select-content"], [role="dialog"]')
+      document.querySelector(
+        '[data-popover-content], [data-slot="select-content"], [role="dialog"]',
+      )
     )
       return
     if (onClose && !session?.running) onClose()
@@ -690,7 +780,8 @@
     contextKey: string | null
   } | null>(null)
   function discardRecovery() {
-    for (const image of recovery?.images ?? []) URL.revokeObjectURL(image.preview)
+    for (const image of recovery?.images ?? [])
+      URL.revokeObjectURL(image.preview)
     recovery = null
   }
   function recoverDraft() {
@@ -727,13 +818,20 @@
     }
     if (accepted) {
       for (const image of attached) URL.revokeObjectURL(image.preview)
-      if (contextRevision === contextVersion && contextKey === key) droppedKey = null
+      if (contextRevision === contextVersion && contextKey === key)
+        droppedKey = null
     } else if (draftRevision === revision && images.length === 0) {
       draft = original
       images = attached
-      if (contextRevision === contextVersion && contextKey === key) droppedKey = removed
+      if (contextRevision === contextVersion && contextKey === key)
+        droppedKey = removed
     } else {
-      recovery = { draft: original, images: attached, droppedKey: removed, contextKey: key }
+      recovery = {
+        draft: original,
+        images: attached,
+        droppedKey: removed,
+        contextKey: key,
+      }
     }
   }
 
@@ -748,29 +846,48 @@
   function readBase64(file: File) {
     const { promise, resolve, reject } = Promise.withResolvers<string>()
     const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result).slice(String(reader.result).indexOf(',') + 1))
+    reader.onload = () =>
+      resolve(
+        String(reader.result).slice(String(reader.result).indexOf(',') + 1),
+      )
     reader.onerror = () => reject(reader.error ?? new Error('read failed'))
     reader.readAsDataURL(file)
     return promise
   }
   /** Adds the image files to the tray, or rejects all of them with a toast. */
   async function attach(files: FileList | null | undefined) {
-    const picked = [...(files ?? [])].filter((file) => file.type.startsWith('image/'))
+    const picked = [...(files ?? [])].filter((file) =>
+      file.type.startsWith('image/'),
+    )
     if (picked.length === 0) return
     if (!vision) notify.toast('error', t('chat.visionUnsupported'))
-    else if (picked.some((file) => !IMAGE_MIMES.includes(file.type))) notify.toast('error', t('chat.imageType'))
-    else if (picked.some((file) => file.size > MAX_IMAGE_BYTES)) notify.toast('error', t('chat.imageSize'))
+    else if (picked.some((file) => !IMAGE_MIMES.includes(file.type)))
+      notify.toast('error', t('chat.imageType'))
+    else if (picked.some((file) => file.size > MAX_IMAGE_BYTES))
+      notify.toast('error', t('chat.imageSize'))
     else if (images.length + picked.length > MAX_IMAGES)
       notify.toast('error', t('chat.imageLimit', { max: MAX_IMAGES }))
     else {
       reading++
       try {
         const read = await Promise.all(
-          picked.map(async (file) => ({ mime: file.type, data: await readBase64(file), file })),
+          picked.map(async (file) => ({
+            mime: file.type,
+            data: await readBase64(file),
+            file,
+          })),
         )
         // Another add may have landed while reading.
-        if (images.length + read.length > MAX_IMAGES) notify.toast('error', t('chat.imageLimit', { max: MAX_IMAGES }))
-        else images.push(...read.map(({ mime, data, file }) => ({ mime, data, preview: URL.createObjectURL(file) })))
+        if (images.length + read.length > MAX_IMAGES)
+          notify.toast('error', t('chat.imageLimit', { max: MAX_IMAGES }))
+        else
+          images.push(
+            ...read.map(({ mime, data, file }) => ({
+              mime,
+              data,
+              preview: URL.createObjectURL(file),
+            })),
+          )
       } catch {
         notify.toast('error', t('errors.internal'))
       } finally {
@@ -834,23 +951,39 @@
         >
       </Alert.Root>
     {/if}
-    {#if session.actionError}<p role="alert" class="text-destructive text-kit-sm">
+    {#if session.actionError}<p
+        role="alert"
+        class="text-destructive text-kit-sm"
+      >
         {t(`errors.${session.actionError}`)}
       </p>{/if}
-    {#if session.historyRefreshError}<p role="alert" class="text-destructive text-kit-sm">
+    {#if session.historyRefreshError}<p
+        role="alert"
+        class="text-destructive text-kit-sm"
+      >
         {t('chat.replyRefreshFailed')}<Button
           variant="outline"
           size="sm"
           disabled={actionBusy}
-          onclick={() => session.conversationId && void open(session.conversationId)}>{t('chat.retryHistory')}</Button
+          onclick={() =>
+            session.conversationId && void open(session.conversationId)}
+          >{t('chat.retryHistory')}</Button
         >
       </p>{/if}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex (native scroll region needs keyboard focus for PageUp/PageDown) -->
-    <div class="messages" bind:this={scroller} {onscroll} role="region" aria-label={t('chat.messages')} tabindex="0">
+    <div
+      class="messages"
+      bind:this={scroller}
+      {onscroll}
+      role="region"
+      aria-label={t('chat.messages')}
+      tabindex="0"
+    >
       {#if session.turns.length > 0}
         <ol class="turns">
           {#each groups as [questionId, replies] (questionId)}
-            {@const candidates = replies.filter((reply) => reply.kind === 'reply').length > 1}
+            {@const candidates =
+              replies.filter((reply) => reply.kind === 'reply').length > 1}
             {#each replies as turn, i (turn.id)}
               <MessageItem
                 {turn}
@@ -864,32 +997,56 @@
                 chosen={candidates && session.selectedTurnId === turn.id}
                 busy={actionBusy}
                 editable={canEdit(turn)}
-                onRetry={purpose === 'chat' && !restoreBlocked && (turn.persisted || capability !== null)
+                onRetry={purpose === 'chat' &&
+                !restoreBlocked &&
+                (turn.persisted || capability !== null)
                   ? () => void retryReply(turn)
                   : undefined}
-                onEdit={purpose === 'chat' && history && session.conversationId && turn.persisted
+                onEdit={purpose === 'chat' &&
+                history &&
+                session.conversationId &&
+                turn.persisted
                   ? () => editReply(turn)
                   : undefined}
-                onBranch={purpose === 'chat' && history && session.conversationId && turn.persisted
+                onBranch={purpose === 'chat' &&
+                history &&
+                session.conversationId &&
+                turn.persisted
                   ? () => void mutateReply(turn, 'branch')
                   : undefined}
-                onCopyConversation={purpose === 'chat' && history && session.conversationId && turn.persisted
+                onCopyConversation={purpose === 'chat' &&
+                history &&
+                session.conversationId &&
+                turn.persisted
                   ? () => void mutateReply(turn, 'copy')
                   : undefined}
-                onSwitchModel={purpose === 'chat' && history && session.conversationId && turn.persisted
+                onSwitchModel={purpose === 'chat' &&
+                history &&
+                session.conversationId &&
+                turn.persisted
                   ? (picked: ModelRef) => void switchModel(turn, picked)
                   : undefined}
                 modelOptions={turn.images.length > 0
                   ? (modelOptions?.filter((option) => option.canVision) ?? null)
                   : modelOptions}
                 sourceModel={sourceModel(turn)}
-                onTranslate={purpose === 'chat' && history && session.conversationId && turn.persisted
+                onTranslate={purpose === 'chat' &&
+                history &&
+                session.conversationId &&
+                turn.persisted
                   ? () => translateDialog(turn)
                   : undefined}
-                onDelete={purpose === 'chat' && history && session.conversationId && turn.persisted
+                onDelete={purpose === 'chat' &&
+                history &&
+                session.conversationId &&
+                turn.persisted
                   ? () => void mutateReply(turn, 'remove')
                   : undefined}
-                onUseContext={candidates && purpose === 'chat' && history && session.conversationId && turn.persisted
+                onUseContext={candidates &&
+                purpose === 'chat' &&
+                history &&
+                session.conversationId &&
+                turn.persisted
                   ? () => void mutateReply(turn, 'select')
                   : undefined}
                 onApprove={(tool, allow) => session.approve(tool, allow)}
@@ -902,8 +1059,10 @@
         <Alert.Root variant="destructive">
           <Alert.Title>{t('chat.modelsFailed')}</Alert.Title>
           <Alert.Description
-            >{modelError}<Button variant="outline" size="sm" onclick={() => modelReload++}
-              >{t('chat.retryModels')}</Button
+            >{modelError}<Button
+              variant="outline"
+              size="sm"
+              onclick={() => modelReload++}>{t('chat.retryModels')}</Button
             ></Alert.Description
           >
         </Alert.Root>
@@ -911,7 +1070,8 @@
         <p class="empty-message" role="status">{t('chat.modelsLoading')}</p>
       {:else if noModels}
         <Empty.Root
-          ><Empty.Description>{t('chat.noModels')}</Empty.Description>{#if onOpenSettings}<Button
+          ><Empty.Description>{t('chat.noModels')}</Empty.Description
+          >{#if onOpenSettings}<Button
               variant="outline"
               size="sm"
               onclick={onOpenSettings}>{t('chat.openSettings')}</Button
@@ -924,7 +1084,9 @@
     {#if !follow && session.turns.length > 0}
       <div class="bottom-control">
         <Button type="button" variant="secondary" size="sm" onclick={toBottom}
-          ><ArrowDownIcon data-icon="inline-start" />{t('chat.backToBottom')}</Button
+          ><ArrowDownIcon data-icon="inline-start" />{t(
+            'chat.backToBottom',
+          )}</Button
         >
       </div>
     {/if}
@@ -966,7 +1128,9 @@
             type="button"
             variant="ghost"
             size="icon-sm"
-            aria-label={t('chat.context.remove', { label: activeContext.label })}
+            aria-label={t('chat.context.remove', {
+              label: activeContext.label,
+            })}
             title={t('chat.context.remove', { label: activeContext.label })}
             onclick={() => {
               droppedKey = contextKey
@@ -990,7 +1154,9 @@
             </li>
           {/each}
         </ul>
-        {#if !vision}<p class="search-status" role="status">{t('chat.visionUnsupported')}</p>{/if}
+        {#if !vision}<p class="search-status" role="status">
+            {t('chat.visionUnsupported')}
+          </p>{/if}
       {/if}
       <Textarea
         bind:value={draft}
@@ -1005,7 +1171,12 @@
           void attach(files)
         }}
         onkeydown={(e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing && e.keyCode !== 229) {
+          if (
+            e.key === 'Enter' &&
+            (e.ctrlKey || e.metaKey) &&
+            !e.isComposing &&
+            e.keyCode !== 229
+          ) {
             e.preventDefault()
             if (!e.repeat) void send()
           }
@@ -1031,9 +1202,11 @@
       <div class="composer-tools">
         <div class="tool-group">
           {#snippet toolIcon(id: string)}
-            {#if id === 'new-conversation'}<MessageSquarePlusIcon />{:else if id === 'web-search'}<GlobeIcon
+            {#if id === 'new-conversation'}<MessageSquarePlusIcon
+              />{:else if id === 'web-search'}<GlobeIcon
                 >{#if !webSearch}<path d="m2 2 20 20" />{/if}</GlobeIcon
-              >{:else if id === 'attachment'}<PaperclipIcon />{:else}<ImageIcon />{/if}
+              >{:else if id === 'attachment'}<PaperclipIcon />{:else}<ImageIcon
+              />{/if}
           {/snippet}
           {#each pinned.filter((id) => tools.includes(id)) as id (id)}
             {#if id === 'new-conversation'}<Button
@@ -1053,15 +1226,19 @@
                 aria-pressed={webSearch}
                 disabled={session.running}
                 title={`${t(webSearch ? 'chat.networkOn' : 'chat.networkOff')} · ${t('chat.networkPrivacy')}`}
-                onclick={() => (webSearch = !webSearch)}>{@render toolIcon(id)}</Button
+                onclick={() => (webSearch = !webSearch)}
+                >{@render toolIcon(id)}</Button
               >{:else if id === 'attachment'}<Button
                 type="button"
                 variant="ghost"
                 size="icon-sm"
                 aria-label={t('chat.uploadAttachment')}
                 disabled={session.running || !vision}
-                title={vision ? t('chat.uploadAttachment') : t('chat.visionUnsupported')}
-                onclick={() => fileInput?.click()}>{@render toolIcon(id)}</Button
+                title={vision
+                  ? t('chat.uploadAttachment')
+                  : t('chat.visionUnsupported')}
+                onclick={() => fileInput?.click()}
+                >{@render toolIcon(id)}</Button
               >{:else}<Button
                 type="button"
                 variant="ghost"
@@ -1069,13 +1246,16 @@
                 size="icon-sm"
                 aria-label={t('chat.generateImage')}
                 aria-pressed={generateImage}
-                disabled={session.running || !paintingModel || capability?.supportsTools === false}
+                disabled={session.running ||
+                  !paintingModel ||
+                  capability?.supportsTools === false}
                 title={!paintingModel
                   ? t('chat.paintingUnconfigured')
                   : capability?.supportsTools === false
                     ? t('chat.toolsUnsupported')
                     : t('chat.generateImage')}
-                onclick={() => (generateImage = !generateImage)}>{@render toolIcon(id)}</Button
+                onclick={() => (generateImage = !generateImage)}
+                >{@render toolIcon(id)}</Button
               >{/if}
           {/each}
           <input
@@ -1089,7 +1269,10 @@
               void attach(input.files).finally(() => (input.value = ''))
             }}
           />
-          <Popover.Root bind:open={toolsOpen} onOpenChange={(open) => !open && (customizing = false)}>
+          <Popover.Root
+            bind:open={toolsOpen}
+            onOpenChange={(open) => !open && (customizing = false)}
+          >
             <Popover.Trigger disabled={session.running}>
               {#snippet child({ props })}<Button
                   {...props}
@@ -1100,32 +1283,49 @@
                   title={t('chat.tools')}><PlusIcon /></Button
                 >{/snippet}
             </Popover.Trigger>
-            <Popover.Content class="tools-menu" side="top" align="start" sideOffset={6} collisionPadding={8}>
+            <Popover.Content
+              class="tools-menu"
+              side="top"
+              align="start"
+              sideOffset={6}
+              collisionPadding={8}
+            >
               {#if customizing}
-                <p class="tools-title" id="{reasoningId}-toolbar">{t('chat.toolbarCustomize')}</p>
+                <p class="tools-title" id="{reasoningId}-toolbar">
+                  {t('chat.toolbarCustomize')}
+                </p>
                 <ul class="tools-order" aria-labelledby="{reasoningId}-toolbar">
                   {#each toolOrder as id, index (id)}
                     <li class="tools-row">
                       <button
                         type="button"
                         class="tools-grip"
-                        aria-label={t('chat.toolbarDrag', { name: t(TOOL_LABEL[id] ?? id) })}
+                        aria-label={t('chat.toolbarDrag', {
+                          name: t(TOOL_LABEL[id] ?? id),
+                        })}
                         onpointerdown={(e) => dragTool(e, id)}
                         onkeydown={(e) => {
-                          if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+                          if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')
+                            return
                           e.preventDefault()
                           const button = e.currentTarget
                           moveTool(id, index + (e.key === 'ArrowUp' ? -1 : 1))
                           void tick().then(() => button.focus())
                         }}><GripVerticalIcon /></button
                       >
-                      {@render toolIcon(id)}<span>{t(TOOL_LABEL[id] ?? id)}</span>
+                      {@render toolIcon(id)}<span
+                        >{t(TOOL_LABEL[id] ?? id)}</span
+                      >
                       <Switch
                         size="sm"
                         aria-label={t(TOOL_LABEL[id] ?? id)}
                         checked={pinned.includes(id)}
                         onCheckedChange={(on) =>
-                          setPinned(toolOrder.filter((item) => (item === id ? on : pinned.includes(item))))}
+                          setPinned(
+                            toolOrder.filter((item) =>
+                              item === id ? on : pinned.includes(item),
+                            ),
+                          )}
                       />
                     </li>
                   {/each}
@@ -1137,7 +1337,9 @@
                   onclick={() => {
                     pinned = [...DEFAULT_TOOLBAR]
                     onToolbarChange?.(pinned)
-                  }}><RotateCcwIcon /><span>{t('chat.toolbarRestore')}</span></button
+                  }}
+                  ><RotateCcwIcon /><span>{t('chat.toolbarRestore')}</span
+                  ></button
                 >
               {:else}
                 {#each toolOrder.filter((id) => !pinned.includes(id)) as id (id)}
@@ -1148,7 +1350,10 @@
                       onclick={() => {
                         toolsOpen = false
                         newConversation()
-                      }}>{@render toolIcon(id)}<span>{t('chat.newConversation')}</span></button
+                      }}
+                      >{@render toolIcon(id)}<span
+                        >{t('chat.newConversation')}</span
+                      ></button
                     >{:else if id === 'web-search'}<button
                       type="button"
                       class="tools-item"
@@ -1157,7 +1362,8 @@
                         toolsOpen = false
                         webSearch = !webSearch
                       }}
-                      >{@render toolIcon(id)}<span>{t('chat.network')}</span>{#if webSearch}<CheckIcon />{/if}</button
+                      >{@render toolIcon(id)}<span>{t('chat.network')}</span
+                      >{#if webSearch}<CheckIcon />{/if}</button
                     >{:else if id === 'attachment'}<button
                       type="button"
                       class="tools-item"
@@ -1167,14 +1373,16 @@
                         toolsOpen = false
                         fileInput?.click()
                       }}
-                      >{@render toolIcon(id)}<span>{t('chat.uploadAttachment')}</span>{#if !vision}<small
-                          >{t('chat.visionUnsupported')}</small
+                      >{@render toolIcon(id)}<span
+                        >{t('chat.uploadAttachment')}</span
+                      >{#if !vision}<small>{t('chat.visionUnsupported')}</small
                         >{/if}</button
                     >{:else}<button
                       type="button"
                       class="tools-item"
                       aria-pressed={generateImage}
-                      disabled={!paintingModel || capability?.supportsTools === false}
+                      disabled={!paintingModel ||
+                        capability?.supportsTools === false}
                       title={!paintingModel
                         ? t('chat.paintingUnconfigured')
                         : capability?.supportsTools === false
@@ -1184,7 +1392,9 @@
                         toolsOpen = false
                         generateImage = !generateImage
                       }}
-                      >{@render toolIcon(id)}<span>{t('chat.generateImage')}</span>{#if !paintingModel}<small
+                      >{@render toolIcon(id)}<span
+                        >{t('chat.generateImage')}</span
+                      >{#if !paintingModel}<small
                           >{t('chat.paintingUnconfigured')}</small
                         >{:else if generateImage}<CheckIcon />{/if}</button
                     >{/if}
@@ -1193,7 +1403,8 @@
                   type="button"
                   class="tools-item tools-footer"
                   aria-label={t('chat.toolbarCustomize')}
-                  onclick={() => (customizing = true)}><span>{t('chat.quickPanel')}</span><Settings2Icon /></button
+                  onclick={() => (customizing = true)}
+                  ><span>{t('chat.quickPanel')}</span><Settings2Icon /></button
                 >
               {/if}
             </Popover.Content>
@@ -1205,7 +1416,8 @@
               class="tool-chip"
               aria-label={t('chat.generateImageOff')}
               title={t('chat.generateImageOff')}
-              onclick={() => (generateImage = false)}><ImageIcon />{t('chat.generateImage')}<XIcon /></Button
+              onclick={() => (generateImage = false)}
+              ><ImageIcon />{t('chat.generateImage')}<XIcon /></Button
             >{/if}
           {#if ports.skills}<div class="skills-control">
               <SkillPicker
@@ -1219,7 +1431,9 @@
             </div>{/if}
         </div>
         <div class="tool-group send-tools">
-          {#if mode === 'plan'}<span class="plan-badge" role="status">{t('chat.mode.planBadge')}</span>{/if}
+          {#if mode === 'plan'}<span class="plan-badge" role="status"
+              >{t('chat.mode.planBadge')}</span
+            >{/if}
           {#if allowedModes.length > 1 || allowedModes.includes('full_access')}
             <DropdownMenu.Root>
               <DropdownMenu.Trigger disabled={session.running}>
@@ -1229,16 +1443,18 @@
                     size="sm"
                     class={mode === 'full_access' ? 'mode-danger' : undefined}
                     aria-label={`${t('chat.mode.label')}: ${t(`chat.mode.${mode}`)}`}
-                    ><ShieldIcon data-icon="inline-start" />{t(`chat.mode.${mode}`)}<ChevronDownIcon
-                      data-icon="inline-end"
-                    /></Button
+                    ><ShieldIcon data-icon="inline-start" />{t(
+                      `chat.mode.${mode}`,
+                    )}<ChevronDownIcon data-icon="inline-end" /></Button
                   >{/snippet}
               </DropdownMenu.Trigger>
               <DropdownMenu.Content side="top" align="end" class="mode-menu">
                 <DropdownMenu.Group aria-label={t('chat.mode.label')}>
                   {#each allowedModes as option (option)}
                     <DropdownMenu.Item
-                      class={option === 'full_access' ? 'mode-option mode-danger' : 'mode-option'}
+                      class={option === 'full_access'
+                        ? 'mode-option mode-danger'
+                        : 'mode-option'}
                       aria-current={option === mode ? 'true' : undefined}
                       onSelect={() => void chooseMode(option)}
                       >{#if option === 'default'}<HandIcon />
@@ -1247,10 +1463,18 @@
                       {:else if option === 'auto'}<ShieldCheckIcon />
                       {:else}<ShieldAlertIcon />{/if}
                       <span class="mode-name">{t(`chat.mode.${option}`)}</span>
-                      <span class="mode-description">{t(`chat.mode.${option}Hint`)}</span>
+                      <span class="mode-description"
+                        >{t(`chat.mode.${option}Hint`)}</span
+                      >
                       <span class="mode-notice">
                         {#if option === 'auto' || option === 'full_access'}
-                          <span title={t(option === 'auto' ? 'chat.mode.ruleNotice' : 'chat.mode.fullAccessBody')}>
+                          <span
+                            title={t(
+                              option === 'auto'
+                                ? 'chat.mode.ruleNotice'
+                                : 'chat.mode.fullAccessBody',
+                            )}
+                          >
                             <InfoIcon />
                           </span>
                         {/if}
@@ -1264,9 +1488,9 @@
                 <div class="mode-footer">
                   <span>{t('chat.mode.label')}</span>
                   <span class="mode-keys"
-                    ><kbd>↑↓</kbd>{t('chat.mode.navigate')}<kbd>↵</kbd>{t('chat.mode.confirm')}<kbd>Esc</kbd>{t(
-                      'chat.mode.close',
-                    )}</span
+                    ><kbd>↑↓</kbd>{t('chat.mode.navigate')}<kbd>↵</kbd>{t(
+                      'chat.mode.confirm',
+                    )}<kbd>Esc</kbd>{t('chat.mode.close')}</span
                   >
                 </div>
               </DropdownMenu.Content>
@@ -1308,30 +1532,41 @@
                 }}
               >
                 <div class="reasoning-heading">
-                  <p>{t('chat.reasoningStrength')}: <strong>{effortLabel}</strong></p>
+                  <p>
+                    {t('chat.reasoningStrength')}:
+                    <strong>{effortLabel}</strong>
+                  </p>
                   <Button
                     variant="secondary"
                     size="xs"
                     disabled={session.running || chosenEffort === 'default'}
-                    onclick={() => chooseEffort('default')}>{t('chat.resetReasoning')}</Button
+                    onclick={() => chooseEffort('default')}
+                    >{t('chat.resetReasoning')}</Button
                   >
                 </div>
                 {#if allowedEfforts.length === 0}
-                  <p class="reasoning-hint">{t('chat.reasoningUnconfigured')}</p>
+                  <p class="reasoning-hint">
+                    {t('chat.reasoningUnconfigured')}
+                  </p>
                   {#if onOpenSettings}<Button
                       variant="outline"
                       size="sm"
                       onclick={() => {
                         reasoningOpen = false
                         settingsTarget.value = picked
-                          ? { endpointId: picked.endpointId, modelId: picked.modelId }
+                          ? {
+                              endpointId: picked.endpointId,
+                              modelId: picked.modelId,
+                            }
                           : null
                         onOpenSettings()
                       }}>{t('chat.openSettings')}</Button
                     >{/if}
                 {:else if allowedEfforts.length > 1}
                   <div class="reasoning-scale" aria-hidden="true">
-                    <span>{t('chat.reasoningFaster')}</span><span>{t('chat.reasoningSmarter')}</span>
+                    <span>{t('chat.reasoningFaster')}</span><span
+                      >{t('chat.reasoningSmarter')}</span
+                    >
                   </div>
                   <div
                     class="reasoning-slider"
@@ -1353,7 +1588,14 @@
                       onkeyup={(event) => {
                         if (
                           !event.isComposing &&
-                          ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)
+                          [
+                            'ArrowLeft',
+                            'ArrowRight',
+                            'ArrowUp',
+                            'ArrowDown',
+                            'Home',
+                            'End',
+                          ].includes(event.key)
                         ) {
                           commitReasoning(event)
                         }
@@ -1372,7 +1614,9 @@
                   </div>
                 {:else}
                   <Field.FieldSet disabled={session.running}>
-                    <Field.FieldLegend class="sr-only">{t('chat.reasoningEffort')}</Field.FieldLegend>
+                    <Field.FieldLegend class="sr-only"
+                      >{t('chat.reasoningEffort')}</Field.FieldLegend
+                    >
                     {#each ['default', ...allowedEfforts] as effort (effort)}
                       <label class="reasoning-option">
                         <input
@@ -1380,14 +1624,17 @@
                           name={reasoningId}
                           value={effort}
                           checked={reasoningEffort === effort}
-                          onchange={() => chooseEffort(effort as ReasoningEffort)}
+                          onchange={() =>
+                            chooseEffort(effort as ReasoningEffort)}
                         />
                         {t(`chat.effort.${effort}`)}
                       </label>
                     {/each}
                   </Field.FieldSet>
                 {/if}
-                {#if reasoningEffort === 'default'}<p class="reasoning-hint">{t('chat.reasoningDefaultHint')}</p>{/if}
+                {#if reasoningEffort === 'default'}<p class="reasoning-hint">
+                    {t('chat.reasoningDefaultHint')}
+                  </p>{/if}
               </Popover.Content>
             </Popover.Root>
           {/if}
@@ -1419,14 +1666,19 @@
     {#if history}
       <Dialog.Root bind:open={historyOpen}>
         <Dialog.Content showCloseButton={false}>
-          <Dialog.Header><Dialog.Title>{t('chat.history')}</Dialog.Title></Dialog.Header>
-          {#if historyLoading}<p role="status">{t('chat.historyLoading')}</p>{/if}
+          <Dialog.Header
+            ><Dialog.Title>{t('chat.history')}</Dialog.Title></Dialog.Header
+          >
+          {#if historyLoading}<p role="status">
+              {t('chat.historyLoading')}
+            </p>{/if}
           {#if historyError}<p role="alert">
               {t('chat.historyFailed')}: {historyError}<Button
                 variant="outline"
                 size="sm"
                 disabled={historyBusy}
-                onclick={() => void retryHistory()}>{t('chat.retryHistory')}</Button
+                onclick={() => void retryHistory()}
+                >{t('chat.retryHistory')}</Button
               >
             </p>{/if}
           <div class="history-list">
@@ -1447,9 +1699,16 @@
               >
                 <Field.FieldGroup
                   ><Field.Field
-                    ><Field.FieldLabel for="chat-conversation-title">{t('chat.conversationTitle')}</Field.FieldLabel
-                    ><Input id="chat-conversation-title" bind:value={renameTitle} disabled={historyBusy} /></Field.Field
-                  ><Button type="submit" disabled={historyBusy || renameTitle.trim() === ''}
+                    ><Field.FieldLabel for="chat-conversation-title"
+                      >{t('chat.conversationTitle')}</Field.FieldLabel
+                    ><Input
+                      id="chat-conversation-title"
+                      bind:value={renameTitle}
+                      disabled={historyBusy}
+                    /></Field.Field
+                  ><Button
+                    type="submit"
+                    disabled={historyBusy || renameTitle.trim() === ''}
                     >{t('common.confirm')}</Button
                   ></Field.FieldGroup
                 >
@@ -1462,12 +1721,16 @@
                   renaming = true
                 }}>{t('chat.rename')}</Button
               >{/if}
-            <Button variant="destructive" disabled={historyBusy || session.running} onclick={() => void remove()}
-              >{t('chat.delete')}</Button
+            <Button
+              variant="destructive"
+              disabled={historyBusy || session.running}
+              onclick={() => void remove()}>{t('chat.delete')}</Button
             >
           {/if}
           <Dialog.Footer
-            ><Button variant="ghost" onclick={() => (historyOpen = false)}>{t('chat.close')}</Button></Dialog.Footer
+            ><Button variant="ghost" onclick={() => (historyOpen = false)}
+              >{t('chat.close')}</Button
+            ></Dialog.Footer
           >
         </Dialog.Content>
       </Dialog.Root>
@@ -1475,9 +1738,17 @@
     <Dialog.Root bind:open={replyOpen}>
       <Dialog.Content class="reply-dialog" showCloseButton={false}>
         <Dialog.Header>
-          <Dialog.Title>{t(replyDialog === 'edit' ? 'chat.editReply' : 'chat.translate')}</Dialog.Title>
+          <Dialog.Title
+            >{t(
+              replyDialog === 'edit' ? 'chat.editReply' : 'chat.translate',
+            )}</Dialog.Title
+          >
           <Dialog.Description
-            >{t(replyDialog === 'edit' ? 'chat.editReplyHint' : 'chat.candidateHint')}</Dialog.Description
+            >{t(
+              replyDialog === 'edit'
+                ? 'chat.editReplyHint'
+                : 'chat.candidateHint',
+            )}</Dialog.Description
           >
         </Dialog.Header>
         <form
@@ -1489,7 +1760,9 @@
           <Field.FieldGroup>
             {#if replyDialog === 'edit'}
               <Field.Field
-                ><Field.FieldLabel for="chat-reply-edit">{t('chat.replyText')}</Field.FieldLabel><Textarea
+                ><Field.FieldLabel for="chat-reply-edit"
+                  >{t('chat.replyText')}</Field.FieldLabel
+                ><Textarea
                   id="chat-reply-edit"
                   bind:value={editDraft}
                   rows={8}
@@ -1499,7 +1772,8 @@
               >
             {:else}
               <Field.Field
-                ><Field.FieldLabel>{t('chat.replyModel')}</Field.FieldLabel><ModelSelect
+                ><Field.FieldLabel>{t('chat.replyModel')}</Field.FieldLabel
+                ><ModelSelect
                   value={replyModel}
                   options={modelOptions}
                   disabled={actionBusy || modelError !== null}
@@ -1508,12 +1782,18 @@
               >
               {#if noModels}<p role="status">{t('chat.noModels')}</p>{/if}
               {#if modelError}<p role="alert">
-                  {modelError}<Button type="button" variant="outline" size="sm" onclick={() => modelReload++}
+                  {modelError}<Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onclick={() => modelReload++}
                     >{t('chat.retryModels')}</Button
                   >
                 </p>{/if}
               <Field.Field
-                ><Field.FieldLabel for="chat-target-language">{t('chat.targetLanguage')}</Field.FieldLabel><Input
+                ><Field.FieldLabel for="chat-target-language"
+                  >{t('chat.targetLanguage')}</Field.FieldLabel
+                ><Input
                   id="chat-target-language"
                   bind:value={targetLanguage}
                   maxlength={80}
@@ -1521,17 +1801,23 @@
                 /></Field.Field
               >
             {/if}
-            {#if replyError}<p role="alert" class="text-destructive">{replyError}</p>{/if}
+            {#if replyError}<p role="alert" class="text-destructive">
+                {replyError}
+              </p>{/if}
             <Dialog.Footer>
-              <Button type="button" variant="ghost" disabled={actionBusy} onclick={() => (replyOpen = false)}
-                >{t('common.cancel')}</Button
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={actionBusy}
+                onclick={() => (replyOpen = false)}>{t('common.cancel')}</Button
               >
               <Button
                 type="submit"
                 disabled={actionBusy ||
                   (replyDialog === 'edit'
                     ? !editDraft.trim() || editDraft.length > 24_000
-                    : !validReplyModel || !targetLanguage.trim())}>{t('common.confirm')}</Button
+                    : !validReplyModel || !targetLanguage.trim())}
+                >{t('common.confirm')}</Button
               >
             </Dialog.Footer>
           </Field.FieldGroup>
@@ -1540,558 +1826,3 @@
     </Dialog.Root>
   </section>
 {/if}
-
-<style>
-  .chat-panel {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: 0.75rem;
-    min-width: 0;
-    min-height: 0;
-    height: 100%;
-    container-type: size;
-  }
-  .chat-header {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    flex: none;
-    min-width: 0;
-  }
-  .title-row {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    min-width: 0;
-  }
-  .title-row h2 {
-    flex: 1;
-    min-width: 0;
-    margin: 0;
-    font: inherit;
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .title-row :global(button) {
-    flex-shrink: 0;
-  }
-  .model-row {
-    min-width: 0;
-  }
-  .messages {
-    flex: 1;
-    min-height: 0;
-    min-width: 0;
-    overflow-y: auto;
-    overflow-x: clip;
-    overscroll-behavior: contain;
-    overflow-anchor: none;
-  }
-  .turns {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    padding: 0;
-    margin: 0;
-    list-style: none;
-  }
-  .empty-message {
-    color: var(--color-muted-foreground);
-    text-align: center;
-    padding: 1.5rem 0.5rem;
-    margin: 0;
-  }
-  .bottom-control {
-    display: flex;
-    justify-content: center;
-  }
-  .composer {
-    position: relative;
-    flex: none;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    border: 1px solid var(--color-border);
-    border-radius: calc(var(--kit-radius, var(--radius)) * 1.5);
-    padding: 0.5rem;
-  }
-  .expand-control {
-    position: absolute;
-    top: 0.375rem;
-    right: 0.375rem;
-  }
-  .composer :global(textarea) {
-    min-height: 5rem;
-    height: 5rem;
-    max-height: 5rem;
-    field-sizing: fixed;
-    resize: none;
-    padding-right: 2.25rem;
-    border: 0;
-    box-shadow: none;
-    border-radius: calc(var(--kit-radius, var(--radius)) * 0.5);
-  }
-  .composer.expanded :global(textarea) {
-    height: 40cqh;
-    max-height: 40cqh;
-  }
-  .composer :global(textarea:focus-visible) {
-    outline: 2px solid var(--color-ring);
-    outline-offset: -2px;
-  }
-  .context-chip {
-    display: flex;
-    align-items: center;
-    align-self: flex-start;
-    gap: 0.25rem;
-    max-width: calc(100% - 2rem);
-    padding-left: 0.5rem;
-    background: var(--color-muted);
-    border-radius: var(--kit-radius, var(--radius));
-  }
-  .context-chip span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .context-chip :global(button) {
-    flex-shrink: 0;
-  }
-  .image-tray {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.375rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  .image-tray li {
-    position: relative;
-  }
-  .image-tray img {
-    width: 3.5rem;
-    height: 3.5rem;
-    object-fit: cover;
-    border: 1px solid var(--color-border);
-    border-radius: var(--kit-radius, var(--radius));
-  }
-  .image-tray :global(button) {
-    position: absolute;
-    top: -0.375rem;
-    right: -0.375rem;
-  }
-  .composer-tools,
-  .tool-group {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    min-width: 0;
-  }
-  .composer-tools {
-    justify-content: space-between;
-    gap: 0.5rem;
-  }
-  .send-tools {
-    margin-left: auto;
-  }
-  .chat-panel :global(button.search-toggle) {
-    color: var(--color-muted-foreground);
-  }
-  .chat-panel :global(button.search-toggle[aria-pressed='true']) {
-    color: var(--color-primary-foreground);
-    background: var(--color-primary);
-    border-color: var(--color-primary);
-  }
-  .chat-panel :global(button.search-toggle[aria-pressed='true']:hover:not(:disabled)) {
-    background: color-mix(in oklch, var(--color-primary) 85%, var(--color-foreground));
-  }
-  :global(.tools-menu) {
-    z-index: 50;
-    box-sizing: border-box;
-    width: min(16rem, calc(100vw - 1rem));
-    display: flex;
-    flex-direction: column;
-    padding: 0.25rem;
-    border: 1px solid var(--color-border);
-    border-radius: var(--kit-radius, var(--radius));
-    background: var(--color-popover);
-    color: var(--color-popover-foreground);
-    box-shadow: 0 4px 12px color-mix(in oklch, var(--color-foreground) 12%, transparent);
-    font-size: var(--kit-font-size-sm, 0.8125rem);
-  }
-  :global(.tools-item) {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    min-height: 2.25rem;
-    padding: 0.25rem 0.625rem;
-    border: 0;
-    border-radius: calc(var(--kit-radius, var(--radius)) - 2px);
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  :global(.tools-item:hover:not(:disabled)),
-  :global(.tools-item:focus-visible) {
-    background: var(--color-accent);
-    color: var(--color-accent-foreground);
-    outline: none;
-  }
-  :global(.tools-item:disabled) {
-    cursor: not-allowed;
-    opacity: 0.55;
-  }
-  :global(.tools-item svg) {
-    width: 1rem;
-    height: 1rem;
-    flex-shrink: 0;
-  }
-  :global(.tools-item small) {
-    margin-left: auto;
-    color: var(--color-muted-foreground);
-    font-size: 0.75rem;
-  }
-  :global(.tools-item > svg:last-child:not(:first-child)) {
-    margin-left: auto;
-  }
-  :global(.tools-footer) {
-    margin-top: 0.25rem;
-    border-top: 1px solid var(--color-border);
-    border-radius: 0 0 calc(var(--kit-radius, var(--radius)) - 2px) calc(var(--kit-radius, var(--radius)) - 2px);
-    color: var(--color-muted-foreground);
-  }
-  :global(.tools-title) {
-    margin: 0;
-    padding: 0.375rem 0.5rem;
-    font-size: 0.875rem;
-    font-weight: 500;
-  }
-  :global(.tools-order) {
-    display: flex;
-    flex-direction: column;
-    gap: 0.125rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  :global(.tools-row) {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    min-height: 2rem;
-    padding: 0 0.375rem;
-    border-radius: calc(var(--kit-radius, var(--radius)) - 2px);
-    font-size: 0.875rem;
-  }
-  :global(.tools-row:hover) {
-    background: var(--color-accent);
-  }
-  :global(.tools-row > svg) {
-    width: 1rem;
-    height: 1rem;
-    flex-shrink: 0;
-    color: var(--color-muted-foreground);
-  }
-  :global(.tools-row > span) {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  :global(.tools-grip) {
-    display: inline-flex;
-    padding: 0.125rem;
-    border: 0;
-    border-radius: 0.25rem;
-    background: none;
-    color: var(--color-muted-foreground);
-    cursor: grab;
-    touch-action: none;
-  }
-  :global(.tools-grip:focus-visible) {
-    outline: 2px solid var(--color-ring);
-  }
-  :global(.tools-grip svg) {
-    width: 0.875rem;
-    height: 0.875rem;
-  }
-  .plan-badge {
-    padding: 0.125rem 0.5rem;
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    color: var(--color-muted-foreground);
-    font-size: var(--kit-font-size-sm, 0.8125rem);
-    white-space: nowrap;
-  }
-  :global(.mode-menu) {
-    width: min(35rem, calc(100vw - 1rem));
-    padding: 0.375rem;
-    border-radius: 0.75rem;
-  }
-  :global(.mode-option) {
-    display: grid;
-    grid-template-columns: 1rem 7.5rem minmax(0, 1fr) 1rem 0.875rem;
-    align-items: center;
-    column-gap: 0.5rem;
-    min-height: 2.125rem;
-    padding: 0.375rem 0.5rem;
-    border-radius: 0.5rem;
-    font-size: var(--kit-font-size-sm, 0.8125rem);
-  }
-  :global(.mode-option[aria-current='true']) {
-    background: var(--color-muted);
-  }
-  :global(.mode-option > svg) {
-    color: var(--color-muted-foreground);
-    width: 0.875rem;
-    height: 0.875rem;
-  }
-  .mode-name {
-    white-space: nowrap;
-  }
-  .mode-description {
-    color: var(--color-muted-foreground);
-    font-size: var(--kit-font-size-xs, 0.75rem);
-    text-align: right;
-    line-height: 1.5;
-  }
-  .mode-notice,
-  .mode-check {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--color-muted-foreground);
-  }
-  .mode-notice {
-    color: var(--color-warning, var(--color-muted-foreground));
-  }
-  .mode-notice :global(svg),
-  .mode-check :global(svg) {
-    display: block;
-    width: 0.8125rem;
-    height: 0.8125rem;
-  }
-  :global(.mode-danger),
-  :global(.mode-danger) :is(.mode-name, .mode-description, .mode-notice),
-  :global(.mode-option.mode-danger > svg) {
-    color: var(--color-destructive);
-  }
-  .mode-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.625rem 0.375rem 0.125rem;
-    color: var(--color-muted-foreground);
-    font-size: var(--kit-font-size-xs, 0.75rem);
-  }
-  .mode-keys {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-  }
-  .mode-keys kbd {
-    padding: 0 0.25rem;
-    border-radius: 0.25rem;
-    background: var(--color-muted);
-    font: inherit;
-  }
-  .mode-keys kbd:not(:first-child) {
-    margin-left: 0.375rem;
-  }
-  @media (max-width: 480px) {
-    :global(.mode-option) {
-      grid-template-columns: 1rem minmax(0, 1fr) 1rem 0.875rem;
-      row-gap: 0.125rem;
-    }
-    .mode-description {
-      grid-column: 2;
-      grid-row: 2;
-      text-align: left;
-    }
-    .mode-notice {
-      grid-column: 3;
-      grid-row: 1;
-    }
-    .mode-check {
-      grid-column: 4;
-      grid-row: 1;
-    }
-  }
-  :global(.reasoning-popover) {
-    box-sizing: border-box;
-    width: min(18rem, calc(100vw - 1rem));
-    max-height: calc(100dvh - 1rem);
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    padding: 0.75rem;
-    border: 1px solid var(--color-border);
-    border-radius: var(--kit-radius, var(--radius));
-    background: var(--color-popover);
-    color: var(--color-popover-foreground);
-    box-shadow: 0 4px 12px color-mix(in oklch, var(--color-foreground) 12%, transparent);
-    font-size: var(--kit-font-size-sm, 0.8125rem);
-  }
-  .reasoning-heading,
-  .reasoning-scale {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .reasoning-heading p,
-  .reasoning-hint {
-    margin: 0;
-    overflow-wrap: anywhere;
-  }
-  .reasoning-scale,
-  .reasoning-hint {
-    color: var(--color-muted-foreground);
-  }
-  :global(.reasoning-popover input) {
-    accent-color: var(--color-primary);
-  }
-  .reasoning-slider {
-    position: relative;
-    height: 1.75rem;
-    display: flex;
-    align-items: center;
-  }
-  :global(.reasoning-slider input[type='range']) {
-    appearance: none;
-    width: 100%;
-    height: 1.75rem;
-    margin: 0;
-    background: transparent;
-    cursor: pointer;
-  }
-  :global(.reasoning-slider input::-webkit-slider-runnable-track) {
-    height: 0.375rem;
-    border-radius: 999px;
-    background: linear-gradient(
-      to right,
-      var(--color-primary) var(--reasoning-progress),
-      var(--color-muted) var(--reasoning-progress)
-    );
-  }
-  :global(.reasoning-slider input::-moz-range-track) {
-    height: 0.375rem;
-    border-radius: 999px;
-    background: linear-gradient(
-      to right,
-      var(--color-primary) var(--reasoning-progress),
-      var(--color-muted) var(--reasoning-progress)
-    );
-  }
-  :global(.reasoning-slider input::-webkit-slider-thumb) {
-    appearance: none;
-    width: 1.125rem;
-    height: 1.125rem;
-    margin-top: -0.375rem;
-    border: 1px solid var(--color-border);
-    border-radius: 50%;
-    background: var(--color-popover);
-  }
-  :global(.reasoning-slider input::-moz-range-thumb) {
-    width: 1.125rem;
-    height: 1.125rem;
-    box-sizing: border-box;
-    border: 1px solid var(--color-border);
-    border-radius: 50%;
-    background: var(--color-popover);
-  }
-  .reasoning-ticks {
-    position: absolute;
-    inset: 50% 0.5625rem auto;
-    pointer-events: none;
-  }
-  .reasoning-tick {
-    position: absolute;
-    width: 0.25rem;
-    height: 0.25rem;
-    border-radius: 50%;
-    background: var(--color-popover);
-    transform: translate(-50%, -50%);
-  }
-  .reasoning-tick.current {
-    visibility: hidden;
-  }
-  :global(.reasoning-slider input:disabled) {
-    cursor: not-allowed;
-    opacity: 0.5;
-  }
-  :global(.reasoning-popover input:focus-visible) {
-    outline: 2px solid var(--color-ring);
-    outline-offset: 2px;
-  }
-  .reasoning-option {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .skills-control {
-    min-width: 0;
-    max-width: 100%;
-  }
-  .skills-control :global(div:first-child) {
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-  .skills-control :global([data-slot='select-trigger']) {
-    width: auto;
-    max-width: 100%;
-  }
-  .search-status,
-  .draft-recovery {
-    margin: 0;
-    color: var(--color-muted-foreground);
-    font-size: var(--kit-font-size-sm, 0.8125rem);
-  }
-  .draft-recovery {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .history-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    max-height: 40vh;
-    overflow-y: auto;
-    min-width: 0;
-  }
-  .history-list :global(button) {
-    justify-content: flex-start;
-    min-width: 0;
-  }
-  .history-list span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  :global(.reply-dialog) {
-    max-height: calc(100dvh - 2rem);
-    overflow-y: auto;
-  }
-  :global(.reply-dialog form),
-  :global(.reply-dialog [data-slot='field-group']) {
-    min-width: 0;
-  }
-  :global(.reply-dialog textarea) {
-    max-height: 45dvh;
-    overflow-y: auto;
-  }
-</style>

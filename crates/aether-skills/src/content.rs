@@ -1,4 +1,5 @@
-//! Pure content identity for validated skill text and sorted packaged-file hashes.
+//! Pure content identity for validated skill text and sorted packaged-file
+//! hashes.
 
 use sha2::{Digest, Sha256};
 
@@ -10,15 +11,19 @@ pub struct ContentIdentity<'a> {
     pub name: &'a str,
     /// Validated display description; encoded as its original UTF-8 bytes.
     pub description: &'a str,
-    /// Validated optional version; `None` and an empty string have distinct identities.
+    /// Validated optional version; `None` and an empty string have distinct
+    /// identities.
     pub version: Option<&'a str>,
-    /// Validated skill body; parsing-boundary normalization must already be complete.
+    /// Validated skill body; parsing-boundary normalization must already be
+    /// complete.
     pub body: &'a str,
-    /// Validated optional license; presence, even empty, enables the package suffix.
+    /// Validated optional license; presence, even empty, enables the package
+    /// suffix.
     pub license: Option<&'a str>,
 }
 
-/// SHA-256 identity as 64 lowercase hexadecimal digits, not a hash of ZIP bytes.
+/// SHA-256 identity as 64 lowercase hexadecimal digits, not a hash of ZIP
+/// bytes.
 ///
 /// # Preconditions
 /// Text fields, paths and file hashes must already be validated. `files` must

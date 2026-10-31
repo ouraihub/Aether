@@ -13,11 +13,16 @@ const actor: Actor = {
   sessionId: 'login',
   scopes: ['settings:write'],
 }
-function sessionDatabase(): { readonly store: DocumentStore; readonly rows: Map<string, StoredDocument | null> } {
+function sessionDatabase(): {
+  readonly store: DocumentStore
+  readonly rows: Map<string, StoredDocument | null>
+} {
   const rows = new Map<string, StoredDocument | null>()
   const store: DocumentStore = {
     async get(owner, collection, key) {
-      return rows.get(JSON.stringify([ownerKey(owner), collection, key])) ?? null
+      return (
+        rows.get(JSON.stringify([ownerKey(owner), collection, key])) ?? null
+      )
     },
     async list() {
       return []
@@ -25,7 +30,11 @@ function sessionDatabase(): { readonly store: DocumentStore; readonly rows: Map<
     async compareAndSet(owner, collection, key, expected, value) {
       const id = JSON.stringify([ownerKey(owner), collection, key])
       const before = rows.get(id)
-      if (expected === null ? rows.has(id) : !before || before.revision !== expected)
+      if (
+        expected === null
+          ? rows.has(id)
+          : !before || before.revision !== expected
+      )
         throw new KitFailure('conflict', 'CAS')
       const document = { key, revision: (before?.revision ?? 0) + 1, value }
       rows.set(id, document)
@@ -33,7 +42,8 @@ function sessionDatabase(): { readonly store: DocumentStore; readonly rows: Map<
     },
     async remove(owner, collection, key, expected) {
       const id = JSON.stringify([ownerKey(owner), collection, key])
-      if (rows.get(id)?.revision !== expected) throw new KitFailure('conflict', 'CAS')
+      if (rows.get(id)?.revision !== expected)
+        throw new KitFailure('conflict', 'CAS')
       rows.set(id, null)
     },
   }
@@ -65,7 +75,13 @@ test('identity validates deployment audience and invokes fresh host verification
 test('opaque sessions persist hashes only and expire/revoke/rotate with absolute lifetime preserved', async () => {
   const { store, rows } = sessionDatabase()
   let now = 1000
-  const sessions = new OpaqueSessionStore({ store, applicationId: 'app', idleMs: 50, absoluteMs: 200, now: () => now })
+  const sessions = new OpaqueSessionStore({
+    store,
+    applicationId: 'app',
+    idleMs: 50,
+    absoluteMs: 200,
+    now: () => now,
+  })
   const issued = await sessions.issue(actor)
   assert.equal(JSON.stringify([...rows]).includes(issued.token), false)
   assert.equal((await sessions.resolve(issued.token))?.subjectId, 'alice')
@@ -84,6 +100,12 @@ test('opaque sessions persist hashes only and expire/revoke/rotate with absolute
   const absolute = await sessions.issue(actor)
   now += 200
   assert.equal(await sessions.resolve(absolute.token), null)
-  const other = new OpaqueSessionStore({ store, applicationId: 'other', idleMs: 50, absoluteMs: 200, now: () => now })
+  const other = new OpaqueSessionStore({
+    store,
+    applicationId: 'other',
+    idleMs: 50,
+    absoluteMs: 200,
+    now: () => now,
+  })
   assert.equal(await other.resolve(absolute.token), null)
 })

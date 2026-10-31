@@ -10,10 +10,18 @@ import type {
   TokenUsage,
   TurnStatus,
 } from '@ouraihub/aether-contracts'
-import type { Message, ReasoningBlock, ToolCall } from '@ouraihub/aether-core/types'
+import type {
+  Message,
+  ReasoningBlock,
+  ToolCall,
+} from '@ouraihub/aether-core/types'
 import { KitFailure, badRequest } from '@ouraihub/aether-core/error'
 import { charCount, isRecord } from '@ouraihub/aether-core/guard'
-import { decodeImage, IMAGE_MIMES, parseImage } from '@ouraihub/aether-core/images'
+import {
+  decodeImage,
+  IMAGE_MIMES,
+  parseImage,
+} from '@ouraihub/aether-core/images'
 
 export const COLLECTION = 'conversations'
 export const IMAGE_TTL_DAYS = 7
@@ -53,7 +61,8 @@ export interface ConversationDocument {
 }
 export const conflict = (reason: string): KitFailure =>
   new KitFailure('conflict', 'Conversation changed or unavailable', { reason })
-export const notFound = (entity: string): KitFailure => new KitFailure('not_found', 'Resource not found', { entity })
+export const notFound = (entity: string): KitFailure =>
+  new KitFailure('not_found', 'Resource not found', { entity })
 const corrupt = (): never => {
   throw new KitFailure('incompatible_db', 'Invalid stored conversation')
 }
@@ -67,7 +76,12 @@ export const emptyUsage = (): TokenUsage => ({
 export function checkId(field: string, id: string): void {
   if (!id.trim() || charCount(id) > 128) throw badRequest(field, 'invalid')
 }
-export function checkText(field: string, text: string, limit: number, nonempty = false): void {
+export function checkText(
+  field: string,
+  text: string,
+  limit: number,
+  nonempty = false,
+): void {
   if (charCount(text) > limit) throw badRequest(field, 'too_long', limit)
   if (nonempty && !text.trim()) throw badRequest(field, 'empty')
 }
@@ -81,7 +95,9 @@ function nullableText(value: unknown): string | null {
   return value === null ? null : text(value)
 }
 function integer(value: unknown): number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : corrupt()
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : corrupt()
 }
 function count(value: unknown): number | null {
   const parsed = value === null ? null : integer(value)
@@ -121,7 +137,8 @@ function context(value: unknown): ContextUsage | null {
   if (value === null) return null
   const v = record(value),
     source = v.source
-  if (source !== 'reported' && source !== 'estimated' && source !== 'unknown') return corrupt()
+  if (source !== 'reported' && source !== 'estimated' && source !== 'unknown')
+    return corrupt()
   return {
     tokens: count(v.tokens),
     contextWindow: count(v.contextWindow),
@@ -164,9 +181,18 @@ export function validateImages(images: readonly ImagePart[]): void {
 function reasoning(value: unknown): ReasoningBlock {
   const v = record(value),
     protocol = v.protocol
-  if (protocol !== 'openai-chat' && protocol !== 'openai-responses' && protocol !== 'anthropic-messages')
+  if (
+    protocol !== 'openai-chat' &&
+    protocol !== 'openai-responses' &&
+    protocol !== 'anthropic-messages'
+  )
     return corrupt()
-  return { protocol, endpointId: nullableText(v.endpointId), modelId: nullableText(v.modelId), value: json(v.value) }
+  return {
+    protocol,
+    endpointId: nullableText(v.endpointId),
+    modelId: nullableText(v.modelId),
+    value: json(v.value),
+  }
 }
 function json(value: unknown, depth = 0): unknown {
   if (depth > 64) return corrupt()
@@ -177,9 +203,12 @@ function json(value: unknown, depth = 0): unknown {
     (typeof value === 'number' && Number.isFinite(value))
   )
     return value
-  if (Array.isArray(value)) return value.map((item: unknown) => json(item, depth + 1))
+  if (Array.isArray(value))
+    return value.map((item: unknown) => json(item, depth + 1))
   if (isRecord(value))
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, json(item, depth + 1)]))
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, json(item, depth + 1)]),
+    )
   return corrupt()
 }
 function call(value: unknown): ToolCall {
@@ -188,11 +217,17 @@ function call(value: unknown): ToolCall {
 }
 function jsonRecord(value: unknown): Record<string, unknown> {
   const v = record(value)
-  return Object.fromEntries(Object.entries(v).map(([key, item]) => [key, json(item)]))
+  return Object.fromEntries(
+    Object.entries(v).map(([key, item]) => [key, json(item)]),
+  )
 }
 export function parseMessage(value: unknown): Message {
   const v = record(value)
-  if (['user', 'assistant', 'tool'].filter((key) => Object.hasOwn(v, key)).length !== 1) return corrupt()
+  if (
+    ['user', 'assistant', 'tool'].filter((key) => Object.hasOwn(v, key))
+      .length !== 1
+  )
+    return corrupt()
   if (typeof v.user === 'string') {
     if (v.images === undefined) return { user: v.user }
     return {
@@ -212,14 +247,20 @@ export function parseMessage(value: unknown): Message {
       assistant: {
         text: text(a.text),
         tool_calls: array(a.tool_calls, call),
-        ...(a.reasoning === undefined ? {} : { reasoning: array(a.reasoning, reasoning) }),
+        ...(a.reasoning === undefined
+          ? {}
+          : { reasoning: array(a.reasoning, reasoning) }),
       },
     }
   }
-  if (isRecord(v.tool)) return { tool: { call_id: text(v.tool.call_id), text: text(v.tool.text) } }
+  if (isRecord(v.tool))
+    return { tool: { call_id: text(v.tool.call_id), text: text(v.tool.text) } }
   return corrupt()
 }
-export function parseDocument(value: unknown, key: string): ConversationDocument {
+export function parseDocument(
+  value: unknown,
+  key: string,
+): ConversationDocument {
   const v = record(value),
     s = record(v.summary)
   if (v.version !== 1 || s.id !== key) return corrupt()
@@ -243,7 +284,10 @@ export function parseDocument(value: unknown, key: string): ConversationDocument
       status = t.status,
       kind = t.kind
     if (
-      (status !== 'running' && status !== 'completed' && status !== 'failed' && status !== 'cancelled') ||
+      (status !== 'running' &&
+        status !== 'completed' &&
+        status !== 'failed' &&
+        status !== 'cancelled') ||
       (kind !== 'reply' && kind !== 'translation')
     )
       return corrupt()
@@ -280,7 +324,14 @@ export function parseDocument(value: unknown, key: string): ConversationDocument
   let running = 0,
     last = 0
   for (const t of turns) {
-    if (!t.id.trim() || charCount(t.id) > 128 || ids.has(t.id) || seqs.has(t.seq) || t.seq <= last) return corrupt()
+    if (
+      !t.id.trim() ||
+      charCount(t.id) > 128 ||
+      ids.has(t.id) ||
+      seqs.has(t.seq) ||
+      t.seq <= last
+    )
+      return corrupt()
     if (
       !t.questionId.trim() ||
       charCount(t.questionId) > 128 ||
@@ -296,11 +347,16 @@ export function parseDocument(value: unknown, key: string): ConversationDocument
     last = t.seq
     if (t.status === 'running') running++
   }
-  if (running > 1 || (summary.selectedTurnId !== null && !ids.has(summary.selectedTurnId))) return corrupt()
+  if (
+    running > 1 ||
+    (summary.selectedTurnId !== null && !ids.has(summary.selectedTurnId))
+  )
+    return corrupt()
   for (const t of turns) {
     if (
       (t.parentId !== null && !ids.has(t.parentId)) ||
-      (t.supersedesId !== null && (!ids.has(t.supersedesId) || t.supersedesId === t.id))
+      (t.supersedesId !== null &&
+        (!ids.has(t.supersedesId) || t.supersedesId === t.id))
     )
       return corrupt()
     const seen = new Set<string>()
@@ -314,7 +370,8 @@ export function parseDocument(value: unknown, key: string): ConversationDocument
   return { version: 1, summary, turns }
 }
 export function idle(document: ConversationDocument): void {
-  if (document.turns.some((t) => t.status === 'running')) throw conflict('turn_running')
+  if (document.turns.some((t) => t.status === 'running'))
+    throw conflict('turn_running')
 }
 export function target(document: ConversationDocument, id: string): StoredTurn {
   checkId('turnId', id)
@@ -323,14 +380,19 @@ export function target(document: ConversationDocument, id: string): StoredTurn {
   return turn
 }
 export function visibleText(turn: StoredTurn): string {
-  return turn.messages.flatMap((m) => ('assistant' in m && m.assistant.text ? [m.assistant.text] : [])).join('\n\n')
+  return turn.messages
+    .flatMap((m) =>
+      'assistant' in m && m.assistant.text ? [m.assistant.text] : [],
+    )
+    .join('\n\n')
 }
 export function reasoningText(turn: StoredTurn): string {
   let text = ''
   for (const message of turn.messages) {
     if (!('assistant' in message)) continue
     for (const block of message.assistant.reasoning ?? []) {
-      if (block.protocol === 'openai-chat' && typeof block.value === 'string') text += block.value
+      if (block.protocol === 'openai-chat' && typeof block.value === 'string')
+        text += block.value
       else if (
         block.protocol === 'anthropic-messages' &&
         isRecord(block.value) &&
@@ -338,15 +400,27 @@ export function reasoningText(turn: StoredTurn): string {
         typeof block.value.thinking === 'string'
       )
         text += block.value.thinking
-      else if (block.protocol === 'openai-responses' && isRecord(block.value) && Array.isArray(block.value.summary)) {
+      else if (
+        block.protocol === 'openai-responses' &&
+        isRecord(block.value) &&
+        Array.isArray(block.value.summary)
+      ) {
         for (const part of block.value.summary)
-          if (isRecord(part) && part.type === 'summary_text' && typeof part.text === 'string') text += part.text
+          if (
+            isRecord(part) &&
+            part.type === 'summary_text' &&
+            typeof part.text === 'string'
+          )
+            text += part.text
       }
     }
   }
   return text
 }
-export function historyPath(document: ConversationDocument, head: string | null): StoredTurn[] {
+export function historyPath(
+  document: ConversationDocument,
+  head: string | null,
+): StoredTurn[] {
   const path: StoredTurn[] = [],
     seen = new Set<string>()
   while (head !== null) {
@@ -359,7 +433,9 @@ export function historyPath(document: ConversationDocument, head: string | null)
   return path.reverse()
 }
 export function imageParts(images: readonly StoredImage[]): ImagePart[] {
-  return images.flatMap((i) => (i.data === null ? [] : [{ mime: i.mime, data: i.data }]))
+  return images.flatMap((i) =>
+    i.data === null ? [] : [{ mime: i.mime, data: i.data }],
+  )
 }
 export function imageRefs(
   conversationId: string,

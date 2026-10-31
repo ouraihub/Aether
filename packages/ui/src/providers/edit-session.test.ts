@@ -44,10 +44,17 @@ const stored: Provider = {
   presetId: null,
   endpoints: [endpoint],
 }
-const result: ProbeResult = { probeUrl: endpoint.probeUrl, models: [], error: null, suggestedProtocol: null }
+const result: ProbeResult = {
+  probeUrl: endpoint.probeUrl,
+  models: [],
+  error: null,
+  suggestedProtocol: null,
+}
 
 function setup(
-  overrides: NonNullable<Parameters<typeof createFakePorts>[0]>['providers'] = {},
+  overrides: NonNullable<
+    Parameters<typeof createFakePorts>[0]
+  >['providers'] = {},
   initial = toDraft(stored),
 ) {
   let draft = initial
@@ -57,7 +64,11 @@ function setup(
   })
   const port = required(
     createFakePorts({
-      providers: { save: async () => [stored], probe: async () => result, ...overrides },
+      providers: {
+        save: async () => [stored],
+        probe: async () => result,
+        ...overrides,
+      },
     }).providers,
   )
   const session = createProviderEditSession(port, {
@@ -76,21 +87,35 @@ describe('provider edit session', () => {
   it('coalesces saves, holds every waiter to queue drain and adopts only the immutable sent identities', async () => {
     const first = Promise.withResolvers<Provider[]>()
     const second = Promise.withResolvers<Provider[]>()
-    const save = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
-    const initial: ProviderDraft = { ...toDraft(stored), id: null, endpoints: [newEndpoint([])] }
+    const save = vi
+      .fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+    const initial: ProviderDraft = {
+      ...toDraft(stored),
+      id: null,
+      endpoints: [newEndpoint([])],
+    }
     const flow = setup({ save }, initial)
     const completed = vi.fn()
     const one = flow.session.commit().then(completed)
     initial.name = 'Edited while saving'
     required(initial.endpoints[0]).baseUrl = 'https://new.example'
     const two = flow.session.commit().then(completed)
-    const created = { ...stored, id: 'created', endpoints: [{ ...endpoint, id: 'created-endpoint', slug: 'ep-1' }] }
+    const created = {
+      ...stored,
+      id: 'created',
+      endpoints: [{ ...endpoint, id: 'created-endpoint', slug: 'ep-1' }],
+    }
     first.resolve([stored, created])
     await first.promise
     await Promise.resolve()
     expect(save).toHaveBeenCalledTimes(2)
     expect(completed).not.toHaveBeenCalled()
-    expect(save.mock.calls[0]?.[0]).toMatchObject({ name: 'Original', endpoints: [{ baseUrl: '' }] })
+    expect(save.mock.calls[0]?.[0]).toMatchObject({
+      name: 'Original',
+      endpoints: [{ baseUrl: '' }],
+    })
     expect(save.mock.calls[1]?.[0]).toMatchObject({
       id: 'created',
       name: 'Edited while saving',
@@ -114,8 +139,12 @@ describe('provider edit session', () => {
     flow.session.invalidate()
     flow.session.invalidate()
     await rejected
-    await expect(flow.session.commit()).rejects.toMatchObject({ code: 'cancelled' })
-    await expect(flow.session.probe('main')).rejects.toMatchObject({ code: 'cancelled' })
+    await expect(flow.session.commit()).rejects.toMatchObject({
+      code: 'cancelled',
+    })
+    await expect(flow.session.probe('main')).rejects.toMatchObject({
+      code: 'cancelled',
+    })
     pending.reject(new Error('late failure'))
     await Promise.resolve()
     expect(flow.onSaved).not.toHaveBeenCalled()
@@ -124,7 +153,11 @@ describe('provider edit session', () => {
   it('fails ambiguous or missing identities without adopting another provider and allows explicit retry', async () => {
     const save = vi
       .fn()
-      .mockResolvedValueOnce([stored, { ...stored, id: 'other' }, { ...stored, id: 'third' }])
+      .mockResolvedValueOnce([
+        stored,
+        { ...stored, id: 'other' },
+        { ...stored, id: 'third' },
+      ])
       .mockResolvedValueOnce([stored, { ...stored, id: 'created' }])
     const flow = setup({ save }, { ...toDraft(stored), id: null })
     await expect(flow.session.commit()).rejects.toBeInstanceOf(KitClientError)
@@ -136,7 +169,9 @@ describe('provider edit session', () => {
 
   it('rejects missing endpoint identities without publishing an incomplete save response', async () => {
     const flow = setup({ save: async () => [{ ...stored, endpoints: [] }] })
-    await expect(flow.session.commit()).rejects.toMatchObject({ code: 'internal' })
+    await expect(flow.session.commit()).rejects.toMatchObject({
+      code: 'internal',
+    })
     expect(flow.read().endpoints[0]?.saved?.id).toBe(endpoint.id)
     expect(flow.onSaved).not.toHaveBeenCalled()
   })
@@ -162,12 +197,18 @@ describe('provider edit session', () => {
   it('keeps all queued commits failed and does not probe after a failed save barrier', async () => {
     const pending = Promise.withResolvers<Provider[]>()
     const probe = vi.fn()
-    const save = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue([stored])
+    const save = vi
+      .fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValue([stored])
     const flow = setup({ save, probe })
     const one = flow.session.commit()
     const two = flow.session.probe('main')
     const failure = new Error('save failed')
-    const rejected = Promise.all([expect(one).rejects.toBe(failure), expect(two).rejects.toBe(failure)])
+    const rejected = Promise.all([
+      expect(one).rejects.toBe(failure),
+      expect(two).rejects.toBe(failure),
+    ])
     pending.reject(failure)
     await rejected
     expect(probe).not.toHaveBeenCalled()
@@ -190,15 +231,24 @@ describe('provider edit session', () => {
     await pendingSave.promise
     await Promise.resolve()
     expect(probe).toHaveBeenCalledTimes(1)
-    expect(probe.mock.calls[0]?.[0]).toMatchObject({ endpointId: endpoint.id, keyId: 'first' })
+    expect(probe.mock.calls[0]?.[0]).toMatchObject({
+      endpointId: endpoint.id,
+      keyId: 'first',
+    })
     first.resolve(result)
     expect((await batch).usable).toBe(result)
-    expect(probe.mock.calls.map(([target]) => target.keyId)).toEqual(['first', 'second'])
+    expect(probe.mock.calls.map(([target]) => target.keyId)).toEqual([
+      'first',
+      'second',
+    ])
   })
 
   it('aborts superseded probes and never sends their next key even if the port ignores abort', async () => {
     const late = Promise.withResolvers<ProbeResult>()
-    const probe = vi.fn().mockReturnValueOnce(late.promise).mockResolvedValue(result)
+    const probe = vi
+      .fn()
+      .mockReturnValueOnce(late.promise)
+      .mockResolvedValue(result)
     const flow = setup({ probe })
     const old = flow.session.probe('main')
     const rejected = expect(old).rejects.toMatchObject({ code: 'cancelled' })
@@ -210,7 +260,11 @@ describe('provider edit session', () => {
     late.resolve(result)
     await late.promise
     await Promise.resolve()
-    expect(probe.mock.calls.map(([target]) => target.keyId)).toEqual(['first', 'first', 'second'])
+    expect(probe.mock.calls.map(([target]) => target.keyId)).toEqual([
+      'first',
+      'first',
+      'second',
+    ])
     expect(probe.mock.calls[0]?.[1].signal.aborted).toBe(true)
   })
 
@@ -232,9 +286,16 @@ describe('provider edit session', () => {
   it('uses the default target for zero or one enabled key', async () => {
     for (const keys of [[], endpoint.keys.slice(0, 1)]) {
       const provider = { ...stored, endpoints: [{ ...endpoint, keys }] }
-      const probe = vi.fn<(target: ProbeTarget) => Promise<ProbeResult>>(async () => result)
-      const flow = setup({ probe, save: async () => [provider] }, toDraft(provider))
-      expect((await flow.session.probe('main')).results).toEqual([{ keyId: null, result }])
+      const probe = vi.fn<(target: ProbeTarget) => Promise<ProbeResult>>(
+        async () => result,
+      )
+      const flow = setup(
+        { probe, save: async () => [provider] },
+        toDraft(provider),
+      )
+      expect((await flow.session.probe('main')).results).toEqual([
+        { keyId: null, result },
+      ])
       expect(probe.mock.calls[0]?.[0]).not.toHaveProperty('keyId')
     }
   })
@@ -258,17 +319,34 @@ describe('probe model merge', () => {
       supportsTools: false,
     }
     const metadata = { ...probed, groupName: probed.group }
-    const existing = { ...metadata, groupName: 'User group', name: 'User name', canVision: true, supportsTools: true }
+    const existing = {
+      ...metadata,
+      groupName: 'User group',
+      name: 'User name',
+      canVision: true,
+      supportsTools: true,
+    }
     const outside = { ...existing, id: 'outside' }
-    const merged = mergeModels([existing, outside, outside], [probed, probed, { ...probed, id: 'new' }], {
-      model: true,
-      new: true,
-    })
+    const merged = mergeModels(
+      [existing, outside, outside],
+      [probed, probed, { ...probed, id: 'new' }],
+      {
+        model: true,
+        new: true,
+      },
+    )
     expect(merged.map((model) => model.id)).toEqual(['outside', 'model', 'new'])
     expect(merged[1]).toBe(existing)
-    expect(merged[2]).toMatchObject({ name: 'Probe name', groupName: 'Probe group' })
-    expect(mergeModels([existing, outside], [probed], { model: false })).toEqual([outside])
-    expect(mergeModels([existing], [probed], { model: true }, { model: 'image' })[0]).toMatchObject({
+    expect(merged[2]).toMatchObject({
+      name: 'Probe name',
+      groupName: 'Probe group',
+    })
+    expect(
+      mergeModels([existing, outside], [probed], { model: false }),
+    ).toEqual([outside])
+    expect(
+      mergeModels([existing], [probed], { model: true }, { model: 'image' })[0],
+    ).toMatchObject({
       modelType: 'image',
       typeSource: 'user',
       reasoning: null,

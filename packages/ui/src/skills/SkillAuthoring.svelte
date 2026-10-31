@@ -6,7 +6,13 @@
   import * as Field from '#lib/components/ui/field/index.js'
   import { Textarea } from '#lib/components/ui/textarea/index.js'
   import { getKitContext } from '../context'
-  import { KitClientError, type ModelRef, type PreparedSkill, type RunEvent, type SkillDto } from '../ports'
+  import {
+    KitClientError,
+    type ModelRef,
+    type PreparedSkill,
+    type RunEvent,
+    type SkillDto,
+  } from '../ports'
   import ModelSelect from '../providers/ModelSelect.svelte'
   import ApprovalCard from '../chat/ApprovalCard.svelte'
   import ToolCallItem from '../chat/ToolCallItem.svelte'
@@ -94,9 +100,14 @@
       await cleanup
       if (!alive || epoch !== currentEpoch || !active) return
       const skills = await ports.skills?.list()
-      const builtin = skills?.find((skill) => skill.origin === 'builtin' && skill.name === 'skill-creator')
+      const builtin = skills?.find(
+        (skill) => skill.origin === 'builtin' && skill.name === 'skill-creator',
+      )
       if (!builtin || !ports.skills)
-        throw new KitClientError({ code: 'needs_config', message: 'skill-creator unavailable' })
+        throw new KitClientError({
+          code: 'needs_config',
+          message: 'skill-creator unavailable',
+        })
       const full = await ports.skills.get(builtin.id)
       if (alive && epoch === currentEpoch) creator = full
     } catch (cause) {
@@ -132,7 +143,8 @@
       }
       session = id
     } catch (cause) {
-      if (alive && epoch === currentEpoch && !controller.signal.aborted) error = errorText(t, cause)
+      if (alive && epoch === currentEpoch && !controller.signal.aborted)
+        error = errorText(t, cause)
     } finally {
       if (alive && epoch === currentEpoch) {
         loading = false
@@ -158,10 +170,21 @@
     const currentEpoch = epoch
     const controller = new AbortController()
     operation = controller
-    const current = (): boolean => alive && epoch === currentEpoch && session === id && !controller.signal.aborted
+    const current = (): boolean =>
+      alive &&
+      epoch === currentEpoch &&
+      session === id &&
+      !controller.signal.aborted
     const turnId = ++nextTurn
-    turns.push({ id: turnId, input: input.trim(), text: '', tools: [], status: 'running' })
-    // The pushed literal is wrapped by the $state proxy; mutate the proxied entry.
+    turns.push({
+      id: turnId,
+      input: input.trim(),
+      text: '',
+      tools: [],
+      status: 'running',
+    })
+    // The pushed literal is wrapped by the $state proxy; mutate the proxied
+    // entry.
     const turn = turns.at(-1)
     if (!turn) return
     input = ''
@@ -170,7 +193,8 @@
     let ended = false
     const receive = (event: RunEvent): void => {
       if (!current() || ended) return
-      const tool = (callId: string): ToolItem | undefined => turn.tools.find((item) => item.callId === callId)
+      const tool = (callId: string): ToolItem | undefined =>
+        turn.tools.find((item) => item.callId === callId)
       switch (event.kind) {
         case 'text_delta':
           turn.text += event.text
@@ -202,22 +226,39 @@
         }
         case 'tool_result': {
           const item = tool(event.callId)
-          if (item) Object.assign(item, { pending: null, outcome: event.outcome, summary: event.summary })
+          if (item)
+            Object.assign(item, {
+              pending: null,
+              outcome: event.outcome,
+              summary: event.summary,
+            })
           break
         }
         case 'end':
           ended = true
           finish(turn, event.status)
           if (event.status === 'failed')
-            error = errorText(t, new KitClientError(event.error ?? { code: 'internal', message: '' }))
+            error = errorText(
+              t,
+              new KitClientError(
+                event.error ?? { code: 'internal', message: '' },
+              ),
+            )
           break
       }
     }
     try {
-      const accepted = await authoring.send(id, turn.input, model, receive, { signal: controller.signal })
+      const accepted = await authoring.send(id, turn.input, model, receive, {
+        signal: controller.signal,
+      })
       if (!current()) {
         if (!ended) await authoring.cancel(id, accepted.runId).catch(report)
-        if (alive && epoch === currentEpoch && session === id && controller.signal.aborted) {
+        if (
+          alive &&
+          epoch === currentEpoch &&
+          session === id &&
+          controller.signal.aborted
+        ) {
           finish(turn, 'cancelled')
           loading = false
         }
@@ -233,7 +274,15 @@
     }
   }
   async function approve(tool: ToolItem, allow: boolean): Promise<void> {
-    if (!authoring || !session || !runId || !running || tool.pending === null || answering.includes(tool.callId)) return
+    if (
+      !authoring ||
+      !session ||
+      !runId ||
+      !running ||
+      tool.pending === null ||
+      answering.includes(tool.callId)
+    )
+      return
     const id = session
     const run = runId
     const currentEpoch = epoch
@@ -242,9 +291,11 @@
       await authoring.approve(id, run, tool.callId, allow)
       if (alive && epoch === currentEpoch && runId === run) tool.pending = null
     } catch (cause) {
-      if (alive && epoch === currentEpoch && runId === run) error = errorText(t, cause)
+      if (alive && epoch === currentEpoch && runId === run)
+        error = errorText(t, cause)
     } finally {
-      if (alive && epoch === currentEpoch) answering = answering.filter((callId) => callId !== tool.callId)
+      if (alive && epoch === currentEpoch)
+        answering = answering.filter((callId) => callId !== tool.callId)
     }
   }
   async function stop(): Promise<void> {
@@ -276,8 +327,16 @@
     loading = true
     error = null
     try {
-      const prepared = await authoring.prepare(id, { signal: controller.signal })
-      if (alive && epoch === currentEpoch && session === id && !controller.signal.aborted) await onprepared(prepared)
+      const prepared = await authoring.prepare(id, {
+        signal: controller.signal,
+      })
+      if (
+        alive &&
+        epoch === currentEpoch &&
+        session === id &&
+        !controller.signal.aborted
+      )
+        await onprepared(prepared)
     } catch (cause) {
       if (alive && epoch === currentEpoch) error = errorText(t, cause)
     } finally {
@@ -298,14 +357,19 @@
   <Dialog.Content class="flex max-h-[85vh] flex-col sm:max-w-2xl">
     <Dialog.Header>
       <Dialog.Title>{t('skills.add.agent')}</Dialog.Title>
-      <Dialog.Description>{t('skills.add.authoring_notice')}</Dialog.Description>
+      <Dialog.Description>{t('skills.add.authoring_notice')}</Dialog.Description
+      >
     </Dialog.Header>
     <div class="flex min-h-0 flex-col gap-4 overflow-y-auto">
-      {#if error}<p role="alert" class="text-destructive text-sm">{error}</p>{/if}
+      {#if error}<p role="alert" class="text-destructive text-sm">
+          {error}
+        </p>{/if}
       {#if !session}
         <p class="text-sm">{t('skills.add.creator_review')}</p>
         {#if creator}
-          <Button disabled={loading} onclick={() => (creatorReview = true)}>{t('skills.add.review_creator')}</Button>
+          <Button disabled={loading} onclick={() => (creatorReview = true)}
+            >{t('skills.add.review_creator')}</Button
+          >
         {/if}
       {:else}
         <Field.Group>
@@ -319,46 +383,81 @@
               placeholder={t('skills.add.choose_model')}
             />
           </Field.Field>
-          <ol class="flex flex-col gap-4" aria-label={t('skills.add.conversation')}>
+          <ol
+            class="flex flex-col gap-4"
+            aria-label={t('skills.add.conversation')}
+          >
             {#each turns as turn (turn.id)}
               <li class="flex flex-col gap-2 rounded-md border p-3">
                 <p class="whitespace-pre-wrap text-sm">{turn.input}</p>
                 <p class="whitespace-pre-wrap text-sm">{turn.text}</p>
                 {#each turn.tools as tool (tool.callId)}
                   {#if tool.pending !== null}
-                    <p class="text-destructive text-xs">{t('skills.add.tool_warning')}</p>
-                    <fieldset disabled={!runId || answering.includes(tool.callId)}>
-                      <ApprovalCard {tool} onAnswer={(allow) => void approve(tool, allow)} />
+                    <p class="text-destructive text-xs">
+                      {t('skills.add.tool_warning')}
+                    </p>
+                    <fieldset
+                      disabled={!runId || answering.includes(tool.callId)}
+                    >
+                      <ApprovalCard
+                        {tool}
+                        onAnswer={(allow) => void approve(tool, allow)}
+                      />
                     </fieldset>
                   {:else}<ToolCallItem {tool} />{/if}
                 {/each}
-                {#if turn.status === 'running'}<p role="status" class="text-muted-foreground text-xs">
+                {#if turn.status === 'running'}<p
+                    role="status"
+                    class="text-muted-foreground text-xs"
+                  >
                     {t('skills.add.working')}
                   </p>{/if}
-                {#if turn.status === 'cancelled'}<p role="status" class="text-muted-foreground text-xs">
+                {#if turn.status === 'cancelled'}<p
+                    role="status"
+                    class="text-muted-foreground text-xs"
+                  >
                     {t('chat.stopped')}
                   </p>{/if}
               </li>
             {/each}
           </ol>
           <Field.Field>
-            <Field.Label for="skill-authoring-message">{t('skills.add.authoring_input')}</Field.Label>
-            <Textarea id="skill-authoring-message" bind:value={input} disabled={running || loading} rows={3} />
+            <Field.Label for="skill-authoring-message"
+              >{t('skills.add.authoring_input')}</Field.Label
+            >
+            <Textarea
+              id="skill-authoring-message"
+              bind:value={input}
+              disabled={running || loading}
+              rows={3}
+            />
           </Field.Field>
           <div class="flex flex-wrap gap-2">
-            <Button disabled={running || loading || !input.trim()} onclick={() => void send()}
+            <Button
+              disabled={running || loading || !input.trim()}
+              onclick={() => void send()}
               ><Bot data-icon="inline-start" />{t('chat.send')}</Button
             >
-            {#if running}<Button variant="outline" onclick={() => void stop()}>{t('chat.stop')}</Button>{/if}
-            <Button variant="outline" disabled={running || loading || turns.length === 0} onclick={() => void prepare()}
+            {#if running}<Button variant="outline" onclick={() => void stop()}
+                >{t('chat.stop')}</Button
+              >{/if}
+            <Button
+              variant="outline"
+              disabled={running || loading || turns.length === 0}
+              onclick={() => void prepare()}
               >{t('skills.add.preview_artifact')}</Button
             >
           </div>
         </Field.Group>
       {/if}
-      {#if loading}<p role="status" class="text-muted-foreground text-sm">{t('skills.add.working')}</p>{/if}
+      {#if loading}<p role="status" class="text-muted-foreground text-sm">
+          {t('skills.add.working')}
+        </p>{/if}
     </div>
-    <Dialog.Footer><Button variant="outline" onclick={onclose}>{t('common.cancel')}</Button></Dialog.Footer>
+    <Dialog.Footer
+      ><Button variant="outline" onclick={onclose}>{t('common.cancel')}</Button
+      ></Dialog.Footer
+    >
   </Dialog.Content>
 </Dialog.Root>
 

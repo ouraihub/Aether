@@ -467,7 +467,9 @@ fn inline_risk(args: &[String]) -> Option<Risk> {
         parse(&inline)
             .iter()
             .flatten()
-            .any(|words| matches!(head(words), Head::Program(name, _) if DOWNLOAD.contains(&name.as_str())))
+            .any(|words| {
+                matches!(head(words), Head::Program(name, _) if DOWNLOAD.contains(&name.as_str()))
+            })
             .then_some(Risk {
                 reason: "download_exec",
             })

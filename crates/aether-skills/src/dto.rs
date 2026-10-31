@@ -1,4 +1,5 @@
-//! Skill DTOs and the run snapshot (docs/14 §5, §6). Requests reject unknown fields.
+//! Skill DTOs and the run snapshot (docs/14 §5, §6). Requests reject unknown
+//! fields.
 
 use std::collections::BTreeMap;
 
@@ -91,11 +92,13 @@ pub struct SkillDto {
     pub license: Option<String>,
     /// Uninterpreted frontmatter keys, shown as-is.
     pub extra: BTreeMap<String, String>,
-    /// Packaged files, sorted by path; empty for hand-written and built-in skills.
+    /// Packaged files, sorted by path; empty for hand-written and built-in
+    /// skills.
     pub files: Vec<SkillFileMeta>,
 }
 
-/// Whether confirming a preview installs a new skill or replaces one with the same name.
+/// Whether confirming a preview installs a new skill or replaces one with the
+/// same name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -122,7 +125,7 @@ pub struct PreviewCurrent {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct Preview {
-    /// `sha256` over the name, description, version, body, license and every packaged
+    /// `sha256` over the name, description, version, body, license and every
     /// file (sorted by path).
     pub digest: String,
     /// Frontmatter `name`.

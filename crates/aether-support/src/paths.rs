@@ -19,7 +19,11 @@ pub fn data_root(app_slug: &str) -> Result<PathBuf, KitError> {
     let exe = std::env::current_exe().map_err(KitError::internal)?;
     let portable = exe.parent().map(|dir| dir.join("data"));
     let root = resolve(portable.as_deref(), app_slug, user_data_dir)?;
-    tracing::info!(root = %root.display(), portable = portable.as_deref() == Some(root.as_path()), "aether.data_root");
+    tracing::info!(
+        root = %root.display(),
+        portable = portable.as_deref() == Some(root.as_path()),
+        "aether.data_root"
+    );
     Ok(root)
 }
 

@@ -3,4 +3,4 @@
 /**
  * Wire protocol of a model endpoint.
  */
-export type Protocol = "anthropic-messages" | "openai-chat" | "openai-responses";
+export type Protocol = 'anthropic-messages' | 'openai-chat' | 'openai-responses'

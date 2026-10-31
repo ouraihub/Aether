@@ -3,4 +3,12 @@
 /**
  * Whitelisted context sent to the UI. Anything else stays in the diagnostic log.
  */
-export type Details = { field?: string, reason?: string, status?: number, limit?: number, entity?: string, port?: number, errorId?: string, };
+export type Details = {
+  field?: string
+  reason?: string
+  status?: number
+  limit?: number
+  entity?: string
+  port?: number
+  errorId?: string
+}

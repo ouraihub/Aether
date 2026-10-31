@@ -1,11 +1,16 @@
-//! `mcp_server_*` commands (docs/15 §5): thin wrappers over the host's `McpServer`.
-//! Read commands are in `aether:mcp-server-read`, the rest in `aether:mcp-server-control`.
+//! `mcp_server_*` commands (docs/15 §5): thin wrappers over the host's
+//! `McpServer`.
+//! Read commands are in `aether:mcp-server-read`, the rest in
+//! `aether:mcp-server-control`.
 #![allow(
     clippy::unreachable,
-    reason = "tauri's #[command] expansion for async commands borrowing State uses unreachable!"
+    reason = "tauri's #[command] expansion for async commands borrowing State \
+             uses unreachable!"
 )]
 
-use aether_mcp_server::{IssuedToken, McpServer, ScopeState, Status, TokenRecord};
+use aether_mcp_server::{
+    IssuedToken, McpServer, ScopeState, Status, TokenRecord,
+};
 use aether_support::KitError;
 use tauri::State;
 
@@ -14,7 +19,10 @@ const MAX_NAME: usize = 200;
 const MAX_SCOPES: usize = 100;
 
 /// Records a failed command as `aether.command.failed` (docs/15 §5).
-fn logged<T>(command: &'static str, result: Result<T, KitError>) -> Result<T, KitError> {
+fn logged<T>(
+    command: &'static str,
+    result: Result<T, KitError>,
+) -> Result<T, KitError> {
     if let Err(error) = &result {
         tracing::warn!(command, code = ?error.code(), "aether.command.failed");
     }
@@ -52,12 +60,16 @@ pub(crate) async fn mcp_server_scopes(
 }
 
 #[tauri::command]
-pub(crate) async fn mcp_server_start(server: State<'_, McpServer>) -> Result<Status, KitError> {
+pub(crate) async fn mcp_server_start(
+    server: State<'_, McpServer>,
+) -> Result<Status, KitError> {
     logged("mcp_server_start", server.start().await)
 }
 
 #[tauri::command]
-pub(crate) async fn mcp_server_stop(server: State<'_, McpServer>) -> Result<Status, KitError> {
+pub(crate) async fn mcp_server_stop(
+    server: State<'_, McpServer>,
+) -> Result<Status, KitError> {
     logged("mcp_server_stop", server.stop().await)
 }
 
@@ -78,7 +90,8 @@ pub(crate) async fn mcp_server_issue_token(
     let result = if name.chars().count() > MAX_NAME {
         Err(KitError::bad_request("name", "too_long"))
     } else {
-        check_scopes(&scopes).and_then(|scopes| server.issue_token(&name, &scopes))
+        check_scopes(&scopes)
+            .and_then(|scopes| server.issue_token(&name, &scopes))
     };
     logged("mcp_server_issue_token", result)
 }

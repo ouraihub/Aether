@@ -45,14 +45,24 @@ export async function boundedWait<T>(
     signal.removeEventListener('abort', cancel)
   }
 }
-async function errorBody(response: Response, signal: AbortSignal, abort: () => void): Promise<string> {
+async function errorBody(
+  response: Response,
+  signal: AbortSignal,
+  abort: () => void,
+): Promise<string> {
   if (!response.body) return ''
   const reader = response.body.getReader(),
     chunks: Uint8Array[] = []
   let length = 0
   try {
     while (length < 8192) {
-      const next = await boundedWait(reader.read(), signal, 15000, abort, 'error_body')
+      const next = await boundedWait(
+        reader.read(),
+        signal,
+        15000,
+        abort,
+        'error_body',
+      )
       if (next.done) break
       const chunk = next.value.subarray(0, 8192 - length)
       chunks.push(chunk)
@@ -101,32 +111,48 @@ export async function streamRound(
   const body = JSON.stringify(encoded)
   state.requestChars = charCount(
     JSON.stringify(encoded, (key, value: unknown) =>
-      key === 'images' || key === 'image_url' || key === 'data' || key === 'source' ? undefined : value,
+      key === 'images' ||
+      key === 'image_url' ||
+      key === 'data' ||
+      key === 'source'
+        ? undefined
+        : value,
     ),
   )
-  const keys: readonly (string | null)[] = connection.keys.length ? connection.keys : [null]
+  const keys: readonly (string | null)[] = connection.keys.length
+    ? connection.keys
+    : [null]
   for (let index = 0; index < keys.length; index++) {
     const controller = new AbortController()
     const abort = (): void => controller.abort()
     const cancel = (): void => controller.abort()
     signal.addEventListener('abort', cancel, { once: true })
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
-    const decoder = new Decoder(connection.protocol, connection.endpointId, connection.modelId)
+    const decoder = new Decoder(
+      connection.protocol,
+      connection.endpointId,
+      connection.modelId,
+    )
     try {
       if (signal.aborted) throw cancelled()
       const headers = new Headers(connection.headers)
       headers.set('accept', 'text/event-stream')
       headers.set('content-type', 'application/json')
-      for (const [name, value] of Object.entries(authHeaders(connection.protocol, keys[index] ?? null)))
+      for (const [name, value] of Object.entries(
+        authHeaders(connection.protocol, keys[index] ?? null),
+      ))
         headers.set(name, value)
       const response = await boundedWait(
-        outbound.fetch(`${connection.baseUrl.replace(/\/+$/, '')}/${PROTOCOL_PATH[connection.protocol]}`, {
-          method: 'POST',
-          headers,
-          body,
-          redirect: 'manual',
-          signal: controller.signal,
-        }),
+        outbound.fetch(
+          `${connection.baseUrl.replace(/\/+$/, '')}/${PROTOCOL_PATH[connection.protocol]}`,
+          {
+            method: 'POST',
+            headers,
+            body,
+            redirect: 'manual',
+            signal: controller.signal,
+          },
+        ),
         signal,
         15000,
         abort,
@@ -134,7 +160,11 @@ export async function streamRound(
       )
       if (!response.ok) {
         const raw = await errorBody(response, signal, abort)
-        if ([401, 403, 429].includes(response.status) && index + 1 < keys.length) continue
+        if (
+          [401, 403, 429].includes(response.status) &&
+          index + 1 < keys.length
+        )
+          continue
         const code =
           response.status === 401 || response.status === 403
             ? 'unauthorized'
@@ -149,10 +179,14 @@ export async function streamRound(
         throw new KitFailure(
           code,
           `Upstream ${response.status}: ${excerpt(raw, [...connection.keys, ...Object.values(connection.headers)])}`,
-          { status: response.status, ...(unsupportedTools ? { reason: 'tools_unsupported' } : {}) },
+          {
+            status: response.status,
+            ...(unsupportedTools ? { reason: 'tools_unsupported' } : {}),
+          },
         )
       }
-      if (!response.body) throw new KitFailure('network', 'Empty upstream stream')
+      if (!response.body)
+        throw new KitFailure('network', 'Empty upstream stream')
       reader = response.body.getReader()
       const parser = new SseParser()
       const apply = (data: string): void => {
@@ -161,10 +195,14 @@ export async function streamRound(
         if (event.error !== undefined)
           throw new KitFailure(
             'upstream',
-            excerpt(event.error, [...connection.keys, ...Object.values(connection.headers)]),
+            excerpt(event.error, [
+              ...connection.keys,
+              ...Object.values(connection.headers),
+            ]),
             { reason: 'stream_error' },
           )
-        if (event.reasoning) emit({ kind: 'reasoning_delta', text: event.reasoning })
+        if (event.reasoning)
+          emit({ kind: 'reasoning_delta', text: event.reasoning })
         if (event.text) {
           state.text += event.text
           emit({ kind: 'text_delta', text: event.text })
@@ -184,7 +222,10 @@ export async function streamRound(
         for (const event of parser.feed(next.value)) apply(event.data)
       }
       for (const event of parser.finish()) apply(event.data)
-      if (!decoder.done) throw new KitFailure('network', 'Upstream stream ended early', { reason: 'incomplete_stream' })
+      if (!decoder.done)
+        throw new KitFailure('network', 'Upstream stream ended early', {
+          reason: 'incomplete_stream',
+        })
       const decoded = decoder.toolCalls(),
         calls: ToolCall[] = []
       let truncated = decoder.truncated && decoded.length > 0

@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Mounts the toaster and the single confirm dialog behind DefaultNotify (docs/16 §3).
+  // Mounts the toaster and the single confirm dialog behind DefaultNotify
+  // (docs/16 §3).
   import * as AlertDialog from '#lib/components/ui/alert-dialog/index.js'
   import { Toaster } from '#lib/components/ui/sonner/index.js'
   import type { KitI18n } from './i18n'
@@ -14,7 +15,10 @@
 </script>
 
 <Toaster />
-<AlertDialog.Root open={notify.open} onOpenChange={(isOpen) => !isOpen && notify.answer(false)}>
+<AlertDialog.Root
+  open={notify.open}
+  onOpenChange={(isOpen) => !isOpen && notify.answer(false)}
+>
   <AlertDialog.Content>
     <AlertDialog.Header>
       <AlertDialog.Title>{notify.request?.title}</AlertDialog.Title>

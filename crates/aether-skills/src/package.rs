@@ -1,7 +1,7 @@
-//! Reading a skill package from a `SKILL.md`, a directory or a ZIP (docs/14 §2).
-//! Everything stays in memory; sizes are counted on the bytes actually read, never
-//! taken from ZIP headers (docs/14 §7.3). Packaged files are data: nothing here runs
-//! them or writes them to disk.
+//! Reading a skill package from a `SKILL.md`, a directory or a ZIP (docs/14
+//! §2). Everything stays in memory; sizes are counted on the bytes actually
+//! read, never taken from ZIP headers (docs/14 §7.3). Packaged files are data:
+//! nothing here runs them or writes them to disk.
 
 use std::fs::{self, File};
 use std::io::{self, Cursor, Read};
@@ -37,8 +37,8 @@ const MAX_DEPTH: usize = 4;
 #[ts(export)]
 pub enum Source {
     /// Absolute path to a `SKILL.md`, a directory or a `.zip`.
-    Path(PathBuf),
-    /// Dropped file content; `file_name` ending in `.zip` selects ZIP, anything else is `SKILL.md`.
+    /// Dropped file content; `file_name` ending in `.zip` selects ZIP,
+    /// anything else is `SKILL.md`.
     #[serde(rename_all = "camelCase")]
     Bytes {
         /// Original file name.
@@ -72,7 +72,8 @@ pub(crate) struct PackageFile {
 pub(crate) fn read(source: &Source) -> Result<Package, KitError> {
     match source {
         Source::Path(path) => read_path(path),
-        Source::Bytes { file_name, bytes } if is_zip(Path::new(file_name)) => read_zip(bytes),
+        Source::Bytes { file_name, bytes }
+            if is_zip(Path::new(file_name)) => read_zip(bytes),
         Source::Bytes { bytes, .. } => {
             let mut files = Files::default();
             files.put(
@@ -111,9 +112,9 @@ fn read_path(path: &Path) -> Result<Package, KitError> {
     files.finish()
 }
 
-/// Reads `dir` as the package directory at `prefix` (`""` = root). Only `scripts/`,
-/// `references/` and `assets/` are descended into; links (including Windows junctions)
-/// are refused, not followed.
+/// Reads `dir` as the package directory at `prefix` (`""` = root). Only
+/// `scripts/`, `references/` and `assets/` are descended into; links (including
+/// Windows junctions) are refused, not followed.
 fn walk(dir: &Path, prefix: &str, files: &mut Files) -> Result<(), KitError> {
     for entry in fs::read_dir(dir)? {
         let path = entry?.path();
@@ -192,7 +193,8 @@ fn read_zip(bytes: &[u8]) -> Result<Package, KitError> {
             Some(slot) => {
                 let entry = archive.by_index(*index).map_err(invalid_zip)?;
                 let data =
-                    read_capped(entry, files.cap(slot)).map_err(|e| invalid_zip(e.into()))?;
+                    read_capped(entry, files.cap(slot))
+                        .map_err(|e| invalid_zip(e.into()))?;
                 files.put(name, slot, data)?;
             }
             None => files.unsupported.push(name.to_owned()),
@@ -201,7 +203,8 @@ fn read_zip(bytes: &[u8]) -> Result<Package, KitError> {
     files.finish()
 }
 
-/// Collapses `.` and empty segments so `./SKILL.md` and `SKILL.md` count as duplicates.
+/// Collapses `.` and empty segments so `./SKILL.md` and `SKILL.md` count as
+/// duplicates.
 fn normalize(name: &str) -> Result<String, KitError> {
     if name.contains('\\') {
         return Err(KitError::bad_request("zip", "backslash_path"));
@@ -237,12 +240,14 @@ impl Slot {
     }
 }
 
-/// `None` = not part of the package format (reported as `unsupported_files`). Paths
-/// under the three file directories must have valid names and depth.
+/// `None` = not part of the package format (reported as `unsupported_files`).
+/// Paths under the three file directories must have valid names and depth.
 fn classify(path: &str) -> Result<Option<Slot>, KitError> {
     match path {
         "SKILL.md" => return Ok(Some(Slot::Skill)),
-        "LICENSE" | "LICENSE.md" | "LICENSE.txt" => return Ok(Some(Slot::License)),
+        "LICENSE" | "LICENSE.md" | "LICENSE.txt" => {
+            return Ok(Some(Slot::License));
+        }
         _ => {}
     }
     match file_kind(path) {
@@ -272,13 +277,18 @@ fn check_path(path: &str, levels: usize) -> Result<(), KitError> {
             && !segment.starts_with('.')
             && segment
                 .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+                .all(|b| {
+                    b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')
+                })
     };
     if !path.split('/').all(valid) {
         return Err(KitError::bad_request(path, "invalid_name"));
     }
     if levels > MAX_DEPTH {
-        return Err(KitError::bad_request(path, "too_deep").with_limit(MAX_DEPTH as u64));
+        return Err(
+            KitError::bad_request(path, "too_deep")
+                .with_limit(MAX_DEPTH as u64),
+        );
     }
     Ok(())
 }
@@ -305,13 +315,19 @@ impl Files {
         Ok(())
     }
 
-    /// How many bytes to read for `slot`: one past whichever limit is closer, so
-    /// [`Files::put`] can tell an oversize file from an exhausted package budget.
+    /// How many bytes to read for `slot`: one past whichever limit is closer,
+    /// so [`Files::put`] can tell an oversize file from an exhausted package
+    /// budget.
     fn cap(&self, slot: Slot) -> usize {
         slot.limit().min(MAX_TOTAL.saturating_sub(self.total))
     }
 
-    fn put(&mut self, name: &str, slot: Slot, bytes: Vec<u8>) -> Result<(), KitError> {
+    fn put(
+        &mut self,
+        name: &str,
+        slot: Slot,
+        bytes: Vec<u8>,
+    ) -> Result<(), KitError> {
         let limit = slot.limit();
         if bytes.len() > limit {
             return Err(too_large(name, limit));
@@ -336,8 +352,11 @@ impl Files {
             Slot::File(kind) => kind,
         };
         let content = match kind {
-            SkillFileKind::Script | SkillFileKind::Reference => text(name, bytes)?.into_bytes(),
-            // Assets may be binary; text assets are still checked for credentials.
+            SkillFileKind::Script | SkillFileKind::Reference => {
+                text(name, bytes)?.into_bytes()
+            }
+            // Assets may be binary; text assets are still checked for
+            // credentials.
             SkillFileKind::Asset => match String::from_utf8(bytes) {
                 Ok(text) => {
                     check_secret(name, &text)?;
@@ -377,12 +396,14 @@ impl Files {
 
 /// UTF-8 text without anything that looks like a credential.
 fn text(name: &str, bytes: Vec<u8>) -> Result<String, KitError> {
-    let text = String::from_utf8(bytes).map_err(|_| KitError::bad_request(name, "not_utf8"))?;
+    let text = String::from_utf8(bytes)
+        .map_err(|_| KitError::bad_request(name, "not_utf8"))?;
     check_secret(name, &text)?;
     Ok(text)
 }
 
-/// Reports the line only; the matched text never reaches errors or logs (docs/14 §2.2).
+/// Reports the line only; the matched text never reaches errors or logs
+/// (docs/14 §2.2).
 fn check_secret(name: &str, text: &str) -> Result<(), KitError> {
     match mask::find_secret(text) {
         Some((line, _)) => Err(KitError::bad_request(
@@ -393,7 +414,8 @@ fn check_secret(name: &str, text: &str) -> Result<(), KitError> {
     }
 }
 
-/// Reads at most `limit + 1` bytes so an oversize input is detected without reading it all.
+/// Reads at most `limit + 1` bytes so an oversize input is detected without
+/// reading it all.
 fn read_capped(reader: impl Read, limit: usize) -> io::Result<Vec<u8>> {
     let mut data = Vec::new();
     reader.take(limit as u64 + 1).read_to_end(&mut data)?;
@@ -405,7 +427,8 @@ fn is_zip(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
 }
 
-/// Junctions are reparse points that `is_symlink` may not report (docs/14 §7.4).
+/// Junctions are reparse points that `is_symlink` may not report
+/// (docs/14 §7.4).
 fn is_link(meta: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {

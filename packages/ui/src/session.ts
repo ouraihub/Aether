@@ -1,4 +1,5 @@
-/** A token belongs to exactly one session instance and one target generation. */
+/** A token belongs to exactly one session instance and one target
+ * generation. */
 export interface SessionToken {
   readonly generation: number
 }

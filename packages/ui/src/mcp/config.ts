@@ -4,11 +4,19 @@ interface McpConfigInput {
   token: string
 }
 
-export function buildMcpJsonConfig({ serverName, url, token }: McpConfigInput): string {
+export function buildMcpJsonConfig({
+  serverName,
+  url,
+  token,
+}: McpConfigInput): string {
   return JSON.stringify(
     {
       mcpServers: {
-        [serverName]: { type: 'http', url, headers: { Authorization: `Bearer ${token}` } },
+        [serverName]: {
+          type: 'http',
+          url,
+          headers: { Authorization: `Bearer ${token}` },
+        },
       },
     },
     null,
@@ -21,6 +29,13 @@ function posixQuote(value: string): string {
 }
 
 /** POSIX shell only: every dynamic value is exactly one quoted argument. */
-export function buildClaudePosixCommand({ serverName, url, token }: McpConfigInput): string {
-  return `claude mcp add --transport http ${posixQuote(serverName)} ${posixQuote(url)} --header ${posixQuote(`Authorization: Bearer ${token}`)}`
+export function buildClaudePosixCommand({
+  serverName,
+  url,
+  token,
+}: McpConfigInput): string {
+  const header = posixQuote(`Authorization: Bearer ${token}`)
+  return `claude mcp add --transport http ${posixQuote(serverName)} ${posixQuote(
+    url,
+  )} --header ${header}`
 }

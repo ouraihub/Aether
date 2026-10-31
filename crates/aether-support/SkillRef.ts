@@ -3,12 +3,13 @@
 /**
  * A skill selected for one run, pinned to the revision the user confirmed.
  */
-export type SkillRef = { 
-/**
- * Skill id.
- */
-id: string, 
-/**
- * Revision the user saw; a mismatch is `conflict{reason:"skill_changed"}`.
- */
-revision: number, };
+export type SkillRef = {
+  /**
+   * Skill id.
+   */
+  id: string
+  /**
+   * Revision the user saw; a mismatch is `conflict{reason:"skill_changed"}`.
+   */
+  revision: number
+}

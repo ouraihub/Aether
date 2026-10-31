@@ -1,0 +1,207 @@
+.message-turn,
+.user-message,
+.assistant-message,
+.markdown {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.user-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.generated-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.generated-images a {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--kit-radius, var(--radius));
+}
+.generated-images a:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+.generated-images img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.user-images a,
+.image-expired {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 5rem;
+  height: 5rem;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--kit-radius, var(--radius));
+}
+.user-images a:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+.user-images img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.image-expired {
+  padding: 0.25rem;
+  color: var(--color-muted-foreground);
+  font-size: var(--kit-font-size-sm, 0.8125rem);
+  text-align: center;
+}
+.user-message {
+  align-self: flex-end;
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--kit-radius);
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+  font-size: var(--kit-text-base);
+  white-space: pre-wrap;
+}
+.assistant-message {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: var(--kit-radius);
+  background: var(--color-muted);
+  color: var(--color-foreground);
+}
+.assistant-message.chosen {
+  outline: 1px solid var(--color-primary);
+}
+.reply-source {
+  font-size: var(--kit-text-sm);
+  color: var(--color-muted-foreground);
+  overflow-wrap: anywhere;
+}
+.thinking {
+  min-width: 0;
+}
+.message-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.5rem;
+}
+.markdown {
+  font-size: var(--kit-text-base);
+  line-height: 1.6;
+}
+.markdown :global(p),
+.markdown :global(ul),
+.markdown :global(ol),
+.markdown :global(blockquote),
+.markdown :global(pre),
+.markdown :global(table) {
+  margin: 0.75em 0;
+}
+.markdown :global(h1),
+.markdown :global(h2),
+.markdown :global(h3),
+.markdown :global(h4),
+.markdown :global(h5),
+.markdown :global(h6) {
+  margin: 1em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.markdown :global(h1) {
+  font-size: 1.4em;
+}
+.markdown :global(h2) {
+  font-size: 1.25em;
+}
+.markdown :global(h3) {
+  font-size: 1.1em;
+}
+.markdown :global(ul),
+.markdown :global(ol) {
+  padding-inline-start: 1.5em;
+}
+.markdown :global(ul) {
+  list-style: disc;
+}
+.markdown :global(ol) {
+  list-style: decimal;
+}
+.markdown :global(li) {
+  margin: 0.25em 0;
+}
+.markdown :global(li::marker) {
+  color: var(--color-muted-foreground);
+}
+.markdown :global(blockquote) {
+  border-inline-start: 3px solid var(--color-border);
+  padding-inline-start: 0.75em;
+  color: var(--color-muted-foreground);
+}
+.markdown :global(a) {
+  color: var(--color-primary);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+.markdown :global(code) {
+  border-radius: var(--kit-radius-sm);
+  background: var(--color-background);
+  padding: 0.1em 0.3em;
+  font-size: 0.95em;
+}
+.markdown :global(pre) {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 0.75em;
+  border: 1px solid var(--color-border);
+  border-radius: var(--kit-radius-sm);
+  background: var(--color-background);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.markdown :global(pre code) {
+  padding: 0;
+  background: none;
+}
+.markdown :global(table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.markdown :global(th),
+.markdown :global(td) {
+  padding: 0.4em 0.6em;
+  border: 1px solid var(--color-border);
+}
+.markdown :global(th) {
+  font-weight: 600;
+}
+.markdown :global(img),
+.markdown :global(video) {
+  max-width: 100%;
+  height: auto;
+}
+.markdown :global(:first-child) {
+  margin-top: 0;
+}
+.markdown :global(:last-child) {
+  margin-bottom: 0;
+}

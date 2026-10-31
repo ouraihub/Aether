@@ -1,4 +1,9 @@
-import type { McpTransport, ServerDto, ServerSave, ServerSecret } from '../ports'
+import type {
+  McpTransport,
+  ServerDto,
+  ServerSave,
+  ServerSecret,
+} from '../ports'
 
 /** Write-only editor input; credentials never come from a ServerDto. */
 export interface McpInput {
@@ -15,9 +20,11 @@ export interface McpInput {
   env: string
 }
 
-export type McpInputResult = { ok: true; value: ServerSave } | { ok: false; error: 'secretLine' | 'transportChanged' }
+export type McpInputResult =
+  | { ok: true; value: ServerSave }
+  | { ok: false; error: 'secretLine' | 'transportChanged' }
 
-/** Split only at the first separator; values may themselves contain separators. */
+/** Split only at the first separator; values may contain separators. */
 function pairs(text: string, separator: string): Record<string, string> | null {
   const entries: [string, string][] = []
   for (const raw of text.split('\n')) {
@@ -31,8 +38,15 @@ function pairs(text: string, separator: string): Record<string, string> | null {
   return Object.fromEntries(entries)
 }
 
-export function mapMcpInput(current: ServerDto | null, input: McpInput): McpInputResult {
-  if (current && current.transport.kind !== input.kind && !input.replaceSecret) {
+export function mapMcpInput(
+  current: ServerDto | null,
+  input: McpInput,
+): McpInputResult {
+  if (
+    current &&
+    current.transport.kind !== input.kind &&
+    !input.replaceSecret
+  ) {
     return { ok: false, error: 'transportChanged' }
   }
   const transport: McpTransport =
@@ -51,7 +65,8 @@ export function mapMcpInput(current: ServerDto | null, input: McpInput): McpInpu
     transport,
     enabled: current?.enabled ?? false,
     trusted: current?.trusted ?? false,
-    allowPrivate: transport.kind === 'http' ? (current?.allowPrivate ?? false) : false,
+    allowPrivate:
+      transport.kind === 'http' ? (current?.allowPrivate ?? false) : false,
   }
   if (input.replaceSecret) {
     const secret: ServerSecret = {}

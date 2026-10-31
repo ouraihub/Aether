@@ -58,18 +58,34 @@ export function createLogger(options: {
 }): Logger {
   const routes = new Set(options.routes)
   for (const route of routes)
-    if (!/^\/[A-Za-z0-9_/:.{}-]*$/u.test(route) || route.length > 256) throw new Error('Invalid log route template')
+    if (!/^\/[A-Za-z0-9_/:.{}-]*$/u.test(route) || route.length > 256)
+      throw new Error('Invalid log route template')
   return Object.freeze({
     log(event: LogEvent, fields: Readonly<Record<string, unknown>>): void {
       if (!Object.hasOwn(EVENTS, event)) throw new Error('Invalid log event')
       const safe: Record<string, LogValue> = {}
       for (const [key, value] of Object.entries(fields)) {
-        if (Object.hasOwn(IDENTIFIERS, key) && typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/u.test(value))
+        if (
+          Object.hasOwn(IDENTIFIERS, key) &&
+          typeof value === 'string' &&
+          /^[A-Za-z0-9_.:-]{1,128}$/u.test(value)
+        )
           safe[key] = value
-        else if (Object.hasOwn(COUNTERS, key) && typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
+        else if (
+          Object.hasOwn(COUNTERS, key) &&
+          typeof value === 'number' &&
+          Number.isSafeInteger(value) &&
+          value >= 0
+        )
           safe[key] = value
-        else if (key === 'usageAvailable' && typeof value === 'boolean') safe[key] = value
-        else if (key === 'route' && typeof value === 'string' && routes.has(value)) safe[key] = value
+        else if (key === 'usageAvailable' && typeof value === 'boolean')
+          safe[key] = value
+        else if (
+          key === 'route' &&
+          typeof value === 'string' &&
+          routes.has(value)
+        )
+          safe[key] = value
         else if (
           key === 'state' &&
           (value === 'accepted' ||

@@ -1,12 +1,17 @@
 <script lang="ts">
-  // Input with a hover/focus copy button at the inline end; shown only when non-empty.
+  // Input with a hover/focus copy button at the inline end; shown only when
+  // non-empty.
   import CopyIcon from '@lucide/svelte/icons/copy'
   import type { ComponentProps } from 'svelte'
   import { Input } from '#lib/components/ui/input/index.js'
   import { cn } from '#lib/utils.js'
   import { getKitContext } from './context'
 
-  let { value = $bindable(), class: className, ...rest }: ComponentProps<typeof Input> = $props()
+  let {
+    value = $bindable(),
+    class: className,
+    ...rest
+  }: ComponentProps<typeof Input> = $props()
   const { i18n, notify } = getKitContext()
   const { t } = i18n
   const text = $derived(String(value ?? '').trim())
@@ -25,7 +30,12 @@
   <Input bind:value class={cn('w-full', text && 'pr-8')} {...rest} />
   {#if text}<button
       type="button"
-      class="text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/50 rounded-kit absolute top-1/2 right-1.5 inline-flex size-6 -translate-y-1/2 items-center justify-center opacity-0 transition-opacity outline-none group-focus-within/copy:opacity-100 group-hover/copy:opacity-100 focus-visible:opacity-100 focus-visible:ring-2"
+      class="text-muted-foreground hover:text-foreground hover:bg-accent
+        focus-visible:ring-ring/50 rounded-kit absolute top-1/2 right-1.5
+        inline-flex size-6 -translate-y-1/2 items-center justify-center
+        opacity-0 transition-opacity outline-none
+        group-focus-within/copy:opacity-100 group-hover/copy:opacity-100
+        focus-visible:opacity-100 focus-visible:ring-2"
       aria-label={t('chat.copy')}
       title={t('chat.copy')}
       onclick={() => void copy()}><CopyIcon class="size-3.5" /></button

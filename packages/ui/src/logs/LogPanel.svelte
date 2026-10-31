@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Log viewer (docs/16 §4.5): tail(300) every 2 s while the page is visible; problems-only filter; open folder.
+  // Log viewer (docs/16 §4.5): tail(300) every 2 s while visible;
+  // problems-only filter; open folder.
   import { Alert, AlertDescription } from '#lib/components/ui/alert/index.js'
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Empty from '#lib/components/ui/empty/index.js'
@@ -18,7 +19,11 @@
   let entries = $state<LogEntry[]>([])
   let failed = $state(false)
   let problemsOnly = $state(false)
-  const shown = $derived(problemsOnly ? entries.filter((e) => e.level === 'ERROR' || e.level === 'WARN') : entries)
+  const shown = $derived(
+    problemsOnly
+      ? entries.filter((e) => e.level === 'ERROR' || e.level === 'WARN')
+      : entries,
+  )
 
   async function refresh() {
     if (!logs) return
@@ -58,7 +63,10 @@
 </script>
 
 {#if logs}
-  <section class="flex min-h-0 flex-1 flex-col gap-3" aria-label={t('logs.title')}>
+  <section
+    class="flex min-h-0 flex-1 flex-col gap-3"
+    aria-label={t('logs.title')}
+  >
     <header class="flex items-center gap-3">
       <h2 class="text-base font-medium">{t('logs.title')}</h2>
       <label class="ml-auto flex items-center gap-2 text-sm">
@@ -66,24 +74,33 @@
         {t('logs.problemsOnly')}
       </label>
       {#if ports.desktop}
-        <Button variant="outline" size="sm" onclick={() => void openDir()}>{t('logs.openDir')}</Button>
+        <Button variant="outline" size="sm" onclick={() => void openDir()}
+          >{t('logs.openDir')}</Button
+        >
       {/if}
     </header>
     {#if failed}
-      <Alert variant="destructive"><AlertDescription>{t('logs.loadFailed')}</AlertDescription></Alert>
+      <Alert variant="destructive"
+        ><AlertDescription>{t('logs.loadFailed')}</AlertDescription></Alert
+      >
     {/if}
     {#if shown.length === 0}
       <Empty.Root>
-        <Empty.Header><Empty.Title>{t('logs.empty')}</Empty.Title></Empty.Header>
+        <Empty.Header><Empty.Title>{t('logs.empty')}</Empty.Title></Empty.Header
+        >
       </Empty.Root>
     {:else}
-      <ol class="bg-muted min-h-0 flex-1 overflow-auto rounded-md p-2 font-mono text-xs">
+      <ol
+        class="bg-muted min-h-0 flex-1 overflow-auto rounded-md p-2 font-mono
+          text-xs"
+      >
         {#each shown as entry (entry.seq)}
           <li
             class={cn(
               'break-all whitespace-pre-wrap',
               entry.level === 'ERROR' && 'text-destructive',
-              (entry.level === 'DEBUG' || entry.level === 'TRACE') && 'text-muted-foreground',
+              (entry.level === 'DEBUG' || entry.level === 'TRACE') &&
+                'text-muted-foreground',
             )}
           >
             {entry.time}

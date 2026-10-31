@@ -1,5 +1,5 @@
-//! One case per `fixtures/skills/` entry (docs/90 SK3-1). ZIPs, links and oversize
-//! files are built in temp dirs instead of committed as binaries.
+//! One case per `fixtures/skills/` entry (docs/90 SK3-1). ZIPs, links and
+//! oversize files are built in temp dirs instead of committed as binaries.
 #![expect(clippy::unwrap_used, clippy::panic, reason = "test assertions")]
 
 use std::io::Write;
@@ -10,7 +10,8 @@ use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
 use super::{
-    MAX_DEPTH, MAX_ENTRIES, MAX_FILE, MAX_SKILL, MAX_TOTAL, MAX_ZIP, Package, Source, read,
+    MAX_DEPTH, MAX_ENTRIES, MAX_FILE, MAX_SKILL, MAX_TOTAL, MAX_ZIP, Package,
+    Source, read,
 };
 use crate::dto::SkillFileKind;
 
@@ -130,7 +131,10 @@ fn crlf_and_bom_are_normalized() {
 
 #[test]
 fn zip_under_single_top_level_directory_is_accepted() {
-    let bytes = zip_bytes(&[("pkg/SKILL.md", SKILL), ("pkg/LICENSE.txt", b"MIT")]);
+    let bytes = zip_bytes(&[
+        ("pkg/SKILL.md", SKILL),
+        ("pkg/LICENSE.txt", b"MIT"),
+    ]);
     let package = ok(&zip_source(bytes));
     assert_eq!(package.skill.name, "zipped");
     assert_eq!(package.license.as_deref(), Some("MIT"));
@@ -138,7 +142,8 @@ fn zip_under_single_top_level_directory_is_accepted() {
 
 #[test]
 fn zip_bomb_stops_at_the_bytes_actually_inflated() {
-    // 10 MiB of one repeated byte deflates to ~10 KiB: small archive, oversize content.
+    // 10 MiB of one repeated byte deflates to ~10 KiB: small archive, oversize
+    // content.
     let mut bomb = SKILL.to_vec();
     bomb.resize(10 * 1024 * 1024, b'a');
     let bytes = zip_bytes(&[("SKILL.md", &bomb)]);
@@ -180,7 +185,11 @@ fn zip_rejects_symlink_entries() {
 
 #[test]
 fn zip_with_script_lists_unsupported_files() {
-    let bytes = zip_bytes(&[("SKILL.md", SKILL), ("run.sh", b"echo"), ("a.py", b"")]);
+    let bytes = zip_bytes(&[
+        ("SKILL.md", SKILL),
+        ("run.sh", b"echo"),
+        ("a.py", b""),
+    ]);
     assert_bad(
         &err(&zip_source(bytes)),
         "a.py, run.sh",
@@ -190,8 +199,13 @@ fn zip_with_script_lists_unsupported_files() {
 
 #[test]
 fn zip_entry_count_and_archive_size_are_capped() {
-    let names: Vec<String> = (0..=MAX_ENTRIES).map(|i| format!("f{i}")).collect();
-    let entries: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b""[..])).collect();
+    let names: Vec<String> = (0..=MAX_ENTRIES)
+        .map(|i| format!("f{i}"))
+        .collect();
+    let entries: Vec<(&str, &[u8])> = names
+        .iter()
+        .map(|n| (n.as_str(), &b""[..]))
+        .collect();
     assert_bad(
         &err(&zip_source(zip_bytes(&entries))),
         "entries",
@@ -222,8 +236,9 @@ fn oversize_body_is_rejected() {
 #[test]
 fn directory_junction_is_rejected_not_followed() {
     let dir = tempfile::tempdir().unwrap();
-    // A valid package behind the junction: following it would succeed, so only the
-    // link check can make this fail. Temp paths use `\`, which `mklink` requires.
+    // A valid package behind the junction: following it would succeed, so only
+    // the link check can make this fail. Temp paths use `\`, which `mklink`
+    // requires.
     let target = tempfile::tempdir().unwrap();
     std::fs::write(target.path().join("SKILL.md"), SKILL).unwrap();
     let target = target.path();
@@ -250,11 +265,17 @@ fn directory_junction_is_rejected_not_followed() {
 fn file_symlink_inside_directory_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     #[cfg(windows)]
-    let made =
-        std::os::windows::fs::symlink_file(fixture("valid/SKILL.md"), dir.path().join("SKILL.md"));
+    let made = std::os::windows::fs::symlink_file(
+        fixture("valid/SKILL.md"),
+        dir.path().join("SKILL.md"),
+    );
     #[cfg(unix)]
-    let made = std::os::unix::fs::symlink(fixture("valid/SKILL.md"), dir.path().join("SKILL.md"));
-    // Windows symlinks need Developer Mode or admin; junction coverage is above.
+    let made = std::os::unix::fs::symlink(
+        fixture("valid/SKILL.md"),
+        dir.path().join("SKILL.md"),
+    );
+    // Windows symlinks need Developer Mode or admin; junction coverage is
+    // above.
     if made.is_err() {
         return;
     }

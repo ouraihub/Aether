@@ -309,14 +309,16 @@ mod tests {
         let receipt = tracing::subscriber::with_default(subscriber, || {
             handle.ingest(&batch(
                 r#"{"droppedCount":0,"entries":[
-                {"level":"warn","event":"ui.dialog.opened","fields":{"count":3,"ok":true,"name":"settings"}},
+                {"level":"warn","event":"ui.dialog.opened","fields":
+                    {"count":3,"ok":true,"name":"settings"}},
                 {"level":"info","event":"ui.click"},
                 {"level":"info","event":"Ui.click"},
                 {"level":"info","event":"single"},
                 {"level":"info","event":"a.b.c.d.e.f.g"},
                 {"level":"info","event":"ui.x","fields":{"Bad-Key":1}},
                 {"level":"info","event":"ui.x","fields":{"obj":{"a":1}}},
-                {"level":"info","event":"ui.x","fields":{"text":"user typed sk-abcdefghijklmnopqrstuvwxyz"}},
+                {"level":"info","event":"ui.x","fields":
+                    {"text":"user typed sk-abcdefghijklmnopqrstuvwxyz"}},
                 {"level":"info","event":"ui.x","fields":{"long":"LONG"}}
                 ]}"#
                     .replace("LONG", &"x".repeat(201))

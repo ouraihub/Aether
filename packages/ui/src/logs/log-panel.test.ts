@@ -7,11 +7,22 @@ import Harness from './Harness.test.svelte'
 
 afterEach(cleanup)
 
-it('reads logs without desktop capability and hides the directory action', async () => {
+it(
+  'reads logs without desktop capability and hides the directory action',
+  async () => {
   const ports = createFakePorts({
     omit: ['desktop'],
     logs: {
-      tail: () => Promise.resolve([{ seq: 1, time: 'now', level: 'INFO', target: 'ui', message: 'Readable log' }]),
+      tail: () =>
+        Promise.resolve([
+          {
+            seq: 1,
+            time: 'now',
+            level: 'INFO',
+            target: 'ui',
+            message: 'Readable log',
+          },
+        ]),
     },
   })
   const kit: KitContext = {
@@ -25,7 +36,9 @@ it('reads logs without desktop capability and hides the directory action', async
   expect(screen.queryByRole('button', { name: 'Open folder' })).toBeNull()
 })
 
-it('opens the log directory only through the optional desktop capability', async () => {
+it(
+  'opens the log directory only through the optional desktop capability',
+  async () => {
   const openLogsDirectory = vi.fn(() => Promise.resolve())
   const kit: KitContext = {
     ports: createFakePorts({ desktop: { openLogsDirectory } }),

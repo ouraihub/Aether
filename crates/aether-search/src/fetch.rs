@@ -20,10 +20,16 @@ pub(crate) fn validate_url<'a>(
 
 /// Reads one page with the supplied key order, without configuration storage.
 /// # Errors
-/// Rejects invalid input/configuration, unsafe sources and network/upstream failures.
-pub async fn fetch(config: ResolvedConfig, url: &str) -> Result<SearchPage, KitError> {
+/// Rejects invalid input/configuration, unsafe sources and network/upstream
+/// failures.
+pub async fn fetch(
+    config: ResolvedConfig,
+    url: &str,
+) -> Result<SearchPage, KitError> {
     let url = validate_url(url, &config.address_policy)?;
-    let Output::Page(mut page) = execution::execute(&config, SearchCap::Fetch, url).await? else {
+    let Output::Page(mut page) =
+        execution::execute(&config, SearchCap::Fetch, url).await?
+    else {
         return Err(KitError::internal(std::io::Error::other(
             "unexpected fetch output",
         )));

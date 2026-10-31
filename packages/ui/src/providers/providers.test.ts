@@ -1,4 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/svelte'
 import { describe, expect, it, vi } from 'vitest'
 import { createI18n } from '../i18n'
 import {
@@ -51,7 +58,14 @@ const endpoint: Endpoint = {
   headers: { 'X-Team': 'a' },
   models: [],
 }
-const stored: Provider = { id: 'p1', name: 'Local', enabled: true, notes: '', presetId: null, endpoints: [endpoint] }
+const stored: Provider = {
+  id: 'p1',
+  name: 'Local',
+  enabled: true,
+  notes: '',
+  presetId: null,
+  endpoints: [endpoint],
+}
 const twoKeys: Endpoint = {
   ...endpoint,
   keys: [
@@ -79,7 +93,9 @@ const model = {
 } as const
 
 function setup(
-  overrides: NonNullable<Parameters<typeof createFakePorts>[0]>['providers'] = {},
+  overrides: NonNullable<
+    Parameters<typeof createFakePorts>[0]
+  >['providers'] = {},
   list = stored,
   presets?: ProviderPreset[],
 ) {
@@ -97,7 +113,14 @@ function setup(
           error: null,
           suggestedProtocol: null,
           models: [
-            { ...model, id: 'gpt-4o', group: 'gpt', modelType: 'chat', typeSource: 'inferred', reasoning: null },
+            {
+              ...model,
+              id: 'gpt-4o',
+              group: 'gpt',
+              modelType: 'chat',
+              typeSource: 'inferred',
+              reasoning: null,
+            },
             {
               ...model,
               id: 'text-embedding-3',
@@ -112,8 +135,16 @@ function setup(
     },
   })
   const notify = { toast: vi.fn(), confirm: () => Promise.resolve(true) }
-  const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
-  render(Harness, { kit: { ports, i18n: createI18n('en'), notify, logger }, ...(presets ? { presets } : {}) })
+  const logger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }
+  render(Harness, {
+    kit: { ports, i18n: createI18n('en'), notify, logger },
+    ...(presets ? { presets } : {}),
+  })
   return { saves, notify }
 }
 
@@ -121,9 +152,14 @@ describe('provider credential sessions', () => {
   it('ignores a row reveal after target unmount without copying or showing an old error', async () => {
     const pending = Promise.withResolvers<string>()
     const writeText = vi.fn(async () => {})
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
     const { notify } = setup({ revealKey: () => pending.promise })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Copy key' }))
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Copy key' }),
+    )
     cleanup()
     pending.reject(new Error('old secret failure'))
     await pending.promise.catch(() => {})
@@ -135,15 +171,26 @@ describe('provider credential sessions', () => {
   it('does not copy or refill a closed and reopened key dialog from its old reveal', async () => {
     const pending = Promise.withResolvers<string>()
     const writeText = vi.fn(async () => {})
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
     const { notify } = setup({ revealKey: () => pending.promise })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Manage API keys' }))
-    let dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Manage API keys' }),
+    )
+    let dialog = within(
+      await screen.findByRole('dialog', { name: 'Manage API keys' }),
+    )
     await fireEvent.click(dialog.getByRole('button', { name: 'Copy key' }))
     await fireEvent.click(dialog.getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    await fireEvent.click(screen.getByRole('button', { name: 'Manage API keys' }))
-    dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Manage API keys' }),
+    )
+    dialog = within(
+      await screen.findByRole('dialog', { name: 'Manage API keys' }),
+    )
     pending.resolve('late-plaintext')
     await pending.promise
     await Promise.resolve()
@@ -156,8 +203,12 @@ describe('provider credential sessions', () => {
     const pending = Promise.withResolvers<string>()
     const revealKey = vi.fn(() => pending.promise)
     setup({ revealNeedsPassword: true, revealKey })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Show key' }))
-    const password = screen.getByLabelText('Current password') as HTMLInputElement
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Show key' }),
+    )
+    const password = screen.getByLabelText(
+      'Current password',
+    ) as HTMLInputElement
     await fireEvent.input(password, { target: { value: 'first-password' } })
     await fireEvent.keyDown(password, { key: 'Enter' })
     await fireEvent.input(password, { target: { value: 'new-password' } })
@@ -168,19 +219,33 @@ describe('provider credential sessions', () => {
   })
 
   it('clears a successful reveal password before a later copy asks again', async () => {
-    setup({ revealNeedsPassword: true, revealKey: async () => 'temporary-plaintext' })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Manage API keys' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    setup({
+      revealNeedsPassword: true,
+      revealKey: async () => 'temporary-plaintext',
+    })
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Manage API keys' }),
+    )
+    const dialog = within(
+      await screen.findByRole('dialog', { name: 'Manage API keys' }),
+    )
     await fireEvent.click(dialog.getByRole('button', { name: 'Edit key' }))
-    const password = dialog.getByLabelText('Current password') as HTMLInputElement
+    const password = dialog.getByLabelText(
+      'Current password',
+    ) as HTMLInputElement
     await fireEvent.input(password, { target: { value: 'one-use-password' } })
     await fireEvent.keyDown(password, { key: 'Enter' })
     await waitFor(() =>
-      expect((dialog.getByRole('textbox', { name: 'API key' }) as HTMLInputElement).value).toBe('temporary-plaintext'),
+      expect(
+        (dialog.getByRole('textbox', { name: 'API key' }) as HTMLInputElement)
+          .value,
+      ).toBe('temporary-plaintext'),
     )
     await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
     await fireEvent.click(dialog.getByRole('button', { name: 'Copy key' }))
-    expect((dialog.getByLabelText('Current password') as HTMLInputElement).value).toBe('')
+    expect(
+      (dialog.getByLabelText('Current password') as HTMLInputElement).value,
+    ).toBe('')
   })
 })
 
@@ -195,10 +260,19 @@ describe('provider presets (docs/39)', () => {
       endpoints: [{ ...endpoint, id: 'e2', keys: [] }],
     }
     const save = vi.fn((input: ProviderSave) =>
-      Promise.resolve(input.presetId === 'fenno' ? [{ ...stored, presetId: 'qiniu' }, seeded] : [stored]),
+      Promise.resolve(
+        input.presetId === 'fenno'
+          ? [{ ...stored, presetId: 'qiniu' }, seeded]
+          : [stored],
+      ),
     )
     setup({ save }, { ...stored, presetId: 'qiniu' }, [
-      { id: 'qiniu', name: 'Qiniu', baseUrl: 'https://api.qnaigc.com', protocol: 'openai-chat' },
+      {
+        id: 'qiniu',
+        name: 'Qiniu',
+        baseUrl: 'https://api.qnaigc.com',
+        protocol: 'openai-chat',
+      },
       {
         id: 'fenno',
         name: 'Fenno',
@@ -212,35 +286,62 @@ describe('provider presets (docs/39)', () => {
       name: 'Fenno',
       presetId: 'fenno',
       enabled: false,
-      endpoints: [{ slug: 'ep-1', baseUrl: 'https://api.fenno.ai/v1', protocol: 'openai-chat', models: [] }],
+      endpoints: [
+        {
+          slug: 'ep-1',
+          baseUrl: 'https://api.fenno.ai/v1',
+          protocol: 'openai-chat',
+          models: [],
+        },
+      ],
     })
     expect(screen.queryByRole('link', { name: 'Get a key' })).toBeNull()
     await fireEvent.click(await screen.findByText('Fenno'))
-    expect((await screen.findByRole('link', { name: 'Get a key' })).getAttribute('href')).toBe(
-      'https://api.fenno.ai/s/vWbM',
+    expect(
+      (await screen.findByRole('link', { name: 'Get a key' })).getAttribute(
+        'href',
+      ),
+    ).toBe('https://api.fenno.ai/s/vWbM')
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'More actions for Fenno' }),
     )
-    await fireEvent.click(screen.getByRole('button', { name: 'More actions for Fenno' }))
-    expect(await screen.findByRole('menuitem', { name: 'Model notes' })).toBeTruthy()
+    expect(
+      await screen.findByRole('menuitem', { name: 'Model notes' }),
+    ).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'Delete' })).toBeNull()
   })
 })
 
 describe('opening settings from chat (docs/28 RT2)', () => {
   it('selects the owning provider and endpoint and opens that model once', async () => {
-    const target: Model = { ...model, id: 'claude-x', modelType: 'chat', typeSource: 'inferred', reasoning: null }
+    const target: Model = {
+      ...model,
+      id: 'claude-x',
+      modelType: 'chat',
+      typeSource: 'inferred',
+      reasoning: null,
+    }
     const other: Provider = {
       ...stored,
       id: 'p2',
       name: 'Relay',
       endpoints: [
         { ...endpoint, id: 'e2', slug: 'first' },
-        { ...endpoint, id: 'e3', slug: 'second', protocol: 'anthropic-messages', models: [target] },
+        {
+          ...endpoint,
+          id: 'e3',
+          slug: 'second',
+          protocol: 'anthropic-messages',
+          models: [target],
+        },
       ],
     }
     settingsTarget.value = { endpointId: 'e3', modelId: 'claude-x' }
     setup({ list: () => Promise.resolve([stored, other]) })
     const dialog = await screen.findByRole('dialog', { name: 'Edit model' })
-    expect((within(dialog).getByLabelText('Model ID') as HTMLInputElement).value).toBe('claude-x')
+    expect(
+      (within(dialog).getByLabelText('Model ID') as HTMLInputElement).value,
+    ).toBe('claude-x')
     expect(settingsTarget.value).toBeNull()
   })
 
@@ -254,23 +355,38 @@ describe('opening settings from chat (docs/28 RT2)', () => {
 })
 
 async function openPicker() {
-  await fireEvent.click(await screen.findByRole('button', { name: 'Sync models' }))
+  await fireEvent.click(
+    await screen.findByRole('button', { name: 'Sync models' }),
+  )
   return within(await screen.findByRole('dialog', { name: 'Pick models' }))
 }
 
 describe('ProvidersSettings', () => {
   it('does not apply a previous provider save or error after selecting a different provider', async () => {
     const pending = Promise.withResolvers<Provider[]>()
-    const other: Provider = { ...stored, id: 'p2', name: 'Other', endpoints: [{ ...endpoint, id: 'e2' }] }
-    const { notify } = setup({ list: async () => [stored, other], save: () => pending.promise })
+    const other: Provider = {
+      ...stored,
+      id: 'p2',
+      name: 'Other',
+      endpoints: [{ ...endpoint, id: 'e2' }],
+    }
+    const { notify } = setup({
+      list: async () => [stored, other],
+      save: () => pending.promise,
+    })
     const url = await screen.findByRole('textbox', { name: 'API URL' })
-    await fireEvent.input(url, { target: { value: 'https://old-edit.example' } })
+    await fireEvent.input(url, {
+      target: { value: 'https://old-edit.example' },
+    })
     await fireEvent.blur(url)
     await fireEvent.click(screen.getByText('Other'))
     pending.reject(new Error('old provider save failure'))
     await pending.promise.catch(() => {})
     await Promise.resolve()
-    expect((screen.getByRole('textbox', { name: 'API URL' }) as HTMLInputElement).value).toBe(endpoint.baseUrl)
+    expect(
+      (screen.getByRole('textbox', { name: 'API URL' }) as HTMLInputElement)
+        .value,
+    ).toBe(endpoint.baseUrl)
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
     expect(notify.toast).not.toHaveBeenCalled()
   })
@@ -283,8 +399,12 @@ describe('ProvidersSettings', () => {
       },
       probe,
     })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Sync models' }))
-    await waitFor(() => expect(screen.getByText('Error: save barrier failed')).toBeTruthy())
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Sync models' }),
+    )
+    await waitFor(() =>
+      expect(screen.getByText('Error: save barrier failed')).toBeTruthy(),
+    )
     expect(probe).not.toHaveBeenCalled()
     expect(screen.queryByRole('dialog', { name: 'Pick models' })).toBeNull()
     expect(notify.toast).not.toHaveBeenCalled()
@@ -304,54 +424,94 @@ describe('ProvidersSettings', () => {
     const { saves } = setup()
     const picker = await openPicker()
     await fireEvent.click(picker.getByRole('button', { name: 'Add gpt-4o' }))
-    await fireEvent.input(picker.getByRole('textbox', { name: 'Search model ID' }), { target: { value: 'embedding' } })
+    await fireEvent.input(
+      picker.getByRole('textbox', { name: 'Search model ID' }),
+      { target: { value: 'embedding' } },
+    )
     await fireEvent.click(picker.getByRole('button', { name: 'Add all' }))
     await fireEvent.click(picker.getByRole('button', { name: 'Remove all' }))
-    await fireEvent.input(picker.getByRole('textbox', { name: 'Search model ID' }), { target: { value: '' } })
+    await fireEvent.input(
+      picker.getByRole('textbox', { name: 'Search model ID' }),
+      { target: { value: '' } },
+    )
     expect(picker.getByRole('button', { name: 'Remove gpt-4o' })).toBeTruthy()
-    expect(picker.getByRole('button', { name: 'Add text-embedding-3' })).toBeTruthy()
-    await waitFor(() => expect(saves.at(-1)?.endpoints[0]?.models.map((m) => m.id)).toEqual(['gpt-4o']))
+    expect(
+      picker.getByRole('button', { name: 'Add text-embedding-3' }),
+    ).toBeTruthy()
+    await waitFor(() =>
+      expect(saves.at(-1)?.endpoints[0]?.models.map((m) => m.id)).toEqual([
+        'gpt-4o',
+      ]),
+    )
     await fireEvent.click(picker.getByRole('button', { name: 'Remove gpt-4o' }))
     await waitFor(() => expect(saves.at(-1)?.endpoints[0]?.models).toEqual([]))
   })
 
   it('toggles enabled immediately without a whole-provider save', async () => {
-    const setEnabled = vi.fn((_id: string, enabled: boolean) => Promise.resolve([{ ...stored, enabled }]))
+    const setEnabled = vi.fn((_id: string, enabled: boolean) =>
+      Promise.resolve([{ ...stored, enabled }]),
+    )
     const { saves } = setup({ setEnabled })
-    await fireEvent.click(await screen.findByRole('switch', { name: 'Enabled' }))
+    await fireEvent.click(
+      await screen.findByRole('switch', { name: 'Enabled' }),
+    )
     await waitFor(() => expect(setEnabled).toHaveBeenCalledWith('p1', false))
     expect(saves).toHaveLength(0)
   })
 
   it('copies the key by revealing it first when it is still masked', async () => {
     const writeText = vi.fn(() => Promise.resolve())
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
     const revealKey = vi.fn(() => Promise.resolve('sk-plain-key'))
     setup({ revealKey })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Copy key' }))
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Copy key' }),
+    )
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('sk-plain-key'))
     expect(revealKey).toHaveBeenCalledWith('k1', '')
   })
 
   it('asks for the web password in a field browsers will not autofill', async () => {
-    setup({ revealNeedsPassword: true, revealKey: vi.fn(() => Promise.resolve('sk-plain-key')) })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Show key' }))
-    const password = document.querySelector('input[aria-label="Current password"]')
+    setup({
+      revealNeedsPassword: true,
+      revealKey: vi.fn(() => Promise.resolve('sk-plain-key')),
+    })
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Show key' }),
+    )
+    const password = document.querySelector(
+      'input[aria-label="Current password"]',
+    )
     expect(password?.getAttribute('autocomplete')).toBe('new-password')
     expect((password as HTMLInputElement | null)?.value).toBe('')
-    expect(screen.getByRole('textbox', { name: 'Search model platforms…' }).getAttribute('autocomplete')).toBe('off')
+    expect(
+      screen
+        .getByRole('textbox', { name: 'Search model platforms…' })
+        .getAttribute('autocomplete'),
+    ).toBe('off')
   })
 
   it('edits the stored key without browser autofill', async () => {
     const revealKey = vi.fn(() => Promise.resolve('sk-plain-key'))
     setup({ revealKey })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Manage API keys' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Manage API keys' }),
+    )
+    const dialog = within(
+      await screen.findByRole('dialog', { name: 'Manage API keys' }),
+    )
     await fireEvent.click(dialog.getByRole('button', { name: 'Edit key' }))
     await waitFor(() =>
-      expect((document.querySelector('input[name="provider-api-key"]') as HTMLInputElement | null)?.value).toBe(
-        'sk-plain-key',
-      ),
+      expect(
+        (
+          document.querySelector(
+            'input[name="provider-api-key"]',
+          ) as HTMLInputElement | null
+        )?.value,
+      ).toBe('sk-plain-key'),
     )
     const keyInput = document.querySelector('input[name="provider-api-key"]')
     expect(revealKey).toHaveBeenCalledWith('k1', '')
@@ -361,28 +521,52 @@ describe('ProvidersSettings', () => {
 
   it('copies the trimmed API address from the input copy button', async () => {
     const writeText = vi.fn(() => Promise.resolve())
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
     setup()
-    const url = (await screen.findByRole('textbox', { name: 'API URL' })) as HTMLInputElement
-    await fireEvent.input(url, { target: { value: '  https://copy.example.com/v1  ' } })
-    await fireEvent.click(within(url.parentElement as HTMLElement).getByRole('button', { name: 'Copy' }))
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://copy.example.com/v1'))
+    const url = (await screen.findByRole('textbox', {
+      name: 'API URL',
+    })) as HTMLInputElement
+    await fireEvent.input(url, {
+      target: { value: '  https://copy.example.com/v1  ' },
+    })
+    await fireEvent.click(
+      within(url.parentElement as HTMLElement).getByRole('button', {
+        name: 'Copy',
+      }),
+    )
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith('https://copy.example.com/v1'),
+    )
   })
 
   it('row menu edits model notes and deletes the provider', async () => {
     const remove = vi.fn(() => Promise.resolve([]))
     const { saves } = setup({ remove })
-    await fireEvent.click(await screen.findByRole('button', { name: 'More actions for Local' }))
-    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Model notes' }))
-    await fireEvent.input(await screen.findByRole('textbox', { name: 'Model notes' }), {
-      target: { value: '## 价格\n- 便宜' },
-    })
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'More actions for Local' }),
+    )
+    await fireEvent.click(
+      await screen.findByRole('menuitem', { name: 'Model notes' }),
+    )
+    await fireEvent.input(
+      await screen.findByRole('textbox', { name: 'Model notes' }),
+      {
+        target: { value: '## 价格\n- 便宜' },
+      },
+    )
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(saves.at(-1)?.notes).toBe('## 价格\n- 便宜'))
     await fireEvent.contextMenu(
-      screen.getByRole('button', { name: 'More actions for Local' }).closest('li') as HTMLElement,
+      screen
+        .getByRole('button', { name: 'More actions for Local' })
+        .closest('li') as HTMLElement,
     )
-    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+    await fireEvent.click(
+      await screen.findByRole('menuitem', { name: 'Delete' }),
+    )
     await waitFor(() => expect(remove).toHaveBeenCalledWith('p1'))
   })
 
@@ -396,15 +580,23 @@ describe('ProvidersSettings', () => {
     const removeKey = vi.fn(() => Promise.resolve([stored]))
     setup({ removeKey })
     expect(screen.queryByText('+1')).toBeNull()
-    await fireEvent.click(await screen.findByRole('button', { name: 'Delete key' }))
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Delete key' }),
+    )
     await waitFor(() => expect(removeKey).toHaveBeenCalledWith('e1', 'k1'))
   })
 
   it('adds no key without text and toggles a key from the dialog', async () => {
-    const saveKey = vi.fn(() => Promise.resolve([{ ...stored, endpoints: [twoKeys] }]))
+    const saveKey = vi.fn(() =>
+      Promise.resolve([{ ...stored, endpoints: [twoKeys] }]),
+    )
     const { notify } = setup({ saveKey }, { ...stored, endpoints: [twoKeys] })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Manage API keys' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Manage API keys' }),
+    )
+    const dialog = within(
+      await screen.findByRole('dialog', { name: 'Manage API keys' }),
+    )
     expect(dialog.getByText('2 / 2 enabled')).toBeTruthy()
     await fireEvent.click(dialog.getByRole('button', { name: 'Add API key' }))
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
@@ -412,7 +604,13 @@ describe('ProvidersSettings', () => {
     expect(saveKey).not.toHaveBeenCalled()
     await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
     await fireEvent.click(dialog.getByRole('switch', { name: 'Enable backup' }))
-    await waitFor(() => expect(saveKey).toHaveBeenCalledWith({ endpointId: 'e1', id: 'k2', enabled: false }))
+    await waitFor(() =>
+      expect(saveKey).toHaveBeenCalledWith({
+        endpointId: 'e1',
+        id: 'k2',
+        enabled: false,
+      }),
+    )
   })
 
   it('offers the key strategy only when the host stores it, and saves the chosen strategy', async () => {
@@ -421,9 +619,17 @@ describe('ProvidersSettings', () => {
     expect(screen.queryByLabelText('Key use')).toBeNull()
     cleanup()
     setup({ keyStrategies: true })
-    expect((await screen.findByLabelText('Key use')).textContent).toContain('Rotate')
-    const draft = toDraft({ ...stored, endpoints: [{ ...endpoint, keyStrategy: 'fill_first' }] })
-    expect(toSave(draft).endpoints[0]).toMatchObject({ id: 'e1', keyStrategy: 'fill_first' })
+    expect((await screen.findByLabelText('Key use')).textContent).toContain(
+      'Rotate',
+    )
+    const draft = toDraft({
+      ...stored,
+      endpoints: [{ ...endpoint, keyStrategy: 'fill_first' }],
+    })
+    expect(toSave(draft).endpoints[0]).toMatchObject({
+      id: 'e1',
+      keyStrategy: 'fill_first',
+    })
   })
 
   it('shows a set-aside key with its recovery time and restores it', async () => {
@@ -433,15 +639,30 @@ describe('ProvidersSettings', () => {
     const paused: Endpoint = {
       ...twoKeys,
       keyStrategy: 'fill_first',
-      keys: [twoKeys.keys[0] ?? backup, { ...backup, exhaustedUntil: later, exhaustedReason: 'HTTP 429' }],
+      keys: [
+        twoKeys.keys[0] ?? backup,
+        { ...backup, exhaustedUntil: later, exhaustedReason: 'HTTP 429' },
+      ],
     }
-    const saveKey = vi.fn(() => Promise.resolve([{ ...stored, endpoints: [twoKeys] }]))
+    const saveKey = vi.fn(() =>
+      Promise.resolve([{ ...stored, endpoints: [twoKeys] }]),
+    )
     setup({ saveKey, keyStrategies: true }, { ...stored, endpoints: [paused] })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Manage API keys' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Manage API keys' }))
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Manage API keys' }),
+    )
+    const dialog = within(
+      await screen.findByRole('dialog', { name: 'Manage API keys' }),
+    )
     expect(dialog.getByText(/^Paused until .* · HTTP 429$/)).toBeTruthy()
     await fireEvent.click(dialog.getByRole('button', { name: 'Restore' }))
-    await waitFor(() => expect(saveKey).toHaveBeenCalledWith({ endpointId: 'e1', id: 'k2', restore: true }))
+    await waitFor(() =>
+      expect(saveKey).toHaveBeenCalledWith({
+        endpointId: 'e1',
+        id: 'k2',
+        restore: true,
+      }),
+    )
   })
 
   it('commits a changed address on blur and rejects an invalid one without a request', async () => {
@@ -451,10 +672,15 @@ describe('ProvidersSettings', () => {
     await fireEvent.blur(url)
     expect(await screen.findByRole('alert')).toBeTruthy()
     expect(saves).toHaveLength(0)
-    await fireEvent.input(url, { target: { value: 'https://api.example.com/v1' } })
+    await fireEvent.input(url, {
+      target: { value: 'https://api.example.com/v1' },
+    })
     await fireEvent.blur(url)
     await waitFor(() => expect(saves).toHaveLength(1))
-    expect(saves[0]?.endpoints[0]).toMatchObject({ id: 'e1', baseUrl: 'https://api.example.com/v1' })
+    expect(saves[0]?.endpoints[0]).toMatchObject({
+      id: 'e1',
+      baseUrl: 'https://api.example.com/v1',
+    })
   })
 
   it('offers the suggested protocol after a check and saves the switch', async () => {
@@ -468,54 +694,90 @@ describe('ProvidersSettings', () => {
     )
     const { saves } = setup({ probe })
     await fireEvent.click(await screen.findByRole('button', { name: 'Check' }))
-    await fireEvent.click(await screen.findByRole('button', { name: 'Use Anthropic protocol' }))
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Use Anthropic protocol' }),
+    )
     await waitFor(() => expect(saves).toHaveLength(2))
-    expect(saves.at(-1)?.endpoints[0]).toMatchObject({ id: 'e1', protocol: 'anthropic-messages' })
-    expect(screen.queryByRole('button', { name: 'Use Anthropic protocol' })).toBeNull()
+    expect(saves.at(-1)?.endpoints[0]).toMatchObject({
+      id: 'e1',
+      protocol: 'anthropic-messages',
+    })
+    expect(
+      screen.queryByRole('button', { name: 'Use Anthropic protocol' }),
+    ).toBeNull()
   })
 
   it('keeps local edits and offers a retry when a save fails', async () => {
     const save = vi.fn(() => Promise.reject(new Error('down')))
     const { notify } = setup({ save })
     const url = await screen.findByRole('textbox', { name: 'API URL' })
-    await fireEvent.input(url, { target: { value: 'https://other.example.com' } })
+    await fireEvent.input(url, {
+      target: { value: 'https://other.example.com' },
+    })
     await fireEvent.blur(url)
-    await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Error: down'))
+    await waitFor(() =>
+      expect(notify.toast).toHaveBeenCalledWith('error', 'Error: down'),
+    )
     expect((url as HTMLInputElement).value).toBe('https://other.example.com')
     await fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(save).toHaveBeenCalledTimes(2)
   })
 
   async function openConfig() {
-    await fireEvent.click(await screen.findByRole('button', { name: 'Configure API URL and custom headers' }))
-    return within(await screen.findByRole('dialog', { name: 'Request configuration' }))
+    await fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure API URL and custom headers',
+      }),
+    )
+    return within(
+      await screen.findByRole('dialog', { name: 'Request configuration' }),
+    )
   }
 
   it('discards request config edits on cancel', async () => {
     const { saves } = setup()
     let dialog = await openConfig()
-    await fireEvent.input(dialog.getByRole('textbox', { name: 'Image generation base URL' }), {
-      target: { value: 'https://img.example.com' },
-    })
+    await fireEvent.input(
+      dialog.getByRole('textbox', { name: 'Image generation base URL' }),
+      {
+        target: { value: 'https://img.example.com' },
+      },
+    )
     await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(saves).toHaveLength(0)
     dialog = await openConfig()
-    expect((dialog.getByRole('textbox', { name: 'Image generation base URL' }) as HTMLInputElement).value).toBe('')
+    expect(
+      (
+        dialog.getByRole('textbox', {
+          name: 'Image generation base URL',
+        }) as HTMLInputElement
+      ).value,
+    ).toBe('')
   })
 
   it('saves image base URL and headers with the provider', async () => {
     const { saves } = setup()
     const dialog = await openConfig()
-    await fireEvent.input(dialog.getByRole('textbox', { name: 'Image generation base URL' }), {
-      target: { value: ' https://img.example.com ' },
-    })
-    await fireEvent.input(dialog.getByRole('textbox', { name: 'Image edit base URL' }), {
-      target: { value: ' https://edit.example.com ' },
-    })
+    await fireEvent.input(
+      dialog.getByRole('textbox', { name: 'Image generation base URL' }),
+      {
+        target: { value: ' https://img.example.com ' },
+      },
+    )
+    await fireEvent.input(
+      dialog.getByRole('textbox', { name: 'Image edit base URL' }),
+      {
+        target: { value: ' https://edit.example.com ' },
+      },
+    )
     await fireEvent.click(dialog.getByRole('button', { name: 'Add header' }))
-    const [, name = document.body] = dialog.getAllByRole('textbox', { name: 'Header name' })
-    const [, value = document.body] = dialog.getAllByRole('textbox', { name: 'Header value' })
+    const [, name = document.body] = dialog.getAllByRole('textbox', {
+      name: 'Header name',
+    })
+    const [, value = document.body] = dialog.getAllByRole('textbox', {
+      name: 'Header value',
+    })
     await fireEvent.input(name, { target: { value: 'X-Trace' } })
     await fireEvent.input(value, { target: { value: '1' } })
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
@@ -531,9 +793,12 @@ describe('ProvidersSettings', () => {
   it('blocks an invalid image edit base URL', async () => {
     const { saves } = setup()
     const dialog = await openConfig()
-    await fireEvent.input(dialog.getByRole('textbox', { name: 'Image edit base URL' }), {
-      target: { value: 'ftp://edit' },
-    })
+    await fireEvent.input(
+      dialog.getByRole('textbox', { name: 'Image edit base URL' }),
+      {
+        target: { value: 'ftp://edit' },
+      },
+    )
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
     expect(dialog.getByRole('alert')).toBeTruthy()
     expect(saves).toHaveLength(0)
@@ -544,12 +809,26 @@ describe('ProvidersSettings', () => {
   it('maps purpose onto type and vision, edits name and keeps untouched reasoning out of the save', async () => {
     const models: Model[] = [
       { ...typed, id: 'gpt-image-1', modelType: 'image' },
-      { ...typed, id: 'gpt-4o', modelType: 'chat', reasoning: { dialect: 'openai', efforts: ['low', 'high'] } },
+      {
+        ...typed,
+        id: 'gpt-4o',
+        modelType: 'chat',
+        reasoning: { dialect: 'openai', efforts: ['low', 'high'] },
+      },
     ]
-    const { saves } = setup({}, { ...stored, endpoints: [{ ...endpoint, models }] })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Settings for gpt-4o' }))
-    let dialog = within(await screen.findByRole('dialog', { name: 'Edit model' }))
-    await fireEvent.input(dialog.getByRole('textbox', { name: 'Model name' }), { target: { value: '  GPT 4o  ' } })
+    const { saves } = setup(
+      {},
+      { ...stored, endpoints: [{ ...endpoint, models }] },
+    )
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Settings for gpt-4o' }),
+    )
+    let dialog = within(
+      await screen.findByRole('dialog', { name: 'Edit model' }),
+    )
+    await fireEvent.input(dialog.getByRole('textbox', { name: 'Model name' }), {
+      target: { value: '  GPT 4o  ' },
+    })
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(saves).toHaveLength(1))
     const saved = saves[0]?.endpoints[0]?.models.find((m) => m.id === 'gpt-4o')
@@ -557,14 +836,24 @@ describe('ProvidersSettings', () => {
     expect(saved && 'reasoning' in saved).toBe(false)
     expect(await screen.findByText('GPT 4o')).toBeTruthy()
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Settings for gpt-image-1' }))
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Settings for gpt-image-1' }),
+    )
     dialog = within(await screen.findByRole('dialog', { name: 'Edit model' }))
-    expect((dialog.getByRole('radio', { name: 'Image generation' }) as HTMLInputElement).checked).toBe(true)
+    expect(
+      (
+        dialog.getByRole('radio', {
+          name: 'Image generation',
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true)
     expect(dialog.queryByRole('button', { name: 'Vision' })).toBeNull()
     await fireEvent.click(dialog.getByRole('radio', { name: 'Image editing' }))
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(saves).toHaveLength(2))
-    expect(saves[1]?.endpoints[0]?.models.find((m) => m.id === 'gpt-image-1')).toMatchObject({
+    expect(
+      saves[1]?.endpoints[0]?.models.find((m) => m.id === 'gpt-image-1'),
+    ).toMatchObject({
       modelType: 'image',
       canVision: true,
     })
@@ -576,17 +865,36 @@ describe('ProvidersSettings', () => {
       id: 'claude',
       modelType: 'chat',
       nativeWebSearch: true,
-      reasoning: { dialect: 'anthropic-budget', efforts: ['high'], budgetTokens: 2048 },
+      reasoning: {
+        dialect: 'anthropic-budget',
+        efforts: ['high'],
+        budgetTokens: 2048,
+      },
     }
-    const anthropic: Endpoint = { ...endpoint, protocol: 'anthropic-messages', models: [chat] }
+    const anthropic: Endpoint = {
+      ...endpoint,
+      protocol: 'anthropic-messages',
+      models: [chat],
+    }
     const { saves } = setup({}, { ...stored, endpoints: [anthropic] })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Settings for claude' }))
-    const dialog = within(await screen.findByRole('dialog', { name: 'Edit model' }))
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Settings for claude' }),
+    )
+    const dialog = within(
+      await screen.findByRole('dialog', { name: 'Edit model' }),
+    )
     const save = dialog.getByRole('button', { name: 'Save' })
-    await fireEvent.input(dialog.getByRole('spinbutton', { name: 'Maximum output (tokens)' }), {
-      target: { value: '2048' },
-    })
-    expect(dialog.getByText('Budget must be at least 1024 and below max output (default 4096)')).toBeTruthy()
+    await fireEvent.input(
+      dialog.getByRole('spinbutton', { name: 'Maximum output (tokens)' }),
+      {
+        target: { value: '2048' },
+      },
+    )
+    expect(
+      dialog.getByText(
+        'Budget must be at least 1024 and below max output (default 4096)',
+      ),
+    ).toBeTruthy()
     expect(save.hasAttribute('disabled')).toBe(true)
     await fireEvent.click(dialog.getByRole('button', { name: 'Embedding' }))
     expect(dialog.queryByRole('button', { name: 'Reasoning' })).toBeNull()
@@ -611,10 +919,22 @@ describe('ProvidersSettings', () => {
         }),
       ),
     )
-    const bad: Model = { ...typed, id: 'm1', name: 'Mine', modelType: 'chat', contextWindow: 100, maxOutput: 200 }
-    const { notify } = setup({ save }, { ...stored, endpoints: [{ ...endpoint, models: [bad] }] })
+    const bad: Model = {
+      ...typed,
+      id: 'm1',
+      name: 'Mine',
+      modelType: 'chat',
+      contextWindow: 100,
+      maxOutput: 200,
+    }
+    const { notify } = setup(
+      { save },
+      { ...stored, endpoints: [{ ...endpoint, models: [bad] }] },
+    )
     const url = await screen.findByRole('textbox', { name: 'API URL' })
-    await fireEvent.input(url, { target: { value: 'https://other.example.com' } })
+    await fireEvent.input(url, {
+      target: { value: 'https://other.example.com' },
+    })
     await fireEvent.blur(url)
     await waitFor(() => expect(save).toHaveBeenCalledOnce())
     expect(
@@ -634,7 +954,10 @@ describe('ProvidersSettings', () => {
       name: 'Mine',
       groupName: 'G',
     }
-    const { saves } = setup({}, { ...stored, endpoints: [{ ...endpoint, models: [mine] }] })
+    const { saves } = setup(
+      {},
+      { ...stored, endpoints: [{ ...endpoint, models: [mine] }] },
+    )
     const picker = await openPicker()
     await fireEvent.click(picker.getByRole('button', { name: 'Add gpt-4o' }))
     await waitFor(() => expect(saves).toHaveLength(2))
@@ -644,30 +967,53 @@ describe('ProvidersSettings', () => {
       name: 'Mine',
       groupName: 'G',
     })
-    expect(models.find((m) => m.id === 'gpt-4o')).toMatchObject({ groupName: 'gpt', name: null })
+    expect(models.find((m) => m.id === 'gpt-4o')).toMatchObject({
+      groupName: 'gpt',
+      name: null,
+    })
   })
 
   it('blocks a reserved header with a message', async () => {
     const { saves } = setup()
     const dialog = await openConfig()
-    await fireEvent.input(dialog.getByRole('textbox', { name: 'Header name' }), { target: { value: 'Authorization' } })
+    await fireEvent.input(
+      dialog.getByRole('textbox', { name: 'Header name' }),
+      { target: { value: 'Authorization' } },
+    )
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
-    expect(dialog.getByRole('alert').textContent).toContain('Authorization is set by the system')
+    expect(dialog.getByRole('alert').textContent).toContain(
+      'Authorization is set by the system',
+    )
     expect(saves).toHaveLength(0)
   })
 
   it('round-trips header rows through JSON and blocks invalid JSON', async () => {
     const { saves } = setup()
     const dialog = await openConfig()
-    await fireEvent.click(dialog.getByRole('button', { name: 'Switch to JSON editing' }))
-    const text = dialog.getByRole('textbox', { name: 'Custom headers' }) as HTMLTextAreaElement
+    await fireEvent.click(
+      dialog.getByRole('button', { name: 'Switch to JSON editing' }),
+    )
+    const text = dialog.getByRole('textbox', {
+      name: 'Custom headers',
+    }) as HTMLTextAreaElement
     expect(JSON.parse(text.value)).toEqual({ 'X-Team': 'a' })
-    await fireEvent.input(text, { target: { value: '{"X-Team":"b","X-New":"c"}' } })
-    await fireEvent.click(dialog.getByRole('button', { name: 'Switch to key-value list' }))
-    const names = dialog.getAllByRole('textbox', { name: 'Header name' }) as HTMLInputElement[]
+    await fireEvent.input(text, {
+      target: { value: '{"X-Team":"b","X-New":"c"}' },
+    })
+    await fireEvent.click(
+      dialog.getByRole('button', { name: 'Switch to key-value list' }),
+    )
+    const names = dialog.getAllByRole('textbox', {
+      name: 'Header name',
+    }) as HTMLInputElement[]
     expect(names.map((input) => input.value)).toEqual(['X-Team', 'X-New'])
-    await fireEvent.click(dialog.getByRole('button', { name: 'Switch to JSON editing' }))
-    await fireEvent.input(dialog.getByRole('textbox', { name: 'Custom headers' }), { target: { value: '[1' } })
+    await fireEvent.click(
+      dialog.getByRole('button', { name: 'Switch to JSON editing' }),
+    )
+    await fireEvent.input(
+      dialog.getByRole('textbox', { name: 'Custom headers' }),
+      { target: { value: '[1' } },
+    )
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
     expect(dialog.getByRole('alert').textContent).toBe('Invalid JSON')
     expect(saves).toHaveLength(0)
@@ -679,14 +1025,26 @@ describe('draft helpers', () => {
     const draft = toDraft(stored)
     const added = { ...newEndpoint(draft.endpoints), slug: 'ep-2' }
     draft.endpoints.push(added)
-    expect(savable(draft).endpoints.map((e) => e.slug)).toEqual(['main', 'ep-2'])
+    expect(savable(draft).endpoints.map((e) => e.slug)).toEqual([
+      'main',
+      'ep-2',
+    ])
     added.baseUrl = 'nope'
     expect(savable(draft).endpoints.map((e) => e.slug)).toEqual(['main'])
 
     added.baseUrl = 'https://b.example.com'
     const sent = structuredClone(savable(draft))
-    const created: Endpoint = { ...endpoint, id: 'e2', slug: 'ep-2', baseUrl: 'https://b.example.com', keys: [] }
-    const next = adopt(draft, sent, { ...stored, endpoints: [endpoint, created] })
+    const created: Endpoint = {
+      ...endpoint,
+      id: 'e2',
+      slug: 'ep-2',
+      baseUrl: 'https://b.example.com',
+      keys: [],
+    }
+    const next = adopt(draft, sent, {
+      ...stored,
+      endpoints: [endpoint, created],
+    })
     expect(next.endpoints[1]?.saved?.id).toBe('e2')
   })
 
@@ -722,13 +1080,26 @@ describe('draft helpers', () => {
         { name: 'x-a', value: '2' },
       ]),
     ).toEqual({ error: { key: 'headers_invalid' } })
-    expect(checkHeaders([{ name: 'bad name', value: '1' }])).toEqual({ error: { key: 'headers_invalid' } })
-    expect(checkHeaders([{ name: 'X-A', value: 'a\nb' }])).toEqual({ error: { key: 'headers_invalid' } })
-    const many = Array.from({ length: 21 }, (_, i) => ({ name: `X-${i}`, value: '' }))
+    expect(checkHeaders([{ name: 'bad name', value: '1' }])).toEqual({
+      error: { key: 'headers_invalid' },
+    })
+    expect(checkHeaders([{ name: 'X-A', value: 'a\nb' }])).toEqual({
+      error: { key: 'headers_invalid' },
+    })
+    const many = Array.from({ length: 21 }, (_, i) => ({
+      name: `X-${i}`,
+      value: '',
+    }))
     expect(checkHeaders(many)).toEqual({ error: { key: 'headers_too_many' } })
   })
 
-  const chat: Model = { ...model, id: 'm', modelType: 'chat', typeSource: 'inferred', reasoning: null }
+  const chat: Model = {
+    ...model,
+    id: 'm',
+    modelType: 'chat',
+    typeSource: 'inferred',
+    reasoning: null,
+  }
 
   it('validateModel mirrors the backend rules and reason codes (contract §3)', () => {
     const budget = (budgetTokens?: number): ReasoningConfig => ({
@@ -736,7 +1107,13 @@ describe('draft helpers', () => {
       efforts: ['high'],
       ...(budgetTokens === undefined ? {} : { budgetTokens }),
     })
-    const tier = { minInputTokens: 0, input: 1, output: 2, cacheRead: null, cacheWrite: null }
+    const tier = {
+      minInputTokens: 0,
+      input: 1,
+      output: 2,
+      cacheRead: null,
+      cacheWrite: null,
+    }
     const cases: [Partial<Model>, string, string[]][] = [
       [{}, 'openai-chat', []],
       [{ name: ' '.repeat(5) + 'x'.repeat(80) }, 'openai-chat', []],
@@ -744,41 +1121,136 @@ describe('draft helpers', () => {
       [{ groupName: '字'.repeat(81) }, 'openai-chat', ['groupName:too_long']],
       [{ contextWindow: 0 }, 'openai-chat', ['contextWindow:invalid']],
       [{ maxOutput: 1.5 }, 'openai-chat', ['maxOutput:invalid']],
-      [{ contextWindow: 100, maxOutput: 100 }, 'openai-chat', ['maxOutput:exceeds_context']],
-      [{ modelType: 'image', contextWindow: 100, maxOutput: 100 }, 'openai-chat', []],
-      [{ reasoning: { dialect: 'openai', efforts: [] } }, 'openai-chat', ['reasoning:invalid_efforts']],
-      [{ reasoning: { dialect: 'openai', efforts: ['low', 'low'] } }, 'openai-chat', ['reasoning:invalid_efforts']],
-      [{ reasoning: { dialect: 'openai', efforts: ['default'] } }, 'openai-chat', ['reasoning:invalid_efforts']],
       [
-        { modelType: 'image', reasoning: { dialect: 'openai', efforts: ['low'] } },
+        { contextWindow: 100, maxOutput: 100 },
+        'openai-chat',
+        ['maxOutput:exceeds_context'],
+      ],
+      [
+        { modelType: 'image', contextWindow: 100, maxOutput: 100 },
+        'openai-chat',
+        [],
+      ],
+      [
+        { reasoning: { dialect: 'openai', efforts: [] } },
         'openai-chat',
         ['reasoning:invalid_efforts'],
       ],
-      [{ reasoning: { dialect: 'openai', efforts: ['low'] } }, 'anthropic-messages', ['reasoning:protocol_mismatch']],
-      [{ reasoning: budget(2048) }, 'openai-responses', ['reasoning:protocol_mismatch']],
-      [{ reasoning: budget() }, 'anthropic-messages', ['reasoning:invalid_budget']],
-      [{ reasoning: budget(1023) }, 'anthropic-messages', ['reasoning:invalid_budget']],
-      [{ reasoning: budget(4096) }, 'anthropic-messages', ['reasoning:invalid_budget']],
-      [{ reasoning: budget(4095) }, 'anthropic-messages', []],
-      [{ maxOutput: 2048, reasoning: budget(2048) }, 'anthropic-messages', ['reasoning:invalid_budget']],
       [
-        { reasoning: { dialect: 'anthropic-adaptive', efforts: ['high'], budgetTokens: 2048 } },
+        { reasoning: { dialect: 'openai', efforts: ['low', 'low'] } },
+        'openai-chat',
+        ['reasoning:invalid_efforts'],
+      ],
+      [
+        { reasoning: { dialect: 'openai', efforts: ['default'] } },
+        'openai-chat',
+        ['reasoning:invalid_efforts'],
+      ],
+      [
+        {
+          modelType: 'image',
+          reasoning: { dialect: 'openai', efforts: ['low'] },
+        },
+        'openai-chat',
+        ['reasoning:invalid_efforts'],
+      ],
+      [
+        { reasoning: { dialect: 'openai', efforts: ['low'] } },
+        'anthropic-messages',
+        ['reasoning:protocol_mismatch'],
+      ],
+      [
+        { reasoning: budget(2048) },
+        'openai-responses',
+        ['reasoning:protocol_mismatch'],
+      ],
+      [
+        { reasoning: budget() },
+        'anthropic-messages',
+        ['reasoning:invalid_budget'],
+      ],
+      [
+        { reasoning: budget(1023) },
+        'anthropic-messages',
+        ['reasoning:invalid_budget'],
+      ],
+      [
+        { reasoning: budget(4096) },
+        'anthropic-messages',
+        ['reasoning:invalid_budget'],
+      ],
+      [{ reasoning: budget(4095) }, 'anthropic-messages', []],
+      [
+        { maxOutput: 2048, reasoning: budget(2048) },
+        'anthropic-messages',
+        ['reasoning:invalid_budget'],
+      ],
+      [
+        {
+          reasoning: {
+            dialect: 'anthropic-adaptive',
+            efforts: ['high'],
+            budgetTokens: 2048,
+          },
+        },
         'anthropic-messages',
         ['reasoning:unexpected_budget'],
       ],
       [{ pricing: { currency: 'USD', tiers: [tier] } }, 'openai-chat', []],
-      [{ modelType: 'image', pricing: { currency: 'USD', tiers: [tier] } }, 'openai-chat', ['pricing:invalid']],
-      [{ pricing: { currency: 'USD', tiers: [] } }, 'openai-chat', ['pricing:invalid']],
-      [{ pricing: { currency: 'USD', tiers: Array(9).fill(tier) } }, 'openai-chat', ['pricing:invalid']],
-      [{ pricing: { currency: 'CNY', tiers: [{ ...tier, minInputTokens: 1 }] } }, 'openai-chat', ['pricing:invalid']],
-      [{ pricing: { currency: 'USD', tiers: [tier, tier] } }, 'openai-chat', ['pricing:invalid']],
-      [{ pricing: { currency: 'USD', tiers: [{ ...tier, input: -1 }] } }, 'openai-chat', ['pricing:invalid']],
-      [{ pricing: { currency: 'USD', tiers: [{ ...tier, output: NaN }] } }, 'openai-chat', ['pricing:invalid']],
-      [{ pricing: { currency: 'USD', tiers: [{ ...tier, cacheRead: 1e6 + 1 }] } }, 'openai-chat', ['pricing:invalid']],
+      [
+        { modelType: 'image', pricing: { currency: 'USD', tiers: [tier] } },
+        'openai-chat',
+        ['pricing:invalid'],
+      ],
+      [
+        { pricing: { currency: 'USD', tiers: [] } },
+        'openai-chat',
+        ['pricing:invalid'],
+      ],
+      [
+        { pricing: { currency: 'USD', tiers: Array(9).fill(tier) } },
+        'openai-chat',
+        ['pricing:invalid'],
+      ],
+      [
+        {
+          pricing: { currency: 'CNY', tiers: [{ ...tier, minInputTokens: 1 }] },
+        },
+        'openai-chat',
+        ['pricing:invalid'],
+      ],
+      [
+        { pricing: { currency: 'USD', tiers: [tier, tier] } },
+        'openai-chat',
+        ['pricing:invalid'],
+      ],
+      [
+        { pricing: { currency: 'USD', tiers: [{ ...tier, input: -1 }] } },
+        'openai-chat',
+        ['pricing:invalid'],
+      ],
+      [
+        { pricing: { currency: 'USD', tiers: [{ ...tier, output: NaN }] } },
+        'openai-chat',
+        ['pricing:invalid'],
+      ],
+      [
+        {
+          pricing: {
+            currency: 'USD',
+            tiers: [{ ...tier, cacheRead: 1e6 + 1 }],
+          },
+        },
+        'openai-chat',
+        ['pricing:invalid'],
+      ],
     ]
     for (const [patch, protocol, expected] of cases)
       expect(
-        validateModel({ ...chat, ...patch }, protocol as Endpoint['protocol']).map((e) => `${e.field}:${e.reason}`),
+        validateModel(
+          { ...chat, ...patch },
+          protocol as Endpoint['protocol'],
+        ).map((e) => `${e.field}:${e.reason}`),
         JSON.stringify(patch),
       ).toEqual(expected)
   })
@@ -786,7 +1258,13 @@ describe('draft helpers', () => {
   it('maps purpose to type and vision, and clears chat-only settings when leaving chat', () => {
     const reasoning: ReasoningConfig = { dialect: 'openai', efforts: ['low'] }
     const pricing: ModelPricing = { currency: 'USD', tiers: [] }
-    const rich: Model = { ...chat, reasoning, nativeWebSearch: true, pricing, canVision: true }
+    const rich: Model = {
+      ...chat,
+      reasoning,
+      nativeWebSearch: true,
+      pricing,
+      canVision: true,
+    }
     expect(purposeOf(rich)).toBe('chat')
     expect(withPurpose(rich, 'image')).toMatchObject({
       modelType: 'image',
@@ -799,22 +1277,46 @@ describe('draft helpers', () => {
     expect(purposeOf(withPurpose(rich, 'edit'))).toBe('edit')
     expect(purposeOf({ ...chat, modelType: 'embedding' })).toBeNull()
     expect(withType(rich, 'chat')).toBe(rich)
-    expect(withPurpose(withPurpose(rich, 'edit'), 'chat')).toMatchObject({ modelType: 'chat', canVision: true })
+    expect(withPurpose(withPurpose(rich, 'edit'), 'chat')).toMatchObject({
+      modelType: 'chat',
+      canVision: true,
+    })
   })
 
   it('toSave omits reasoning only when unchanged from the stored model or null on a new one (contract §2)', () => {
-    const reasoning: ReasoningConfig = { dialect: 'openai', efforts: ['low', 'high'] }
+    const reasoning: ReasoningConfig = {
+      dialect: 'openai',
+      efforts: ['low', 'high'],
+    }
     const saved = { ...chat, reasoning }
-    const draft = toDraft({ ...stored, endpoints: [{ ...endpoint, models: [saved] }] })
+    const draft = toDraft({
+      ...stored,
+      endpoints: [{ ...endpoint, models: [saved] }],
+    })
     const first = draft.endpoints[0]
     if (!first) throw new Error('missing endpoint')
-    const models = (list: Model[]) => toSave({ ...draft, endpoints: [{ ...first, models: list }] }).endpoints[0]?.models
+    const models = (list: Model[]) =>
+      toSave({ ...draft, endpoints: [{ ...first, models: list }] }).endpoints[0]
+        ?.models
     expect(models([saved])?.[0]).not.toHaveProperty('reasoning')
-    expect(models([{ ...saved, reasoning: { ...reasoning } }])?.[0]).not.toHaveProperty('reasoning')
-    expect(models([{ ...saved, reasoning: null }])?.[0]).toHaveProperty('reasoning', null)
+    expect(
+      models([{ ...saved, reasoning: { ...reasoning } }])?.[0],
+    ).not.toHaveProperty('reasoning')
+    expect(models([{ ...saved, reasoning: null }])?.[0]).toHaveProperty(
+      'reasoning',
+      null,
+    )
     const changed: ReasoningConfig = { dialect: 'openai', efforts: ['high'] }
-    expect(models([{ ...saved, reasoning: changed }])?.[0]).toHaveProperty('reasoning', changed)
-    expect(models([{ ...chat, id: 'new' }])?.[0]).not.toHaveProperty('reasoning')
-    expect(models([{ ...chat, id: 'new', reasoning }])?.[0]).toHaveProperty('reasoning', reasoning)
+    expect(models([{ ...saved, reasoning: changed }])?.[0]).toHaveProperty(
+      'reasoning',
+      changed,
+    )
+    expect(models([{ ...chat, id: 'new' }])?.[0]).not.toHaveProperty(
+      'reasoning',
+    )
+    expect(models([{ ...chat, id: 'new', reasoning }])?.[0]).toHaveProperty(
+      'reasoning',
+      reasoning,
+    )
   })
 })

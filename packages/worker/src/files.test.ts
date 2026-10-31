@@ -14,13 +14,20 @@ const actor: Actor = {
 }
 export function testBucket(): {
   readonly bucket: R2Bucket
-  readonly objects: Map<string, { readonly data: Uint8Array; readonly mime: string }>
+  readonly objects: Map<
+    string,
+    { readonly data: Uint8Array; readonly mime: string }
+  >
 } {
   const objects = new Map<string, { data: Uint8Array; mime: string }>()
   const bucket: R2Bucket = {
     async put(key, value, options) {
-      if (options?.onlyIf?.etagDoesNotMatch === '*' && objects.has(key)) return null
-      objects.set(key, { data: new Uint8Array(value), mime: options?.httpMetadata?.contentType ?? '' })
+      if (options?.onlyIf?.etagDoesNotMatch === '*' && objects.has(key))
+        return null
+      objects.set(key, {
+        data: new Uint8Array(value),
+        mime: options?.httpMetadata?.contentType ?? '',
+      })
       return { key }
     },
     async get(key) {
@@ -53,15 +60,29 @@ test('R2 files isolate app/tenant/subject, validate MIME/size, and never expose 
   ])
     assert.equal(await files.get(other, 'image'), null)
   assert.equal(files.url(actor, 'image'), '/api/v1/files/image')
-  await assert.rejects(files.put(actor, 'image', { mime: 'image/png', data }), { code: 'conflict' })
-  await assert.rejects(files.put(actor, 'bad', { mime: 'image/png', data: new Uint8Array([1]) }), {
-    code: 'bad_request',
-  })
-  await assert.rejects(files.put(actor, 'large', { mime: 'application/octet-stream', data: new Uint8Array(33) }), {
-    code: 'bad_request',
+  await assert.rejects(files.put(actor, 'image', { mime: 'image/png', data }), {
+    code: 'conflict',
   })
   await assert.rejects(
-    files.put(actor, '../traversal', { mime: 'application/octet-stream', data: new Uint8Array([1]) }),
+    files.put(actor, 'bad', { mime: 'image/png', data: new Uint8Array([1]) }),
+    {
+      code: 'bad_request',
+    },
+  )
+  await assert.rejects(
+    files.put(actor, 'large', {
+      mime: 'application/octet-stream',
+      data: new Uint8Array(33),
+    }),
+    {
+      code: 'bad_request',
+    },
+  )
+  await assert.rejects(
+    files.put(actor, '../traversal', {
+      mime: 'application/octet-stream',
+      data: new Uint8Array([1]),
+    }),
     { code: 'bad_request' },
   )
   await files.remove(actor, 'image')

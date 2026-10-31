@@ -1,4 +1,8 @@
-import type { SearchCap, SearchHit, SearchPreferences } from '@ouraihub/aether-contracts'
+import type {
+  SearchCap,
+  SearchHit,
+  SearchPreferences,
+} from '@ouraihub/aether-contracts'
 import { badRequest } from '../error.js'
 
 export interface ProviderSpec {
@@ -15,7 +19,10 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     name: '智谱 Zhipu',
     description: 'Web search',
     basicAuth: false,
-    search: { defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4/web_search', keyMode: 'required' },
+    search: {
+      defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4/web_search',
+      keyMode: 'required',
+    },
   },
   {
     id: 'tavily',
@@ -65,7 +72,10 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     name: 'Brave Search',
     description: 'Independent web search',
     basicAuth: false,
-    search: { defaultBaseUrl: 'https://api.search.brave.com', keyMode: 'required' },
+    search: {
+      defaultBaseUrl: 'https://api.search.brave.com',
+      keyMode: 'required',
+    },
   },
   {
     id: 'parallel',
@@ -87,7 +97,10 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     name: 'Firecrawl',
     description: 'Search and Markdown scraping',
     basicAuth: false,
-    search: { defaultBaseUrl: 'https://api.firecrawl.dev', keyMode: 'optional' },
+    search: {
+      defaultBaseUrl: 'https://api.firecrawl.dev',
+      keyMode: 'optional',
+    },
     fetch: { defaultBaseUrl: 'https://api.firecrawl.dev', keyMode: 'optional' },
   },
   {
@@ -98,7 +111,10 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     fetch: { defaultBaseUrl: '', keyMode: 'none' },
   },
 ]
-export const DEFAULT_PROVIDERS: Readonly<Record<SearchCap, string>> = { search: 'exa-mcp', fetch: 'jina' }
+export const DEFAULT_PROVIDERS: Readonly<Record<SearchCap, string>> = {
+  search: 'exa-mcp',
+  fetch: 'jina',
+}
 export const defaultPreferences = (): SearchPreferences => ({
   maxResults: 5,
   compression: 'none',
@@ -115,8 +131,14 @@ export function providerFor(cap: SearchCap, id: string) {
 export function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
-export function fields(value: unknown, allowed: readonly string[]): Record<string, unknown> {
-  if (!record(value) || Object.keys(value).some((key) => !allowed.includes(key)))
+export function fields(
+  value: unknown,
+  allowed: readonly string[],
+): Record<string, unknown> {
+  if (
+    !record(value) ||
+    Object.keys(value).some((key) => !allowed.includes(key))
+  )
     throw badRequest('input', 'unknown_fields')
   return value
 }
@@ -125,7 +147,8 @@ export function stringValue(value: unknown, field: string): string {
   return value
 }
 export function capability(value: unknown): SearchCap {
-  if (value !== 'search' && value !== 'fetch') throw badRequest('capability', 'invalid')
+  if (value !== 'search' && value !== 'fetch')
+    throw badRequest('capability', 'invalid')
   return value
 }
 export function targetUrl(value: string): URL {
@@ -135,41 +158,77 @@ export function targetUrl(value: string): URL {
   } catch {
     throw badRequest('url', 'invalid')
   }
-  if (!['https:', 'http:'].includes(url.protocol) || !url.hostname || url.username || url.password)
+  if (
+    !['https:', 'http:'].includes(url.protocol) ||
+    !url.hostname ||
+    url.username ||
+    url.password
+  )
     throw badRequest('url', 'invalid')
   url.hostname = url.hostname.toLowerCase().replace(/\.$/, '')
   return url
 }
 export function normalizeRule(value: unknown): string {
-  if (typeof value !== 'string' || !value || [...value].length > 256 || /[\s[\]\\^{}|#]/u.test(value))
+  if (
+    typeof value !== 'string' ||
+    !value ||
+    [...value].length > 256 ||
+    /[\s[\]\\^{}|#]/u.test(value)
+  )
     throw badRequest('blacklist', 'invalid')
   for (const character of value) {
     const code = character.codePointAt(0)
-    if (code !== undefined && (code <= 31 || code === 127)) throw badRequest('blacklist', 'invalid')
+    if (code !== undefined && (code <= 31 || code === 127))
+      throw badRequest('blacklist', 'invalid')
   }
   const parts = value.match(/^(https?):\/\/([^/]+)(\/.*)?$/i)
   const hostPort = parts ? (parts[2] ?? '') : value
   const match = hostPort.match(/^([^:]+)(?::([0-9]+))?$/)
-  if (!match || (!parts && match[2]) || (match[2] && (Number(match[2]) < 1 || Number(match[2]) > 65535)))
+  if (
+    !match ||
+    (!parts && match[2]) ||
+    (match[2] && (Number(match[2]) < 1 || Number(match[2]) > 65535))
+  )
     throw badRequest('blacklist', 'invalid')
   const host = (match[1] ?? '').toLowerCase().replace(/\.$/, '')
   if (
     host.length > 253 ||
     host
       .split('.')
-      .some((label) => !label || label.length > 63 || !/^[a-z0-9*?](?:[a-z0-9*?-]*[a-z0-9*?])?$/u.test(label))
+      .some(
+        (label) =>
+          !label ||
+          label.length > 63 ||
+          !/^[a-z0-9*?](?:[a-z0-9*?-]*[a-z0-9*?])?$/u.test(label),
+      )
   )
     throw badRequest('blacklist', 'invalid')
   const scheme = parts?.[1]?.toLowerCase()
   const port =
-    match[2] && !((scheme === 'https' && match[2] === '443') || (scheme === 'http' && match[2] === '80'))
+    match[2] &&
+    !(
+      (scheme === 'https' && match[2] === '443') ||
+      (scheme === 'http' && match[2] === '80')
+    )
       ? ':' + match[2]
       : ''
   return parts ? scheme + '://' + host + port + (parts[3] ?? '/') : host
 }
 export function validatePreferences(value: unknown): SearchPreferences {
-  const input = fields(value, ['maxResults', 'compression', 'cutoffLimit', 'blacklist', 'modelToolsPreferred'])
-  const { maxResults, compression, cutoffLimit, blacklist, modelToolsPreferred } = input
+  const input = fields(value, [
+    'maxResults',
+    'compression',
+    'cutoffLimit',
+    'blacklist',
+    'modelToolsPreferred',
+  ])
+  const {
+    maxResults,
+    compression,
+    cutoffLimit,
+    blacklist,
+    modelToolsPreferred,
+  } = input
   if (
     typeof maxResults !== 'number' ||
     !Number.isInteger(maxResults) ||
@@ -213,7 +272,10 @@ function glob(pattern: string, value: string): boolean {
   while (pattern[p] === '*') p++
   return p === pattern.length
 }
-export function checkBlacklist(raw: string, preferences: SearchPreferences): void {
+export function checkBlacklist(
+  raw: string,
+  preferences: SearchPreferences,
+): void {
   const url = targetUrl(raw)
   if (
     preferences.blacklist.some((rule) =>
@@ -236,9 +298,14 @@ export function truncate(text: string, limit: number): string {
   return index < text.length ? text.slice(0, index) : text
 }
 export function cutoff(text: string, preferences: SearchPreferences): string {
-  return preferences.compression === 'cutoff' ? truncate(text, preferences.cutoffLimit) : text
+  return preferences.compression === 'cutoff'
+    ? truncate(text, preferences.cutoffLimit)
+    : text
 }
-export function processHits(hits: readonly SearchHit[], preferences: SearchPreferences): SearchHit[] {
+export function processHits(
+  hits: readonly SearchHit[],
+  preferences: SearchPreferences,
+): SearchHit[] {
   const seen = new Set<string>()
   const result: SearchHit[] = []
   for (const hit of hits) {
@@ -251,7 +318,11 @@ export function processHits(hits: readonly SearchHit[], preferences: SearchPrefe
     }
     if (seen.has(url)) continue
     seen.add(url)
-    result.push({ title: truncate(hit.title || url, 500), url, snippet: cutoff(hit.snippet, preferences) })
+    result.push({
+      title: truncate(hit.title || url, 500),
+      url,
+      snippet: cutoff(hit.snippet, preferences),
+    })
     if (result.length >= preferences.maxResults) break
   }
   return result
@@ -262,6 +333,7 @@ export function validateQuery(value: string): string {
   return query
 }
 export function validateTarget(value: string): string {
-  if (new TextEncoder().encode(stringValue(value, 'url')).length > 8192) throw badRequest('url', 'too_long', 8192)
+  if (new TextEncoder().encode(stringValue(value, 'url')).length > 8192)
+    throw badRequest('url', 'too_long', 8192)
   return targetUrl(value.trim()).href
 }

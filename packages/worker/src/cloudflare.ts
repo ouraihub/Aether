@@ -2,7 +2,10 @@
 export interface D1Statement {
   bind(...values: (string | number | null)[]): D1Statement
   first(): Promise<unknown>
-  all(): Promise<{ readonly results?: readonly unknown[]; readonly success: boolean }>
+  all(): Promise<{
+    readonly results?: readonly unknown[]
+    readonly success: boolean
+  }>
 }
 export interface D1Database {
   prepare(sql: string): D1Statement

@@ -51,12 +51,14 @@ fn github_urls_reject_untrusted_and_normalized_paths() {
         "https://github.com/a/b/tree/main",
         "https://github.com/a/b/blob/main/SKILL.md",
         "https://github.com/a/b/blob/feature/slash/skills/one/SKILL.md",
-        "https://raw.githubusercontent.com/a/b/refs/heads/feature/slash/skills/one/SKILL.md",
+        "https://raw.githubusercontent.com/a/b/refs/heads/feature/slash/"
+        "skills/one/SKILL.md",
     ] {
         assert!(parse_github_url(url).is_ok(), "{url}");
     }
     let parsed = parse_github_url(
-        "https://raw.githubusercontent.com/a/b/refs/heads/feature/slash/one/SKILL.md",
+        "https://raw.githubusercontent.com/a/b/refs/heads/feature/slash/"
+        "one/SKILL.md",
     )
     .unwrap();
     assert_eq!(parsed.namespace.as_deref(), Some("heads"));
@@ -184,7 +186,8 @@ fn prepared_zip_uses_real_source_preview_and_digest_install() {
     let bytes = zip_package(&[
         (
             "SKILL.md".into(),
-            b"---\nname: sample\ndescription: Safe sample\n---\nRead this.\n".to_vec(),
+            b"---\nname: sample\ndescription: Safe sample\n---\n"
+                .to_vec(),
         ),
         ("LICENSE.txt".into(), b"Example license".to_vec()),
         ("scripts/a.py".into(), b"print(1)".to_vec()),
@@ -195,13 +198,18 @@ fn prepared_zip_uses_real_source_preview_and_digest_install() {
             file_name: "sample.zip".into(),
             bytes,
         },
-        origin: "https://github.com/a/b/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/SKILL.md"
-            .into(),
+        origin: "https://github.com/a/b/blob/"
+            .to_owned()
+            + &"a".repeat(40)
+            + "/SKILL.md",
         ignored: vec!["README.md".into()],
     };
     let encoded = serde_json::to_value(&prepared).unwrap();
     assert_eq!(encoded["source"]["bytes"]["fileName"], "sample.zip");
-    let source: crate::Source = serde_json::from_value(encoded["source"].clone()).unwrap();
+    let source: crate::Source = serde_json::from_value(
+        encoded["source"].clone(),
+    )
+    .unwrap();
     let directory = tempfile::tempdir().unwrap();
     let store = crate::Store::open(directory.path(), &[]).unwrap();
     let preview = store.preview(&source).unwrap();
@@ -212,12 +220,16 @@ fn prepared_zip_uses_real_source_preview_and_digest_install() {
 }
 
 #[tokio::test]
-#[ignore = "requires public GitHub network access and unauthenticated API quota"]
+#[ignore = "requires public GitHub network access and unauthenticated API "
+    "quota"]
 async fn public_github_prepare_preview_install() {
     let prepared =
-        prepare("https://github.com/anthropics/skills/blob/main/skills/internal-comms/SKILL.md")
-            .await
-            .unwrap();
+        prepare(
+            "https://github.com/anthropics/skills/blob/main/skills/"
+                "internal-comms/SKILL.md",
+        )
+        .await
+        .unwrap();
     let pinned = parse_github_url(&prepared.origin).unwrap();
     assert!(sha(&pinned.tail[0]));
     let directory = tempfile::tempdir().unwrap();

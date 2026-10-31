@@ -7,7 +7,8 @@ use aether_observability::LogConfig;
 
 #[expect(
     clippy::print_stderr,
-    reason = "logging may not be initialised yet; this is the only way to report a startup failure"
+    reason = "logging may not be initialised yet; this is the only way to \
+              report a startup failure"
 )]
 fn main() {
     if let Err(error) = run() {
@@ -17,9 +18,14 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // Before `tauri::Builder`, so logs from other plugins' setup reach the file (docs/10 §8).
+    // Before `tauri::Builder`, so logs from other plugins' setup reach the
+    // file (docs/10 §8).
     let root = aether_observability::data_root("aether-providers-only")?;
-    let logs = aether_observability::init(&root.join("logs"), LogConfig::default(), None)?;
+    let logs = aether_observability::init(
+        &root.join("logs"),
+        LogConfig::default(),
+        None,
+    )?;
     let aether = tauri_plugin_aether::Builder::new(logs)
         .providers(Arc::new(aether_providers::Store::open(&root)?))
         .build()?;

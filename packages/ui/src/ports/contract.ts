@@ -1,4 +1,5 @@
-// Port interfaces and KitClientError (docs/16 §2, docs/04 §3.2). Pure TS: no Tauri imports.
+// Port interfaces and KitClientError (docs/16 §2, docs/04 §3.2).
+// Pure TS: no Tauri imports.
 import type {
   Conversation,
   ConversationSummary,
@@ -55,7 +56,7 @@ export interface DesktopActions {
   openLogsDirectory(): Promise<void>
 }
 
-/** Host-supplied provider template, seeded once into the store disabled and keyless (docs/39). */
+/** Host-supplied provider template, seeded disabled and keyless (docs/39). */
 export interface ProviderPreset {
   id: string
   name: string
@@ -66,9 +67,9 @@ export interface ProviderPreset {
 }
 
 export interface ProvidersPort {
-  /** Browser asks for the current password; desktop uses its local credential boundary. */
+  /** Browser asks for the current password; desktop uses its boundary. */
   readonly revealNeedsPassword: boolean
-  /** Host stores `keyStrategy` and key set-aside state (web); `false` = rotation only, fields ignored. */
+  /** Host stores key strategy and set-aside state; false means rotation. */
   readonly keyStrategies: boolean
   list(): Promise<Provider[]>
   setEnabled(id: string, enabled: boolean): Promise<Provider[]>
@@ -86,7 +87,12 @@ export interface ConversationClient {
   get(id: string): Promise<Conversation>
   remove(id: string): Promise<void>
   rename(id: string, title: string): Promise<ConversationSummary>
-  editTurn(conversationId: string, turnId: string, text: string, expectedText: string): Promise<Conversation>
+  editTurn(
+    conversationId: string,
+    turnId: string,
+    text: string,
+    expectedText: string,
+  ): Promise<Conversation>
   removeTurn(conversationId: string, turnId: string): Promise<Conversation>
   fork(conversationId: string, turnId: string): Promise<Conversation>
   selectTurn(conversationId: string, turnId: string): Promise<Conversation>
@@ -94,7 +100,11 @@ export interface ConversationClient {
 
 export interface RunClient {
   /** Resolves once accepted; events may arrive before acceptance. */
-  start(request: RunRequest, onEvent: (event: RunEvent) => void, options?: CallOptions): Promise<RunAccepted>
+  start(
+    request: RunRequest,
+    onEvent: (event: RunEvent) => void,
+    options?: CallOptions,
+  ): Promise<RunAccepted>
   cancel(runId: string): Promise<void>
   approve(runId: string, callId: string, allow: boolean): Promise<void>
   getSnapshot(runId: string): Promise<RunSnapshot>
@@ -105,8 +115,12 @@ export interface SkillsPort {
   get(id: string): Promise<SkillDto>
   /** Reads and validates a package; nothing is stored. */
   preview(source: Source): Promise<Preview>
-  /** `confirmedDigest` is the previewed digest; a changed package rejects with `conflict{content_changed}`. */
-  install(source: Source, confirmedDigest: string, replace: boolean): Promise<SkillMeta[]>
+  /** A changed package rejects with conflict{content_changed}. */
+  install(
+    source: Source,
+    confirmedDigest: string,
+    replace: boolean,
+  ): Promise<SkillMeta[]>
   save(input: ManualSave): Promise<SkillMeta[]>
   duplicate(id: string, newName: string): Promise<SkillMeta[]>
   reorder(ids: readonly string[]): Promise<SkillMeta[]>
@@ -118,7 +132,11 @@ export interface McpClientPort {
   save(server: ServerSave): Promise<ServerDto[]>
   remove(id: string): Promise<ServerDto[]>
   refresh(serverId: string): Promise<ToolDto[]>
-  setToolApproval(serverId: string, tool: string, approval: Approval): Promise<void>
+  setToolApproval(
+    serverId: string,
+    tool: string,
+    approval: Approval,
+  ): Promise<void>
 }
 
 export interface McpServerPort {
@@ -133,7 +151,7 @@ export interface McpServerPort {
   setScopes(ids: readonly string[]): Promise<ScopeState[]>
 }
 
-/** Ports the host declared; components skip the area of a missing port (docs/16 §2). */
+/** Ports the host declared; components skip missing areas (docs/16 §2). */
 export interface KitPorts {
   logs?: LogsPort
   desktop?: DesktopActions

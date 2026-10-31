@@ -3,4 +3,19 @@
 /**
  * Stable error codes. The UI translates by code, never by message (docs/00 §7.2).
  */
-export type KitErrorCode = "bad_request" | "not_found" | "conflict" | "unsupported" | "cancelled" | "unauthorized" | "forbidden" | "rate_limited" | "upstream" | "timeout" | "network" | "needs_config" | "budget_exceeded" | "incompatible_db" | "internal";
+export type KitErrorCode =
+  | 'bad_request'
+  | 'not_found'
+  | 'conflict'
+  | 'unsupported'
+  | 'cancelled'
+  | 'unauthorized'
+  | 'forbidden'
+  | 'rate_limited'
+  | 'upstream'
+  | 'timeout'
+  | 'network'
+  | 'needs_config'
+  | 'budget_exceeded'
+  | 'incompatible_db'
+  | 'internal'

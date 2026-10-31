@@ -34,13 +34,21 @@ function json(body: string): Record<string, unknown> {
   } catch {
     throw new KitFailure('upstream', 'Search provider returned invalid JSON')
   }
-  if (!record(value)) throw new KitFailure('upstream', 'Search provider returned invalid JSON')
+  if (!record(value))
+    throw new KitFailure('upstream', 'Search provider returned invalid JSON')
   return value
 }
-function providerError(provider: string, payload: Record<string, unknown>): void {
+function providerError(
+  provider: string,
+  payload: Record<string, unknown>,
+): void {
   if (
-    (provider === 'bocha' && payload.code !== undefined && payload.code !== 200) ||
-    (provider === 'querit' && payload.error_code !== undefined && payload.error_code !== 200) ||
+    (provider === 'bocha' &&
+      payload.code !== undefined &&
+      payload.code !== 200) ||
+    (provider === 'querit' &&
+      payload.error_code !== undefined &&
+      payload.error_code !== 200) ||
     (provider === 'firecrawl' && payload.success === false)
   )
     throw new KitFailure('upstream', 'Search provider returned an error')
@@ -53,12 +61,24 @@ function collect(items: readonly unknown[]): SearchHit[] {
     hits.push({
       title: text(item, 'title', 'name') || url,
       url,
-      snippet: text(item, 'content', 'text', 'snippet', 'description', 'excerpts', 'summary', 'markdown'),
+      snippet: text(
+        item,
+        'content',
+        'text',
+        'snippet',
+        'description',
+        'excerpts',
+        'summary',
+        'markdown',
+      ),
     })
   }
   return hits
 }
-export function parseSearchResponse(provider: string, body: string): SearchHit[] {
+export function parseSearchResponse(
+  provider: string,
+  body: string,
+): SearchHit[] {
   if (provider === 'exa-mcp') return parseMcp(body)
   const payload = json(body)
   providerError(provider, payload)
@@ -78,7 +98,10 @@ export function parseSearchResponse(provider: string, body: string): SearchHit[]
     const items = at(payload, path)
     if (Array.isArray(items)) return collect(items)
   }
-  throw new KitFailure('upstream', 'Search provider returned invalid result shape')
+  throw new KitFailure(
+    'upstream',
+    'Search provider returned invalid result shape',
+  )
 }
 export function parseMcp(body: string): SearchHit[] {
   const envelopes: Record<string, unknown>[] = []
@@ -104,7 +127,8 @@ export function parseMcp(body: string): SearchHit[] {
         if (value) chunks.push(value)
       }
   }
-  if (!chunks.length) throw new KitFailure('upstream', 'Exa MCP returned invalid result shape')
+  if (!chunks.length)
+    throw new KitFailure('upstream', 'Exa MCP returned invalid result shape')
   return collect(
     chunks
       .join('\n\n')
@@ -112,15 +136,25 @@ export function parseMcp(body: string): SearchHit[] {
       .map((chunk) => ({
         title: chunk.match(/^Title:[^\S\r\n]*(.*)$/mu)?.[1] ?? '',
         url: chunk.match(/^URL:[^\S\r\n]*(.*)$/mu)?.[1] ?? '',
-        content: chunk.match(/^(?:Text|Highlights):[^\S\r\n]*([\s\S]*)$/mu)?.[1]?.trim() ?? '',
+        content:
+          chunk
+            .match(/^(?:Text|Highlights):[^\S\r\n]*([\s\S]*)$/mu)?.[1]
+            ?.trim() ?? '',
       })),
   )
 }
-function headers(key: string | undefined, kind: 'bearer' | 'api' = 'bearer'): Record<string, string> {
+function headers(
+  key: string | undefined,
+  kind: 'bearer' | 'api' = 'bearer',
+): Record<string, string> {
   return {
     accept: 'application/json',
     'content-type': 'application/json',
-    ...(key ? (kind === 'api' ? { 'x-api-key': key } : { authorization: 'Bearer ' + key }) : {}),
+    ...(key
+      ? kind === 'api'
+        ? { 'x-api-key': key }
+        : { authorization: 'Bearer ' + key }
+      : {}),
   }
 }
 function basic(username: string, key: string): string {
@@ -137,25 +171,35 @@ export function searchRequest(
   let url = config.baseUrl.replace(/\/+$/u, '')
   const count = config.preferences.maxResults
   let init: RequestInit
-  const post = (payload: unknown, kind: 'bearer' | 'api' = 'bearer'): RequestInit => ({
+  const post = (
+    payload: unknown,
+    kind: 'bearer' | 'api' = 'bearer',
+  ): RequestInit => ({
     method: 'POST',
     headers: headers(key, kind),
     body: JSON.stringify(payload),
   })
   switch (config.provider) {
     case 'zhipu':
-      init = post({ search_query: query, search_engine: 'search_std', search_intent: false })
+      init = post({
+        search_query: query,
+        search_engine: 'search_std',
+        search_intent: false,
+      })
       break
     case 'tavily':
       url += '/search'
       init = post({ query, max_results: count })
       break
     case 'searxng':
-      url += '/search?q=' + encodeURIComponent(query) + '&format=json&language=auto'
+      url +=
+        '/search?q=' + encodeURIComponent(query) + '&format=json&language=auto'
       init = {
         headers: {
           accept: 'application/json',
-          ...(config.basicAuthUsername ? { authorization: basic(config.basicAuthUsername, key ?? '') } : {}),
+          ...(config.basicAuthUsername
+            ? { authorization: basic(config.basicAuthUsername, key ?? '') }
+            : {}),
         },
       }
       break
@@ -172,12 +216,20 @@ export function searchRequest(
             method: 'tools/call',
             params: {
               name: 'web_search_exa',
-              arguments: { query, type: 'auto', numResults: count, livecrawl: 'fallback' },
+              arguments: {
+                query,
+                type: 'auto',
+                numResults: count,
+                livecrawl: 'fallback',
+              },
             },
           },
           'api',
         ),
-        headers: { ...headers(key, 'api'), accept: 'application/json, text/event-stream' },
+        headers: {
+          ...headers(key, 'api'),
+          accept: 'application/json, text/event-stream',
+        },
       }
       break
     case 'bocha':
@@ -189,12 +241,28 @@ export function searchRequest(
       init = post({ query, count })
       break
     case 'brave':
-      url += '/res/v1/web/search?q=' + encodeURIComponent(query) + '&count=' + Math.min(20, count)
-      init = { headers: { accept: 'application/json', 'x-subscription-token': key ?? '' } }
+      url +=
+        '/res/v1/web/search?q=' +
+        encodeURIComponent(query) +
+        '&count=' +
+        Math.min(20, count)
+      init = {
+        headers: {
+          accept: 'application/json',
+          'x-subscription-token': key ?? '',
+        },
+      }
       break
     case 'parallel':
       url += '/v1/search'
-      init = post({ objective: query, search_queries: [query], advanced_settings: { max_results: count } }, 'api')
+      init = post(
+        {
+          objective: query,
+          search_queries: [query],
+          advanced_settings: { max_results: count },
+        },
+        'api',
+      )
       break
     case 'jina':
       url += '/' + encodeURIComponent(query)
@@ -202,10 +270,17 @@ export function searchRequest(
       break
     case 'firecrawl':
       url += '/v2/search'
-      init = post({ query, limit: count, scrapeOptions: { formats: ['markdown'] } })
+      init = post({
+        query,
+        limit: count,
+        scrapeOptions: { formats: ['markdown'] },
+      })
       break
     default:
-      throw new KitFailure('bad_request', 'Unsupported search provider', { field: 'provider', reason: 'unsupported' })
+      throw new KitFailure('bad_request', 'Unsupported search provider', {
+        field: 'provider',
+        reason: 'unsupported',
+      })
   }
   return { url, init }
 }
@@ -222,23 +297,44 @@ export function fetchRequest(
         init: {
           method: 'POST',
           headers: headers(key),
-          body: JSON.stringify({ urls: [target], format: 'markdown', extrasMeta: true }),
+          body: JSON.stringify({
+            urls: [target],
+            format: 'markdown',
+            extrasMeta: true,
+          }),
         },
       }
     case 'jina':
-      return { url: base + '/' + target, init: { headers: { ...headers(key), 'x-retain-images': 'none' } } }
+      return {
+        url: base + '/' + target,
+        init: { headers: { ...headers(key), 'x-retain-images': 'none' } },
+      }
     case 'firecrawl':
       return {
         url: base + '/v2/scrape',
-        init: { method: 'POST', headers: headers(key), body: JSON.stringify({ url: target, formats: ['markdown'] }) },
+        init: {
+          method: 'POST',
+          headers: headers(key),
+          body: JSON.stringify({ url: target, formats: ['markdown'] }),
+        },
       }
     case 'fetch':
-      return { url: target, init: { method: 'GET', headers: { accept: 'text/html, text/plain' } } }
+      return {
+        url: target,
+        init: { method: 'GET', headers: { accept: 'text/html, text/plain' } },
+      }
     default:
-      throw new KitFailure('bad_request', 'Unsupported fetch provider', { field: 'provider', reason: 'unsupported' })
+      throw new KitFailure('bad_request', 'Unsupported fetch provider', {
+        field: 'provider',
+        reason: 'unsupported',
+      })
   }
 }
-export function parsePage(provider: string, body: string, target: string): SearchPage {
+export function parsePage(
+  provider: string,
+  body: string,
+  target: string,
+): SearchPage {
   if (provider === 'fetch') {
     const title =
       body
@@ -246,14 +342,23 @@ export function parsePage(provider: string, body: string, target: string): Searc
         ?.replace(/<[^>]*>/gu, ' ')
         .replace(/\s+/gu, ' ')
         .trim() || target
-    const visible = body.replace(/<!--[\s\S]*?-->|<(script|style|noscript|head|title)\b[^>]*>[\s\S]*?<\/\1\s*>/giu, ' ')
-    const documentBody = visible.match(/<body\b[^>]*>([\s\S]*?)(?:<\/body\s*>|$)/iu)?.[1] ?? visible
+    const visible = body.replace(
+      /<!--[\s\S]*?-->|<(script|style|noscript|head|title)\b[^>]*>[\s\S]*?<\/\1\s*>/giu,
+      ' ',
+    )
+    const documentBody =
+      visible.match(/<body\b[^>]*>([\s\S]*?)(?:<\/body\s*>|$)/iu)?.[1] ??
+      visible
     const content = documentBody
       .replace(/<[^>]*>/gu, ' ')
       .replace(/\s+/gu, ' ')
       .trim()
     if (!content) throw new KitFailure('upstream', 'Page has no content')
-    return { title: truncate(title, 500), url: target, content: truncate(content, 24000) }
+    return {
+      title: truncate(title, 500),
+      url: target,
+      content: truncate(content, 24000),
+    }
   }
   const payload = json(body)
   providerError(provider, payload)
@@ -269,9 +374,11 @@ export function parsePage(provider: string, body: string, target: string): Searc
     data = at(payload, 'data') ?? payload
     metadata = at(data, 'metadata')
   }
-  const url = text(data, 'url', 'link') || text(metadata, 'sourceURL', 'url') || target
+  const url =
+    text(data, 'url', 'link') || text(metadata, 'sourceURL', 'url') || target
   const title = text(data, 'title') || text(metadata, 'title') || url
   const content = text(data, 'markdown', 'content', 'text')
-  if (!content) throw new KitFailure('upstream', 'Search provider returned no page content')
+  if (!content)
+    throw new KitFailure('upstream', 'Search provider returned no page content')
   return { title: truncate(title, 500), url, content: truncate(content, 24000) }
 }

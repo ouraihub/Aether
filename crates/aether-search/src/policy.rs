@@ -12,7 +12,10 @@ fn normalized_rule(rule: &str) -> Result<(String, bool), KitError> {
     }
     let (scheme, rest) = match rule.split_once("://") {
         Some((scheme, rest))
-            if matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https" | "*") =>
+            if matches!(
+                scheme.to_ascii_lowercase().as_str(),
+                "http" | "https" | "*"
+            ) =>
         {
             (Some(scheme.to_ascii_lowercase()), rest)
         }
@@ -25,7 +28,10 @@ fn normalized_rule(rule: &str) -> Result<(String, bool), KitError> {
         return Err(invalid());
     }
     let (host, port) = match authority.rsplit_once(':') {
-        Some((host, port)) if scheme.is_some() && port.parse::<u16>().is_ok_and(|p| p != 0) => {
+        Some((host, port))
+            if scheme.is_some()
+                && port.parse::<u16>().is_ok_and(|p| p != 0) =>
+        {
             (host, Some(port))
         }
         Some(_) => return Err(invalid()),
@@ -40,7 +46,10 @@ fn normalized_rule(rule: &str) -> Result<(String, bool), KitError> {
                 || label.ends_with('-')
                 || !label
                     .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'*' | b'?'))
+                    .all(|b| {
+                        b.is_ascii_alphanumeric()
+                            || matches!(b, b'-' | b'*' | b'?')
+                    })
         })
     {
         return Err(invalid());
@@ -117,15 +126,20 @@ fn blocked_url(url: &reqwest::Url, prefs: &SearchPreferences) -> bool {
         } else if rule.contains(['*', '?']) {
             glob_match(&rule, host)
         } else {
-            host == rule || host.strip_suffix(&rule).is_some_and(|s| s.ends_with('.'))
+            host == rule
+                || host.strip_suffix(&rule).is_some_and(|s| s.ends_with('.'))
         }
     })
 }
 /// Rejects a URL that matches a configured exclusion rule.
 /// # Errors
 /// Reports malformed URLs or a blacklisted source.
-pub fn check_blacklist(url: &str, prefs: &SearchPreferences) -> Result<(), KitError> {
-    let url = reqwest::Url::parse(url).map_err(|_| KitError::bad_request("url", "invalid"))?;
+pub fn check_blacklist(
+    url: &str,
+    prefs: &SearchPreferences,
+) -> Result<(), KitError> {
+    let url = reqwest::Url::parse(url)
+        .map_err(|_| KitError::bad_request("url", "invalid"))?;
     if blocked_url(&url, prefs) {
         return Err(KitError::bad_request("url", "blacklisted"));
     }

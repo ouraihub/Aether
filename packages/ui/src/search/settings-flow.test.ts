@@ -8,11 +8,24 @@ function setup() {
     capability: 'search',
     defaultProvider: 'jina',
     providers: [],
-    preferences: { maxResults: 5, compression: 'none', cutoffLimit: 2000, blacklist: [], modelToolsPreferred: false },
+    preferences: {
+      maxResults: 5,
+      compression: 'none',
+      cutoffLimit: 2000,
+      blacklist: [],
+      modelToolsPreferred: false,
+    },
   }
-  const config = { capability: 'search' as const, provider: 'jina', baseUrl: 'https://example.test' }
+  const config = {
+    capability: 'search' as const,
+    provider: 'jina',
+    baseUrl: 'https://example.test',
+  }
   const save = vi.fn(async () => settings)
-  const saveKey = vi.fn(async () => ({ ...settings, defaultProvider: 'saved-key' }))
+  const saveKey = vi.fn(async () => ({
+    ...settings,
+    defaultProvider: 'saved-key',
+  }))
   const check = vi.fn(async () => ({ count: 3 }))
   const port = createFakePorts({ search: { save, saveKey, check } }).search
   if (!port) throw new Error('Expected search fixture port')
@@ -40,7 +53,11 @@ function setup() {
 for (const failedStep of ['save', 'saveKey', 'check'] as const) {
   test(`${failedStep} failure preserves only already persisted callbacks and the original error`, async () => {
     const h = setup()
-    const failure = new KitClientError({ code: 'internal', message: failedStep, details: {} })
+    const failure = new KitClientError({
+      code: 'internal',
+      message: failedStep,
+      details: {},
+    })
     h[failedStep].mockRejectedValueOnce(failure)
     await expect(
       saveSearchSettings(
@@ -53,9 +70,15 @@ for (const failedStep of ['save', 'saveKey', 'check'] as const) {
         h.session,
       ),
     ).rejects.toBe(failure)
-    expect(h.session.onConfigSaved).toHaveBeenCalledTimes(failedStep === 'save' ? 0 : 1)
-    expect(h.session.onKeySaved).toHaveBeenCalledTimes(failedStep === 'check' ? 1 : 0)
-    expect(h.session.onSettings).toHaveBeenCalledTimes(failedStep === 'save' ? 0 : failedStep === 'saveKey' ? 1 : 2)
+    expect(h.session.onConfigSaved).toHaveBeenCalledTimes(
+      failedStep === 'save' ? 0 : 1,
+    )
+    expect(h.session.onKeySaved).toHaveBeenCalledTimes(
+      failedStep === 'check' ? 1 : 0,
+    )
+    expect(h.session.onSettings).toHaveBeenCalledTimes(
+      failedStep === 'save' ? 0 : failedStep === 'saveKey' ? 1 : 2,
+    )
     expect(h.saveKey).toHaveBeenCalledTimes(failedStep === 'save' ? 0 : 1)
     expect(h.check).toHaveBeenCalledTimes(failedStep === 'check' ? 1 : 0)
   })
@@ -74,7 +97,10 @@ test('config and key callbacks apply immediately, before a pending check settles
   )
   await called.promise
   expect(h.session.onConfigSaved).toHaveBeenCalledWith(h.config)
-  expect(h.session.onSettings).toHaveBeenLastCalledWith({ ...h.settings, defaultProvider: 'saved-key' })
+  expect(h.session.onSettings).toHaveBeenLastCalledWith({
+    ...h.settings,
+    defaultProvider: 'saved-key',
+  })
   pendingCheck.resolve({ count: 4 })
   await expect(saving).resolves.toEqual({
     settings: { ...h.settings, defaultProvider: 'saved-key' },
@@ -85,7 +111,11 @@ test('config and key callbacks apply immediately, before a pending check settles
 test('empty key and optional check are skipped', async () => {
   const h = setup()
   await expect(
-    saveSearchSettings(h.port, { config: h.config, key: { value: '  ' }, check: false }, h.session),
+    saveSearchSettings(
+      h.port,
+      { config: h.config, key: { value: '  ' }, check: false },
+      h.session,
+    ),
   ).resolves.toEqual({ settings: h.settings })
   expect(h.saveKey).not.toHaveBeenCalled()
   expect(h.check).not.toHaveBeenCalled()
@@ -138,7 +168,11 @@ test('cancellation from a partial-success callback prevents the next step', asyn
   const h = setup()
   h.session.onKeySaved.mockImplementation(h.invalidate)
   await expect(
-    saveSearchSettings(h.port, { config: h.config, key: { value: 'example-secret' }, check: true }, h.session),
+    saveSearchSettings(
+      h.port,
+      { config: h.config, key: { value: 'example-secret' }, check: true },
+      h.session,
+    ),
   ).rejects.toMatchObject({ code: 'cancelled' })
   expect(h.session.onConfigSaved).toHaveBeenCalledOnce()
   expect(h.session.onKeySaved).toHaveBeenCalledOnce()
@@ -148,7 +182,9 @@ test('cancellation from a partial-success callback prevents the next step', asyn
 test('already cancelled calls never reach the port', async () => {
   const h = setup()
   h.invalidate()
-  await expect(saveSearchSettings(h.port, { config: h.config, check: false }, h.session)).rejects.toMatchObject({
+  await expect(
+    saveSearchSettings(h.port, { config: h.config, check: false }, h.session),
+  ).rejects.toMatchObject({
     code: 'cancelled',
   })
   expect(h.save).not.toHaveBeenCalled()
@@ -158,7 +194,9 @@ for (const stage of ['saveKey', 'check'] as const) {
   test(`abort during ${stage} keeps prior successes and ignores the late response`, async () => {
     const h = setup()
     const entered = Promise.withResolvers<void>()
-    const pending = Promise.withResolvers<SearchSettingsDto & { count: number }>()
+    const pending = Promise.withResolvers<
+      SearchSettingsDto & { count: number }
+    >()
     h[stage].mockImplementationOnce(() => {
       entered.resolve()
       return pending.promise
@@ -176,8 +214,12 @@ for (const stage of ['saveKey', 'check'] as const) {
     await rejected
     pending.resolve({ ...h.settings, count: 7 })
     expect(h.session.onConfigSaved).toHaveBeenCalledOnce()
-    expect(h.session.onKeySaved).toHaveBeenCalledTimes(stage === 'check' ? 1 : 0)
-    expect(h.session.onSettings).toHaveBeenCalledTimes(stage === 'check' ? 2 : 1)
+    expect(h.session.onKeySaved).toHaveBeenCalledTimes(
+      stage === 'check' ? 1 : 0,
+    )
+    expect(h.session.onSettings).toHaveBeenCalledTimes(
+      stage === 'check' ? 2 : 1,
+    )
     expect(h.check).toHaveBeenCalledTimes(stage === 'check' ? 1 : 0)
   })
 }
@@ -186,7 +228,11 @@ test('each request keeps the originally captured config and key identity', async
   const h = setup()
   const pending = Promise.withResolvers<SearchSettingsDto>()
   h.save.mockReturnValueOnce(pending.promise)
-  const input = { config: { ...h.config }, key: { value: 'original-secret', keyId: 'original-key' }, check: true }
+  const input = {
+    config: { ...h.config },
+    key: { value: 'original-secret', keyId: 'original-key' },
+    check: true,
+  }
   const saving = saveSearchSettings(h.port, input, h.session)
   input.config.provider = 'other-provider'
   input.key.value = 'new-secret'
@@ -194,6 +240,12 @@ test('each request keeps the originally captured config and key identity', async
   input.check = false
   pending.resolve(h.settings)
   await saving
-  expect(h.saveKey).toHaveBeenCalledWith('search', 'jina', 'original-secret', 'original-key', undefined)
+  expect(h.saveKey).toHaveBeenCalledWith(
+    'search',
+    'jina',
+    'original-secret',
+    'original-key',
+    undefined,
+  )
   expect(h.check).toHaveBeenCalledWith('search', 'jina', undefined)
 })

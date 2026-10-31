@@ -1,4 +1,5 @@
-//! Independent history IPC; all domain validation and UI projection belong to runtime.
+//! Independent history IPC; all domain validation and UI projection belong
+//! to runtime.
 
 use std::sync::Arc;
 
@@ -12,7 +13,9 @@ use tauri::{AppHandle, Manager, Runtime};
 
 async fn blocking<R: Runtime, T: Send + 'static>(
     app: &AppHandle<R>,
-    f: impl FnOnce(&ConversationService) -> Result<T, KitError> + Send + 'static,
+    f: impl FnOnce(&ConversationService) -> Result<T, KitError>
+        + Send
+        + 'static,
 ) -> Result<T, KitError> {
     let service = app.state::<Arc<ConversationService>>().inner().clone();
     tauri::async_runtime::spawn_blocking(move || f(&service))
@@ -21,7 +24,11 @@ async fn blocking<R: Runtime, T: Send + 'static>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_conversations"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_conversations"),
+    err(level = "warn")
+)]
 pub(crate) async fn chat_conversations<R: Runtime>(
     app: AppHandle<R>,
     scope: Option<String>,
@@ -35,7 +42,11 @@ pub(crate) async fn chat_conversations<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_conversation"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_conversation"),
+    err(level = "warn")
+)]
 pub(crate) async fn chat_conversation<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -44,7 +55,11 @@ pub(crate) async fn chat_conversation<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_delete"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_delete"),
+    err(level = "warn")
+)]
 pub(crate) async fn chat_delete<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -54,7 +69,11 @@ pub(crate) async fn chat_delete<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_rename"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_rename"),
+    err(level = "warn")
+)]
 pub(crate) async fn chat_rename<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -67,7 +86,11 @@ pub(crate) async fn chat_rename<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_edit_turn"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_edit_turn"),
+    err(level = "warn")
+)]
 pub(crate) async fn chat_edit_turn<R: Runtime>(
     app: AppHandle<R>,
     conversation_id: String,
@@ -84,7 +107,11 @@ pub(crate) async fn chat_edit_turn<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_remove_turn"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_remove_turn"),
+    err(level = "warn")
+)]
 pub(crate) async fn chat_remove_turn<R: Runtime>(
     app: AppHandle<R>,
     conversation_id: String,
@@ -99,7 +126,11 @@ pub(crate) async fn chat_remove_turn<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_fork"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_fork"),
+    err(level = "warn")
+)]
 pub(crate) async fn chat_fork<R: Runtime>(
     app: AppHandle<R>,
     conversation_id: String,
@@ -114,7 +145,11 @@ pub(crate) async fn chat_fork<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_select_turn"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_select_turn"),
+    err(level = "warn")
+)]
 pub(crate) async fn chat_select_turn<R: Runtime>(
     app: AppHandle<R>,
     conversation_id: String,

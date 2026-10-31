@@ -1,6 +1,7 @@
-// createLogger (docs/16 §4.5): same whitelist as the backend (docs/10 §10), batched into LogsPort.ingest.
-// ponytail: secret detection stays in the backend (it rejects and counts); mirror mask.rs here
-// if a secret-looking value must never leave the page.
+// createLogger (docs/16 §4.5): same whitelist as the backend (docs/10 §10),
+// batched into LogsPort.ingest.
+// ponytail: secret detection stays in the backend (it rejects and counts);
+// mirror mask.rs here if a secret-looking value must never leave the page.
 import type { KitLogger, LogFields } from '../context'
 import type { IngestEntry, IngestLevel, LogsPort } from '../ports'
 
@@ -72,9 +73,12 @@ export function createLogger(port: LogsPort): BatchingLogger {
       return
     }
     if (queue.length >= MAX_QUEUE) {
-      // Full: drop the oldest debug/info first; a new debug/info entry is dropped itself.
+      // Full: drop the oldest debug/info first; a new debug/info entry is
+      // dropped itself.
       dropped++
-      const low = queue.findIndex((entry) => entry.level === 'debug' || entry.level === 'info')
+      const low = queue.findIndex(
+        (entry) => entry.level === 'debug' || entry.level === 'info',
+      )
       if (low >= 0) queue.splice(low, 1)
       else if (level === 'debug' || level === 'info') return
       else queue.shift()

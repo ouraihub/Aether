@@ -45,7 +45,13 @@ export interface ToolCall {
 }
 export type Message =
   | { user: string; images?: readonly ImagePart[] }
-  | { assistant: { text: string; tool_calls: ToolCall[]; reasoning?: ReasoningBlock[] } }
+  | {
+      assistant: {
+        text: string
+        tool_calls: ToolCall[]
+        reasoning?: ReasoningBlock[]
+      }
+    }
   | { tool: { call_id: string; text: string } }
 export type ToolSource = { kind: 'host' } | { kind: 'mcp'; server: string }
 export interface ToolSpec {

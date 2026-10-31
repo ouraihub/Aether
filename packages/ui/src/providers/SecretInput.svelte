@@ -37,7 +37,9 @@
     editKeyId = $state<string | null>(null)
   const keys = $derived(endpoint?.keys ?? [])
   const primary = $derived(primaryKey(keys))
-  const plain = $derived(revealed && revealed.id === primary?.id ? revealed.text : null)
+  const plain = $derived(
+    revealed && revealed.id === primary?.id ? revealed.text : null,
+  )
   const session = createClientSession()
   let passwordRevision = 0
   let textRevision = 0
@@ -83,7 +85,12 @@
       if (copying) await copy()
     } catch (error) {
       if (session.isCurrent(token))
-        notify.toast('error', error instanceof Error ? error.message : t('providers.key_reveal_failed'))
+        notify.toast(
+          'error',
+          error instanceof Error
+            ? error.message
+            : t('providers.key_reveal_failed'),
+        )
     } finally {
       if (session.isCurrent(token)) {
         busy = false
@@ -103,9 +110,11 @@
     try {
       if (!session.isCurrent(token)) return
       await navigator.clipboard.writeText(value)
-      if (session.isCurrent(token)) notify.toast('success', t('providers.key_copied'))
+      if (session.isCurrent(token))
+        notify.toast('success', t('providers.key_copied'))
     } catch {
-      if (session.isCurrent(token)) notify.toast('error', t('providers.key_copy_failed'))
+      if (session.isCurrent(token))
+        notify.toast('error', t('providers.key_copy_failed'))
     }
   }
   async function run(action: (port: ProvidersPort) => Promise<Provider[]>) {
@@ -143,7 +152,10 @@
     if (!endpointId || !keyId) return
     const token = session.capture()
     if (
-      !(await notify.confirm({ title: t('providers.key_delete'), body: t('providers.key_delete_confirm') })) ||
+      !(await notify.confirm({
+        title: t('providers.key_delete'),
+        body: t('providers.key_delete_confirm'),
+      })) ||
       !session.isCurrent(token)
     )
       return
@@ -189,9 +201,14 @@
           class="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-2.5 text-left outline-none"
           onclick={() => manage(null)}
         >
-          {#if primary.label}<span class="shrink-0 font-sans text-muted-foreground">{primary.label}</span>{/if}
-          <span class="min-w-0 truncate">{plain ?? maskedText(primary, t)}</span>
-          {#if keys.length > 1}<span class="shrink-0 font-sans text-kit-xs text-muted-foreground"
+          {#if primary.label}<span
+              class="shrink-0 font-sans text-muted-foreground"
+              >{primary.label}</span
+            >{/if}
+          <span class="min-w-0 truncate">{plain ?? maskedText(primary, t)}</span
+          >
+          {#if keys.length > 1}<span
+              class="shrink-0 font-sans text-kit-xs text-muted-foreground"
               >+{keys.length - 1}</span
             >{/if}
         </button>
@@ -227,8 +244,12 @@
             variant="ghost"
             size="icon-xs"
             class="text-muted-foreground"
-            title={plain === null ? t('providers.key_show') : t('providers.key_hide')}
-            aria-label={plain === null ? t('providers.key_show') : t('providers.key_hide')}
+            title={plain === null
+              ? t('providers.key_show')
+              : t('providers.key_hide')}
+            aria-label={plain === null
+              ? t('providers.key_show')
+              : t('providers.key_hide')}
             disabled={busy}
             onclick={() => {
               copyAfterReveal = false

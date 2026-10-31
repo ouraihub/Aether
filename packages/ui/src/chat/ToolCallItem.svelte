@@ -5,7 +5,9 @@
 
   let { tool }: { tool: ToolItem } = $props()
   const { t } = getKitContext().i18n
-  const name = $derived(tool.server ? `${tool.name} · ${tool.server}` : tool.name)
+  const name = $derived(
+    tool.server ? `${tool.name} · ${tool.server}` : tool.name,
+  )
 </script>
 
 <p class="text-muted-foreground truncate text-kit-sm">

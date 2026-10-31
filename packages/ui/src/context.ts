@@ -1,4 +1,5 @@
-// Host-injected dependencies of kit containers (docs/16 §3, docs/04 §5 "依赖注入走 context").
+// Host-injected dependencies of kit containers (docs/16 §3, docs/04 §5
+// "依赖注入走 context").
 import { createContext } from 'svelte'
 import type { KitI18n } from './i18n'
 import type { KitPorts } from './ports'
@@ -30,5 +31,6 @@ export interface KitContext {
   logger: KitLogger
 }
 
-/** The host root component calls `setKitContext` once; kit containers call `getKitContext`. */
+/** The host root calls `setKitContext` once; containers call
+ * `getKitContext`. */
 export const [getKitContext, setKitContext] = createContext<KitContext>()

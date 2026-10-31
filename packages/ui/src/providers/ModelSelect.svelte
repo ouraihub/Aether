@@ -46,16 +46,27 @@
   let open = $state(false)
   let highlighted = $state('')
   let active = $state<Cap[]>([])
-  const options = $derived(suppliedOptions === undefined ? loadedOptions : suppliedOptions)
+  const options = $derived(
+    suppliedOptions === undefined ? loadedOptions : suppliedOptions,
+  )
 
   const key = (r: ModelRef) => `${r.endpointId}\n${r.modelId}`
   // label is `{provider} · {slug} · {modelId}`; a model's display name never enters it.
-  const group = (o: ModelOption) => o.label.slice(0, Math.max(0, o.label.lastIndexOf(' · '))) || o.label
+  const group = (o: ModelOption) =>
+    o.label.slice(0, Math.max(0, o.label.lastIndexOf(' · '))) || o.label
   type Cap = 'vision' | 'reasoning' | 'tools' | 'web'
   const CAPS = [
     { cap: 'vision', icon: EyeIcon, has: (o: ModelOption) => o.canVision },
-    { cap: 'reasoning', icon: BrainIcon, has: (o: ModelOption) => o.reasoning !== null },
-    { cap: 'tools', icon: WrenchIcon, has: (o: ModelOption) => o.supportsTools === true },
+    {
+      cap: 'reasoning',
+      icon: BrainIcon,
+      has: (o: ModelOption) => o.reasoning !== null,
+    },
+    {
+      cap: 'tools',
+      icon: WrenchIcon,
+      has: (o: ModelOption) => o.supportsTools === true,
+    },
     { cap: 'web', icon: GlobeIcon, has: (o: ModelOption) => o.nativeWebSearch },
   ] as const
   const caps = $derived(CAPS.filter((c) => options?.some(c.has)))
@@ -71,7 +82,9 @@
     return out
   })
   const match = (_: string, search: string, keywords: string[] = []) =>
-    keywords.join(' ').toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0
+    keywords.join(' ').toLowerCase().includes(search.trim().toLowerCase())
+      ? 1
+      : 0
 
   $effect(() => {
     if (suppliedOptions !== undefined) return
@@ -93,7 +106,9 @@
     }
   })
   const current = $derived(value && options?.find((o) => key(o) === key(value)))
-  const invalid = $derived(!failed && value !== null && options !== null && !current)
+  const invalid = $derived(
+    !failed && value !== null && options !== null && !current,
+  )
 
   function pick(option: ModelOption) {
     open = false
@@ -105,7 +120,9 @@
   {#if failed}
     <div class="model-error" role="alert">
       <span>{t('chat.modelsFailed')}</span>
-      <Button variant="outline" size="sm" {disabled} onclick={() => reload++}>{t('chat.retry')}</Button>
+      <Button variant="outline" size="sm" {disabled} onclick={() => reload++}
+        >{t('chat.retry')}</Button
+      >
     </div>
   {:else}
     <Popover.Root
@@ -114,7 +131,9 @@
         if (next) highlighted = value ? key(value) : ''
       }}
     >
-      <Popover.Trigger disabled={disabled || options === null || options.length === 0}>
+      <Popover.Trigger
+        disabled={disabled || options === null || options.length === 0}
+      >
         {#snippet child({ props })}
           {#if trigger}{@render trigger({ props })}{:else}
             <Button
@@ -128,11 +147,14 @@
               {#if options === null}
                 <span class="model-name muted">{t('chat.modelsLoading')}</span>
               {:else if current}
-                <span class="model-name">{current.name ?? current.modelId}</span>
+                <span class="model-name">{current.name ?? current.modelId}</span
+                >
                 <span class="model-group">| {group(current)}</span>
               {:else}
                 <span class="model-name muted"
-                  >{invalid ? t('providers.model_invalid') : (placeholder ?? t('providers.model_placeholder'))}</span
+                  >{invalid
+                    ? t('providers.model_invalid')
+                    : (placeholder ?? t('providers.model_placeholder'))}</span
                 >
               {/if}
               <ChevronDownIcon class="model-chevron" />
@@ -150,10 +172,17 @@
           if (event.isComposing) event.preventDefault()
         }}
       >
-        <Command.Root bind:value={highlighted} filter={match} label={t('providers.model_placeholder')}>
+        <Command.Root
+          bind:value={highlighted}
+          filter={match}
+          label={t('providers.model_placeholder')}
+        >
           <div class="model-search">
             <SearchIcon class="model-search-icon" />
-            <Command.Input class="model-search-input" placeholder={t('providers.model_search')} />
+            <Command.Input
+              class="model-search-input"
+              placeholder={t('providers.model_search')}
+            />
           </div>
           {#if caps.length > 0}
             <div class="model-caps">
@@ -163,34 +192,53 @@
                   class="cap-chip cap-{c.cap}"
                   aria-pressed={active.includes(c.cap)}
                   onclick={() =>
-                    (active = active.includes(c.cap) ? active.filter((x) => x !== c.cap) : [...active, c.cap])}
+                    (active = active.includes(c.cap)
+                      ? active.filter((x) => x !== c.cap)
+                      : [...active, c.cap])}
                   ><c.icon />{t(`providers.cap_${c.cap}`)}</button
                 >
               {/each}
             </div>
           {/if}
-          <Command.List class="model-list" aria-label={t('providers.model_placeholder')}>
-            <Command.Empty class="model-empty">{t('providers.model_no_match')}</Command.Empty>
+          <Command.List
+            class="model-list"
+            aria-label={t('providers.model_placeholder')}
+          >
+            <Command.Empty class="model-empty"
+              >{t('providers.model_no_match')}</Command.Empty
+            >
             {#each groups as [name, items] (name)}
               <Command.Group value={`group\n${name}`}>
-                <Command.GroupHeading class="model-heading">{name}</Command.GroupHeading>
+                <Command.GroupHeading class="model-heading"
+                  >{name}</Command.GroupHeading
+                >
                 <Command.GroupItems>
                   {#each items as option (key(option))}
                     <Command.Item
                       class="model-item"
                       value={key(option)}
                       keywords={[option.modelId, option.name ?? '', name]}
-                      aria-current={value !== null && key(option) === key(value) ? 'true' : undefined}
+                      aria-current={value !== null && key(option) === key(value)
+                        ? 'true'
+                        : undefined}
                       onSelect={() => pick(option)}
                     >
                       <span class="model-avatar" aria-hidden="true"
-                        >{(option.name ?? option.modelId).charAt(0).toUpperCase()}</span
+                        >{(option.name ?? option.modelId)
+                          .charAt(0)
+                          .toUpperCase()}</span
                       >
-                      <span class="model-name" title={option.label}>{option.name ?? option.modelId}</span>
+                      <span class="model-name" title={option.label}
+                        >{option.name ?? option.modelId}</span
+                      >
                       <span class="model-tags">
                         {#each CAPS.filter((c) => c.has(option)) as c (c.cap)}
-                          <span class="cap-tag cap-{c.cap}" title={t(`providers.cap_${c.cap}`)}
-                            ><c.icon aria-label={t(`providers.cap_${c.cap}`)} /></span
+                          <span
+                            class="cap-tag cap-{c.cap}"
+                            title={t(`providers.cap_${c.cap}`)}
+                            ><c.icon
+                              aria-label={t(`providers.cap_${c.cap}`)}
+                            /></span
                           >
                         {/each}
                       </span>
@@ -265,7 +313,8 @@
     border-radius: var(--kit-radius, var(--radius));
     background: var(--color-popover);
     color: var(--color-popover-foreground);
-    box-shadow: 0 4px 12px color-mix(in oklch, var(--color-foreground) 12%, transparent);
+    box-shadow: 0 4px 12px
+      color-mix(in oklch, var(--color-foreground) 12%, transparent);
     font-size: var(--kit-font-size-sm, 0.8125rem);
     overflow: hidden;
   }

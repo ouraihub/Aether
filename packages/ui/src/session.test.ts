@@ -20,6 +20,10 @@ it('never revives an old token after repeated invalidations', () => {
     session.invalidate()
     tokens.push(session.capture())
   }
-  expect(tokens.slice(0, -1).some((token) => session.isCurrent(token))).toBe(false)
-  expect(tokens.filter((token) => session.isCurrent(token))).toEqual([session.capture()])
+  expect(tokens.slice(0, -1).some((token) => session.isCurrent(token))).toBe(
+    false,
+  )
+  expect(tokens.filter((token) => session.isCurrent(token))).toEqual([
+    session.capture(),
+  ])
 })

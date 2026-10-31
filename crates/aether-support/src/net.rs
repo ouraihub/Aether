@@ -467,7 +467,8 @@ mod tests {
     #[tokio::test]
     async fn redirects_are_not_followed() {
         let port = serve(
-            "HTTP/1.1 302 Found\r\nlocation: /elsewhere\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+            "HTTP/1.1 302 Found\r\nlocation: /elsewhere\r\n\
+content-length: 0\r\nconnection: close\r\n\r\n",
         )
         .await;
         let client = client(AddressPolicy::default(), Duration::from_secs(5)).unwrap();

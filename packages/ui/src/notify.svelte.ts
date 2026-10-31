@@ -1,5 +1,6 @@
-// Default KitNotify for hosts without their own: svelte-sonner toasts + one shadcn AlertDialog (docs/16 §3).
-// Render <KitNotifier notify={...} /> once next to the host root so the toaster and dialog exist.
+// Default KitNotify for hosts without their own: svelte-sonner toasts + one
+// shadcn AlertDialog (docs/16 §3). Render <KitNotifier notify={...} /> once
+// next to the host root so the toaster and dialog exist.
 import { toast } from 'svelte-sonner'
 import type { ConfirmOptions, KitNotify } from './context'
 
@@ -8,7 +9,7 @@ export class DefaultNotify implements KitNotify {
   #open = $state(false)
   #resolve: ((answer: boolean) => void) | null = null
 
-  /** Last request; kept after closing so the dialog keeps its text while it animates out. */
+  /** Kept after closing so the dialog keeps its text while it animates out. */
   get request(): ConfirmOptions | null {
     return this.#request
   }

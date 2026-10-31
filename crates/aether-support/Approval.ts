@@ -3,4 +3,4 @@
 /**
  * Default approval of a tool in the run catalogue; the host has the final say.
  */
-export type Approval = "auto" | "ask" | "deny";
+export type Approval = 'auto' | 'ask' | 'deny'

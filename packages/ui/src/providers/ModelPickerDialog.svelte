@@ -26,7 +26,16 @@
     onchange: (models: Model[]) => void
   } = $props()
 
-  const TYPES: ModelType[] = ['chat', 'image', 'video', 'tts', 'stt', 'embedding', 'rerank', 'unknown']
+  const TYPES: ModelType[] = [
+    'chat',
+    'image',
+    'video',
+    'tts',
+    'stt',
+    'embedding',
+    'rerank',
+    'unknown',
+  ]
   const { t } = getKitContext().i18n
 
   let checked = $state<Record<string, boolean>>({})
@@ -37,20 +46,38 @@
 
   $effect.pre(() => {
     if (!open || !result) return
-    const current = Object.fromEntries(untrack(() => selected).map((m) => [m.id, m]))
-    checked = Object.fromEntries(result.models.map((m) => [m.id, m.id in current]))
-    types = Object.fromEntries(result.models.map((m) => [m.id, current[m.id]?.modelType ?? m.modelType]))
+    const current = Object.fromEntries(
+      untrack(() => selected).map((m) => [m.id, m]),
+    )
+    checked = Object.fromEntries(
+      result.models.map((m) => [m.id, m.id in current]),
+    )
+    types = Object.fromEntries(
+      result.models.map((m) => [m.id, current[m.id]?.modelType ?? m.modelType]),
+    )
     query = ''
     filter = 'all'
     collapsed = {}
   })
 
   const models = $derived(result?.models ?? [])
-  const searched = $derived(models.filter((m) => m.id.toLowerCase().includes(query.trim().toLowerCase())))
-  const shown = $derived(searched.filter((m) => filter === 'all' || (types[m.id] ?? m.modelType) === filter))
-  const groups = $derived(Object.entries(Object.groupBy(shown, (m) => m.group ?? '')))
+  const searched = $derived(
+    models.filter((m) =>
+      m.id.toLowerCase().includes(query.trim().toLowerCase()),
+    ),
+  )
+  const shown = $derived(
+    searched.filter(
+      (m) => filter === 'all' || (types[m.id] ?? m.modelType) === filter,
+    ),
+  )
+  const groups = $derived(
+    Object.entries(Object.groupBy(shown, (m) => m.group ?? '')),
+  )
   const count = $derived(models.filter((m) => checked[m.id]).length)
-  const bulkRemoves = $derived(shown.length > 0 && shown.every((m) => checked[m.id]))
+  const bulkRemoves = $derived(
+    shown.length > 0 && shown.every((m) => checked[m.id]),
+  )
 
   function bulk() {
     const on = !bulkRemoves
@@ -73,11 +100,17 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="flex max-h-[85dvh] min-w-0 flex-col gap-3 sm:max-w-2xl">
+  <Dialog.Content
+    class="flex max-h-[85dvh] min-w-0 flex-col gap-3 sm:max-w-2xl"
+  >
     <Dialog.Header class="shrink-0 text-left">
       <Dialog.Title class="flex items-center gap-2 pr-6">
         {t('providers.picker_title')}
-        <span aria-hidden="true" class="bg-muted rounded px-1.5 text-kit-xs tabular-nums">{models.length}</span>
+        <span
+          aria-hidden="true"
+          class="bg-muted rounded px-1.5 text-kit-xs tabular-nums"
+          >{models.length}</span
+        >
       </Dialog.Title>
       <Dialog.Description>{t('providers.picker_hint')}</Dialog.Description>
     </Dialog.Header>
@@ -90,14 +123,27 @@
         autocomplete="off"
         spellcheck={false}
       />
-      <Button variant="outline" size="sm" class="shrink-0" disabled={shown.length === 0} onclick={bulk}>
+      <Button
+        variant="outline"
+        size="sm"
+        class="shrink-0"
+        disabled={shown.length === 0}
+        onclick={bulk}
+      >
         {t(bulkRemoves ? 'providers.remove_all' : 'providers.add_all')}
       </Button>
     </div>
-    <div class="flex shrink-0 gap-1 overflow-x-auto pb-1" role="group" aria-label={t('providers.model_type')}>
+    <div
+      class="flex shrink-0 gap-1 overflow-x-auto pb-1"
+      role="group"
+      aria-label={t('providers.model_type')}
+    >
       {#each ['all', ...TYPES] as type (type)}
         {@const hits =
-          type === 'all' ? searched.length : searched.filter((m) => (types[m.id] ?? m.modelType) === type).length}
+          type === 'all'
+            ? searched.length
+            : searched.filter((m) => (types[m.id] ?? m.modelType) === type)
+                .length}
         <Button
           variant={filter === type ? 'secondary' : 'ghost'}
           size="sm"
@@ -106,14 +152,22 @@
           disabled={hits === 0 && type !== 'all'}
           onclick={() => (filter = type as ModelType | 'all')}
         >
-          {type === 'all' ? t('providers.all_types') : t(`providers.type.${type as ModelType}`)}
+          {type === 'all'
+            ? t('providers.all_types')
+            : t(`providers.type.${type as ModelType}`)}
           <span class="text-muted-foreground tabular-nums">{hits}</span>
         </Button>
       {/each}
     </div>
-    <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto" role="region" aria-label={t('providers.models')}>
+    <div
+      class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto"
+      role="region"
+      aria-label={t('providers.models')}
+    >
       {#if shown.length === 0}
-        <p class="text-muted-foreground py-8 text-center text-kit-sm">{t('providers.no_model_matches')}</p>
+        <p class="text-muted-foreground py-8 text-center text-kit-sm">
+          {t('providers.no_model_matches')}
+        </p>
       {/if}
       {#each groups as [group, items = []] (group)}
         {@const folded = !query.trim() && collapsed[group]}
@@ -127,34 +181,48 @@
           >
             <ChevronRight class={folded ? '' : 'rotate-90'} />
             {group || t('providers.no_group')}
-            <span class="bg-muted rounded px-1.5 tabular-nums">{items.length}</span>
+            <span class="bg-muted rounded px-1.5 tabular-nums"
+              >{items.length}</span
+            >
           </Button>
           {#if !folded}
             <ul>
               {#each items as model (model.id)}
-                <li class="hover:bg-accent/50 flex min-w-0 items-center gap-1 rounded-md py-0.5 pl-4">
-                  <span class="min-w-0 flex-1 truncate font-mono text-kit-sm" title={model.id}>{model.id}</span>
+                <li
+                  class="hover:bg-accent/50 flex min-w-0 items-center gap-1 rounded-md py-0.5 pl-4"
+                >
+                  <span
+                    class="min-w-0 flex-1 truncate font-mono text-kit-sm"
+                    title={model.id}>{model.id}</span
+                  >
                   <Select.Root
                     type="single"
                     value={types[model.id] ?? model.modelType}
-                    onValueChange={(value) => setType(model.id, value as ModelType)}
+                    onValueChange={(value) =>
+                      setType(model.id, value as ModelType)}
                   >
                     <Select.Trigger
                       size="sm"
                       class="shrink-0 border-0 bg-transparent shadow-none"
                       aria-label={t('providers.type_for', { id: model.id })}
                     >
-                      {t(`providers.type.${types[model.id] ?? model.modelType}`)}
+                      {t(
+                        `providers.type.${types[model.id] ?? model.modelType}`,
+                      )}
                     </Select.Trigger>
                     <Select.Content
                       ><Select.Group>
                         {#each TYPES as type (type)}
-                          <Select.Item value={type} label={t(`providers.type.${type}`)} />
+                          <Select.Item
+                            value={type}
+                            label={t(`providers.type.${type}`)}
+                          />
                         {/each}
                       </Select.Group></Select.Content
                     >
                   </Select.Root>
-                  {#if model.canVision}<span class="text-muted-foreground hidden shrink-0 text-kit-xs sm:inline"
+                  {#if model.canVision}<span
+                      class="text-muted-foreground hidden shrink-0 text-kit-xs sm:inline"
                       >{t('providers.vision')}</span
                     >{/if}
                   <span class="text-success w-8 shrink-0 text-right text-kit-xs"
@@ -164,9 +232,14 @@
                     variant="ghost"
                     size="icon-sm"
                     class="shrink-0"
-                    aria-label={t(checked[model.id] ? 'providers.remove_model' : 'providers.add_model', {
-                      id: model.id,
-                    })}
+                    aria-label={t(
+                      checked[model.id]
+                        ? 'providers.remove_model'
+                        : 'providers.add_model',
+                      {
+                        id: model.id,
+                      },
+                    )}
                     onclick={() => toggle(model.id)}
                   >
                     {#if checked[model.id]}<Minus />{:else}<Plus />{/if}

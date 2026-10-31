@@ -1,6 +1,7 @@
 <script lang="ts">
-  // Create or edit a hand-written skill (docs/14 §6). Editing sends `expectedRevision`, so a
-  // concurrent edit elsewhere fails with `conflict{revision_changed}` instead of being overwritten.
+  // Create or edit a hand-written skill (docs/14 §6). Editing sends
+  // `expectedRevision`, so a concurrent edit elsewhere fails with
+  // `conflict{revision_changed}` instead of being overwritten.
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Dialog from '#lib/components/ui/dialog/index.js'
   import * as Field from '#lib/components/ui/field/index.js'
@@ -46,7 +47,8 @@
       version: version.trim() || null,
       body,
     }
-    if (skill) Object.assign(input, { id: skill.id, expectedRevision: skill.revision })
+    if (skill)
+      Object.assign(input, { id: skill.id, expectedRevision: skill.revision })
     saving = true
     try {
       onsaved(await port.save(input))
@@ -62,31 +64,62 @@
 <Dialog.Root bind:open>
   <Dialog.Content class="flex max-h-[85vh] flex-col sm:max-w-2xl">
     <Dialog.Header>
-      <Dialog.Title>{skill ? t('skills.edit_title', { name: skill.name }) : t('skills.new')}</Dialog.Title>
+      <Dialog.Title
+        >{skill
+          ? t('skills.edit_title', { name: skill.name })
+          : t('skills.new')}</Dialog.Title
+      >
     </Dialog.Header>
     <Field.Group class="min-h-0 overflow-y-auto">
       <div class="flex gap-3">
         <Field.Field class="flex-1">
           <Field.Label for="kit-skill-name">{t('skills.name')}</Field.Label>
-          <Input id="kit-skill-name" class="font-mono" maxlength={64} bind:value={name} />
+          <Input
+            id="kit-skill-name"
+            class="font-mono"
+            maxlength={64}
+            bind:value={name}
+          />
         </Field.Field>
         <Field.Field class="w-32">
-          <Field.Label for="kit-skill-version">{t('skills.version')}</Field.Label>
-          <Input id="kit-skill-version" maxlength={32} placeholder={t('skills.unversioned')} bind:value={version} />
+          <Field.Label for="kit-skill-version"
+            >{t('skills.version')}</Field.Label
+          >
+          <Input
+            id="kit-skill-version"
+            maxlength={32}
+            placeholder={t('skills.unversioned')}
+            bind:value={version}
+          />
         </Field.Field>
       </div>
       <Field.Field>
-        <Field.Label for="kit-skill-description">{t('skills.description')}</Field.Label>
-        <Input id="kit-skill-description" maxlength={500} bind:value={description} />
+        <Field.Label for="kit-skill-description"
+          >{t('skills.description')}</Field.Label
+        >
+        <Input
+          id="kit-skill-description"
+          maxlength={500}
+          bind:value={description}
+        />
       </Field.Field>
       <Field.Field>
         <Field.Label for="kit-skill-body">{t('skills.body')}</Field.Label>
-        <Textarea id="kit-skill-body" class="min-h-64 font-mono text-xs" bind:value={body} />
+        <Textarea
+          id="kit-skill-body"
+          class="min-h-64 font-mono text-xs"
+          bind:value={body}
+        />
       </Field.Field>
     </Field.Group>
     <Dialog.Footer>
-      <Button variant="outline" onclick={() => (open = false)}>{t('common.cancel')}</Button>
-      <Button disabled={saving || !name.trim() || !description.trim() || !body.trim()} onclick={() => void save()}>
+      <Button variant="outline" onclick={() => (open = false)}
+        >{t('common.cancel')}</Button
+      >
+      <Button
+        disabled={saving || !name.trim() || !description.trim() || !body.trim()}
+        onclick={() => void save()}
+      >
         {t('skills.save')}
       </Button>
     </Dialog.Footer>

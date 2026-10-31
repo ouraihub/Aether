@@ -1,4 +1,8 @@
-import type { ImagePart, ModelRef, RunRequest } from '@ouraihub/aether-contracts'
+import type {
+  ImagePart,
+  ModelRef,
+  RunRequest,
+} from '@ouraihub/aether-contracts'
 import type { HistoryTurn } from '@ouraihub/aether-core/types'
 import { badRequest } from '@ouraihub/aether-core/error'
 import { canonicalJson, charCount } from '@ouraihub/aether-core/guard'
@@ -21,7 +25,9 @@ export type Action =
   | { kind: 'retry'; sourceId: string }
   | { kind: 'translation'; sourceId: string; targetLanguage: string }
 export type SelectionGuard =
-  { kind: 'explicit' } | { kind: 'selected'; turnId: string } | { kind: 'latest'; turnId: string | null }
+  | { kind: 'explicit' }
+  | { kind: 'selected'; turnId: string }
+  | { kind: 'latest'; turnId: string | null }
 export interface ReservationInput {
   input: string
   images: ImagePart[]
@@ -46,12 +52,20 @@ export function authoritative(
   guard: SelectionGuard,
   document: ConversationDocument | null,
 ): ReservationInput {
-  if ((request.conversationId ?? null) !== (document?.summary.id ?? null)) throw notFound('conversation')
+  if ((request.conversationId ?? null) !== (document?.summary.id ?? null))
+    throw notFound('conversation')
   if (document) {
     idle(document)
-    if (guard.kind === 'selected' && document.summary.selectedTurnId !== guard.turnId)
+    if (
+      guard.kind === 'selected' &&
+      document.summary.selectedTurnId !== guard.turnId
+    )
       throw conflict('preparation_changed')
-    if (guard.kind === 'latest' && (document.summary.selectedTurnId !== null || latest(document) !== guard.turnId))
+    if (
+      guard.kind === 'latest' &&
+      (document.summary.selectedTurnId !== null ||
+        latest(document) !== guard.turnId)
+    )
       throw conflict('preparation_changed')
   }
   let input = request.input,
@@ -60,7 +74,10 @@ export function authoritative(
     sourceModel: ModelRef | null = null
   if (action.kind === 'reply') {
     head = action.parentId
-    if (head !== null && (!document || target(document, head).status !== 'completed'))
+    if (
+      head !== null &&
+      (!document || target(document, head).status !== 'completed')
+    )
       throw conflict('turn_not_completed')
   } else {
     if (!document) throw notFound('conversation')
@@ -98,10 +115,19 @@ export function authoritative(
   }
 }
 async function digest(value: string): Promise<string> {
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
-  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  const bytes = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(value),
+  )
+  return Array.from(new Uint8Array(bytes), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
 }
-async function imageBasis(turnId: string, kind: string, images: readonly StoredImage[]): Promise<unknown[]> {
+async function imageBasis(
+  turnId: string,
+  kind: string,
+  images: readonly StoredImage[],
+): Promise<unknown[]> {
   return Promise.all(
     images.map(async (image, index) => ({
       turnId,
@@ -119,7 +145,10 @@ export async function fingerprint(
   document: ConversationDocument | null,
   input: ReservationInput,
 ): Promise<string> {
-  const source = action.kind !== 'reply' && document ? target(document, action.sourceId) : null
+  const source =
+    action.kind !== 'reply' && document
+      ? target(document, action.sourceId)
+      : null
   const sourceBasis = source
     ? {
         id: source.id,
@@ -151,7 +180,11 @@ export async function fingerprint(
     })),
   )
   const currentImages = await Promise.all(
-    input.images.map(async (image, index) => ({ index, mime: image.mime, data: await digest(image.data) })),
+    input.images.map(async (image, index) => ({
+      index,
+      mime: image.mime,
+      data: await digest(image.data),
+    })),
   )
   return digest(
     canonicalJson({
@@ -181,22 +214,41 @@ export async function resolveAction(
       if (typeof id !== 'string') throw badRequest(String(field), 'invalid')
       checkId(String(field), id)
     }
-  if (request.scope !== undefined && request.scope !== null) checkText('scope', request.scope, 200)
+  if (request.scope !== undefined && request.scope !== null)
+    checkText('scope', request.scope, 200)
   checkText('input', request.input, 100_000)
   validateImages(request.images ?? [])
-  const sourced = Boolean(request.retryTurnId || request.translateTurnId || request.regenerate)
-  if (Number(Boolean(request.retryTurnId)) + Number(Boolean(request.translateTurnId)) + Number(request.regenerate) > 1)
+  const sourced = Boolean(
+    request.retryTurnId || request.translateTurnId || request.regenerate,
+  )
+  if (
+    Number(Boolean(request.retryTurnId)) +
+      Number(Boolean(request.translateTurnId)) +
+      Number(request.regenerate) >
+    1
+  )
     throw badRequest('action', 'multiple')
-  if (sourced && request.replyToId) throw badRequest('replyToId', 'action_conflict')
-  if (sourced && (request.images?.length ?? 0) > 0) throw badRequest('images', 'action_conflict')
-  if (Boolean(request.translateTurnId) !== (request.targetLanguage !== null && request.targetLanguage !== undefined))
+  if (sourced && request.replyToId)
+    throw badRequest('replyToId', 'action_conflict')
+  if (sourced && (request.images?.length ?? 0) > 0)
+    throw badRequest('images', 'action_conflict')
+  if (
+    Boolean(request.translateTurnId) !==
+    (request.targetLanguage !== null && request.targetLanguage !== undefined)
+  )
     throw badRequest('targetLanguage', 'translation_required')
-  if (!request.conversationId && (sourced || request.replyToId)) throw badRequest('conversationId', 'required')
+  if (!request.conversationId && (sourced || request.replyToId))
+    throw badRequest('conversationId', 'required')
   if ((request.retryTurnId || request.translateTurnId) && request.webSearch)
     throw badRequest('webSearch', 'action_conflict')
   let guard: SelectionGuard = { kind: 'explicit' },
     head: string | null = request.replyToId ?? null
-  if (document && !request.replyToId && !request.retryTurnId && !request.translateTurnId) {
+  if (
+    document &&
+    !request.replyToId &&
+    !request.retryTurnId &&
+    !request.translateTurnId
+  ) {
     if (document.summary.selectedTurnId !== null) {
       head = document.summary.selectedTurnId
       guard = { kind: 'selected', turnId: head }
@@ -208,9 +260,15 @@ export async function resolveAction(
   let action: Action
   if (request.translateTurnId) {
     const language = request.targetLanguage?.trim() ?? ''
-    if (!language || charCount(language) > 80) throw badRequest('targetLanguage', 'invalid')
-    action = { kind: 'translation', sourceId: request.translateTurnId, targetLanguage: language }
-  } else if (request.retryTurnId) action = { kind: 'retry', sourceId: request.retryTurnId }
+    if (!language || charCount(language) > 80)
+      throw badRequest('targetLanguage', 'invalid')
+    action = {
+      kind: 'translation',
+      sourceId: request.translateTurnId,
+      targetLanguage: language,
+    }
+  } else if (request.retryTurnId)
+    action = { kind: 'retry', sourceId: request.retryTurnId }
   else if (request.regenerate) {
     if (head === null) throw notFound('turn')
     action = { kind: 'retry', sourceId: head }

@@ -23,13 +23,32 @@ async fn blocking<R: Runtime, T: Send + 'static>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "skills_list"), err(level = "warn"))]
-pub(crate) async fn skills_list<R: Runtime>(app: AppHandle<R>) -> Result<Vec<SkillMeta>, KitError> {
+#[tracing::instrument(
+    skip_all,
+    fields(command = "skills_list"),
+    err(level = "warn")
+)]
+pub(crate) async fn skills_list<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Vec<SkillMeta>, KitError> {
     blocking(&app, Store::list).await
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "skills_get"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "skills_get"),
+    err(level = "warn")
+)]
+    blocking(&app, Store::list).await
+}
+
+#[tauri::command]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "skills_get"),
+    err(level = "warn")
+)]
 pub(crate) async fn skills_get<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -38,7 +57,11 @@ pub(crate) async fn skills_get<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "skills_preview"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "skills_preview"),
+    err(level = "warn")
+)]
 pub(crate) async fn skills_preview<R: Runtime>(
     app: AppHandle<R>,
     source: Source,
@@ -47,7 +70,11 @@ pub(crate) async fn skills_preview<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "skills_install"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "skills_install"),
+    err(level = "warn")
+)]
 pub(crate) async fn skills_install<R: Runtime>(
     app: AppHandle<R>,
     source: Source,
@@ -61,7 +88,11 @@ pub(crate) async fn skills_install<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "skills_save"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "skills_save"),
+    err(level = "warn")
+)]
 pub(crate) async fn skills_save<R: Runtime>(
     app: AppHandle<R>,
     input: ManualSave,
@@ -70,7 +101,11 @@ pub(crate) async fn skills_save<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "skills_duplicate"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "skills_duplicate"),
+    err(level = "warn")
+)]
 pub(crate) async fn skills_duplicate<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -80,7 +115,11 @@ pub(crate) async fn skills_duplicate<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "skills_reorder"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "skills_reorder"),
+    err(level = "warn")
+)]
 pub(crate) async fn skills_reorder<R: Runtime>(
     app: AppHandle<R>,
     ids: Vec<String>,
@@ -89,7 +128,11 @@ pub(crate) async fn skills_reorder<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "skills_delete"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "skills_delete"),
+    err(level = "warn")
+)]
 pub(crate) async fn skills_delete<R: Runtime>(
     app: AppHandle<R>,
     id: String,

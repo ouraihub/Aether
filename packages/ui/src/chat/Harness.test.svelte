@@ -4,7 +4,10 @@
   import { setKitContext, type KitContext } from '../context'
   import ChatPanel from './ChatPanel.svelte'
 
-  let { kit, ...props }: { kit: KitContext } & ComponentProps<typeof ChatPanel> = $props()
+  let {
+    kit,
+    ...props
+  }: { kit: KitContext } & ComponentProps<typeof ChatPanel> = $props()
   // svelte-ignore state_referenced_locally
   setKitContext(kit)
 </script>

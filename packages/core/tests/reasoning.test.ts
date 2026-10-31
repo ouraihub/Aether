@@ -30,7 +30,11 @@ test('explicit dialect controls and vendor-only responses summary', () => {
   current.reasoningBudget = 2048
   assert.equal(requestBody(current).thinking_budget, 2048)
   current.protocol = 'anthropic-messages'
-  current.reasoning = { dialect: 'anthropic-budget', efforts: ['high'], budgetTokens: 4096 }
+  current.reasoning = {
+    dialect: 'anthropic-budget',
+    efforts: ['high'],
+    budgetTokens: 4096,
+  }
   assert.equal(at(requestBody(current), 'thinking', 'budget_tokens'), 2048)
   current.reasoning = { dialect: 'anthropic-adaptive', efforts: ['high'] }
   assert.equal(at(requestBody(current), 'output_config', 'effort'), 'high')
@@ -45,7 +49,10 @@ test('native search uses protocol-specific server tools and rejects Chat Complet
   current.nativeWebSearch = true
   assert.throws(() => requestBody(current))
   current.protocol = 'anthropic-messages'
-  assert.equal(at(requestBody(current), 'tools', 0, 'type'), 'web_search_20250305')
+  assert.equal(
+    at(requestBody(current), 'tools', 0, 'type'),
+    'web_search_20250305',
+  )
   assert.equal(at(requestBody(current), 'tools', 0, 'max_uses'), 5)
   current.protocol = 'openai-responses'
   assert.equal(at(requestBody(current), 'tools', 0, 'type'), 'web_search')
@@ -54,32 +61,60 @@ test('signed anthropic reasoning replays natively and encrypted responses are no
   const usage = emptyUsage(),
     decoder = new Decoder('anthropic-messages', 'endpoint', 'model')
   decoder.event(
-    JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }),
+    JSON.stringify({
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'thinking', thinking: '' },
+    }),
     usage,
   )
   assert.equal(
     decoder.event(
-      JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'visible' } }),
+      JSON.stringify({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'thinking_delta', thinking: 'visible' },
+      }),
       usage,
     )?.reasoning,
     'visible',
   )
   decoder.event(
-    JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'signed' } }),
+    JSON.stringify({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'signature_delta', signature: 'signed' },
+    }),
     usage,
   )
   decoder.event(JSON.stringify({ type: 'content_block_stop', index: 0 }), usage)
   assert.equal(at(decoder.reasoning[0]?.value, 'signature'), 'signed')
   const current = request()
   current.protocol = 'anthropic-messages'
-  current.turn = [{ assistant: { text: 'answer', tool_calls: [], reasoning: decoder.reasoning } }]
-  assert.equal(at(requestBody(current), 'messages', 1, 'content', 0, 'thinking'), 'visible')
+  current.turn = [
+    {
+      assistant: {
+        text: 'answer',
+        tool_calls: [],
+        reasoning: decoder.reasoning,
+      },
+    },
+  ]
+  assert.equal(
+    at(requestBody(current), 'messages', 1, 'content', 0, 'thinking'),
+    'visible',
+  )
   const responses = new Decoder('openai-responses', 'endpoint', 'model')
   assert.equal(
     responses.event(
       JSON.stringify({
         type: 'response.output_item.done',
-        item: { type: 'reasoning', id: 'r', encrypted_content: 'secret', summary: [] },
+        item: {
+          type: 'reasoning',
+          id: 'r',
+          encrypted_content: 'secret',
+          summary: [],
+        },
       }),
       usage,
     ),

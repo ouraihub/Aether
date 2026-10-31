@@ -16,10 +16,15 @@ pub(crate) fn validate_query(query: &str) -> Result<&str, KitError> {
 
 /// Searches once with the supplied key order, without configuration storage.
 /// # Errors
-/// Rejects invalid input/configuration and reports network, deadline or upstream errors.
-pub async fn search(config: ResolvedConfig, query: &str) -> Result<SearchResult, KitError> {
+/// Rejects invalid input/configuration and reports network, deadline or
+/// upstream errors.
+pub async fn search(
+    config: ResolvedConfig,
+    query: &str,
+) -> Result<SearchResult, KitError> {
     let query = validate_query(query)?;
-    let Output::Hits(mut hits) = execution::execute(&config, SearchCap::Search, query).await?
+    let Output::Hits(mut hits) =
+        execution::execute(&config, SearchCap::Search, query).await?
     else {
         return Err(KitError::internal(std::io::Error::other(
             "unexpected search output",

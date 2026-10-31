@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { ImagePart } from '@ouraihub/aether-contracts'
-import type { ImageConnection, ImageRequest } from '@ouraihub/aether-core/images'
+import type {
+  ImageConnection,
+  ImageRequest,
+} from '@ouraihub/aether-core/images'
 import type { WorkerContext } from '../context.js'
 import { ImageService } from './index.js'
 
@@ -38,7 +41,10 @@ test('without persistence returns a display reference, never claiming it was sav
   })
   assert.deepEqual(await service.generate(connection, input, context), {
     image,
-    reference: { mime: image.mime, url: `data:${image.mime};base64,${image.data}` },
+    reference: {
+      mime: image.mime,
+      url: `data:${image.mime};base64,${image.data}`,
+    },
     persisted: false,
   })
 })
@@ -101,6 +107,9 @@ test('generation failure never calls persistence', async () => {
       return { mime: value.mime, url: '/api/v1/files/unreachable' }
     },
   })
-  await assert.rejects(service.generate(connection, input, context), { dispatch: 'unknown', code: 'network' })
+  await assert.rejects(service.generate(connection, input, context), {
+    dispatch: 'unknown',
+    code: 'network',
+  })
   assert.equal(saved, 0)
 })

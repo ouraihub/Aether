@@ -1,13 +1,17 @@
-//! MCP configuration commands and refresh transport; lifecycle belongs to McpRuntime.
+//! MCP configuration commands and refresh transport; lifecycle belongs to
+//! McpRuntime.
 
 use std::sync::Arc;
 
-use aether_mcp_client::{Approval, McpRuntime, ServerDto, ServerSave, Store, ToolDto};
+use aether_mcp_client::{
+    Approval, McpRuntime, ServerDto, ServerSave, Store, ToolDto,
+};
 use aether_support::KitError;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio_util::sync::CancellationToken;
 
-/// One shared runtime, including its configuration store, and adapter request cancellation.
+/// One shared runtime, including its configuration store, and adapter request
+/// cancellation.
 pub(crate) struct McpClient {
     pub(crate) runtime: Arc<McpRuntime>,
     pub(crate) cancel: CancellationToken,
@@ -25,7 +29,11 @@ async fn blocking<R: Runtime, T: Send + 'static>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "mcp_client_list"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "mcp_client_list"),
+    err(level = "warn")
+)]
 pub(crate) async fn mcp_client_list<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<Vec<ServerDto>, KitError> {
@@ -33,7 +41,11 @@ pub(crate) async fn mcp_client_list<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "mcp_client_save"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "mcp_client_save"),
+    err(level = "warn")
+)]
 pub(crate) async fn mcp_client_save<R: Runtime>(
     app: AppHandle<R>,
     input: ServerSave,
@@ -42,7 +54,11 @@ pub(crate) async fn mcp_client_save<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "mcp_client_delete"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "mcp_client_delete"),
+    err(level = "warn")
+)]
 pub(crate) async fn mcp_client_delete<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -52,7 +68,11 @@ pub(crate) async fn mcp_client_delete<R: Runtime>(
 
 /// "Test connection": handshake and re-discover the server's tools.
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "mcp_client_refresh"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "mcp_client_refresh"),
+    err(level = "warn")
+)]
 pub(crate) async fn mcp_client_refresh<R: Runtime>(
     app: AppHandle<R>,
     server_id: String,

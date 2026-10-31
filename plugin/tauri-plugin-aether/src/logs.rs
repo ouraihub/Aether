@@ -1,5 +1,6 @@
-//! `logs_*` commands over the host's `LogHandle` (docs/15 §5, docs/10 §10). Always registered.
-//! `logs_ingest` and `logs_tail` carry no span: span fields would be appended to every line.
+//! `logs_*` commands over the host's `LogHandle` (docs/15 §5, docs/10 §10).
+//! Always registered. `logs_ingest` and `logs_tail` carry no span: span fields
+//! would be appended to every line.
 
 use aether_observability::{
     DiagnosticLevel, IngestBatch, IngestReceipt, LogEntry, LogHandle, LogStatus,
@@ -16,7 +17,10 @@ pub(crate) async fn logs_tail<R: Runtime>(
     limit: usize,
 ) -> Result<Vec<LogEntry>, KitError> {
     if limit > usize::from(MAX_TAIL) {
-        return Err(KitError::bad_request("limit", "out_of_range").with_limit(MAX_TAIL.into()));
+        return Err(
+            KitError::bad_request("limit", "out_of_range")
+                .with_limit(MAX_TAIL.into()),
+        );
     }
     let logs = app.state::<LogHandle>().inner().clone();
     tauri::async_runtime::spawn_blocking(move || logs.tail(limit))
@@ -32,7 +36,11 @@ pub(crate) async fn logs_get_level<R: Runtime>(app: AppHandle<R>) -> LogStatus {
 
 /// Applies `level` immediately and persists it to `level.json`.
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "logs_set_level"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "logs_set_level"),
+    err(level = "warn")
+)]
 pub(crate) fn logs_set_level(
     logs: State<'_, LogHandle>,
     level: DiagnosticLevel,
@@ -54,8 +62,14 @@ pub(crate) async fn logs_ingest<R: Runtime>(
 
 /// Opens the logs directory in the system file manager.
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "logs_open_dir"), err(level = "warn"))]
-pub(crate) async fn logs_open_dir<R: Runtime>(app: AppHandle<R>) -> Result<(), KitError> {
+#[tracing::instrument(
+    skip_all,
+    fields(command = "logs_open_dir"),
+    err(level = "warn")
+)]
+pub(crate) async fn logs_open_dir<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<(), KitError> {
     let opener = if cfg!(windows) {
         "explorer"
     } else if cfg!(target_os = "macos") {
@@ -71,7 +85,8 @@ pub(crate) async fn logs_open_dir<R: Runtime>(app: AppHandle<R>) -> Result<(), K
     else {
         return Err(KitError::not_found("logs directory"));
     };
-    // The exit code is ignored: explorer returns 1 even after opening the window.
+    // The exit code is ignored: explorer returns 1 even after opening the
+    // window.
     tauri::async_runtime::spawn_blocking(move || {
         std::process::Command::new(opener).arg(dir).status()
     })

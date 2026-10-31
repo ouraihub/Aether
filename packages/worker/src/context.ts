@@ -26,17 +26,26 @@ export function isActor(value: unknown): value is Actor {
     value.applicationId.length > 0 &&
     value.applicationId.length <= 256 &&
     'kind' in value &&
-    (value.kind === 'user' || value.kind === 'service' || value.kind === 'mcp_client') &&
+    (value.kind === 'user' ||
+      value.kind === 'service' ||
+      value.kind === 'mcp_client') &&
     'tenantId' in value &&
     (value.tenantId === null ||
-      (typeof value.tenantId === 'string' && value.tenantId.length > 0 && value.tenantId.length <= 256)) &&
+      (typeof value.tenantId === 'string' &&
+        value.tenantId.length > 0 &&
+        value.tenantId.length <= 256)) &&
     'sessionId' in value &&
     (value.sessionId === null ||
-      (typeof value.sessionId === 'string' && value.sessionId.length > 0 && value.sessionId.length <= 256)) &&
+      (typeof value.sessionId === 'string' &&
+        value.sessionId.length > 0 &&
+        value.sessionId.length <= 256)) &&
     'scopes' in value &&
     Array.isArray(value.scopes) &&
     value.scopes.length <= 256 &&
-    value.scopes.every((scope: unknown) => typeof scope === 'string' && scope.length > 0 && scope.length <= 256)
+    value.scopes.every(
+      (scope: unknown) =>
+        typeof scope === 'string' && scope.length > 0 && scope.length <= 256,
+    )
   )
 }
 export function immutableActor(actor: Actor): Actor {

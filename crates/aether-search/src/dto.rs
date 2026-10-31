@@ -18,7 +18,8 @@ impl SearchCap {
         }
     }
 }
-/// Provider metadata and masked persisted state; never contains a clear credential.
+/// Provider metadata and masked persisted state; never contains a clear
+/// credential.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchProvider {

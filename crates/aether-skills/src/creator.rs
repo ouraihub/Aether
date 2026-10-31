@@ -1,5 +1,7 @@
-//! Fixed skill-creator resources from an Apache-2.0 bundle; see `creator/LICENSE.txt`.
-//! The runtime adapts filesystem locations and approvals; these files never execute on installation.
+//! Fixed skill-creator resources from an Apache-2.0 bundle; see
+//! `creator/LICENSE.txt`.
+//! The runtime adapts filesystem locations and approvals; these files never
+//! execute on installation.
 use std::path::Path;
 
 use crate::{BuiltinSkill, KitError};
@@ -7,15 +9,20 @@ use crate::{BuiltinSkill, KitError};
 /// Trusted built-in creator, selected explicitly for a skill-authoring session.
 pub static CREATOR_SKILLS: &[BuiltinSkill] = &[BuiltinSkill {
     name: "skill-creator",
-    description: "Create, edit, evaluate and improve reusable skills with explicit user review.",
+    description: concat!(
+        "Create, edit, evaluate and improve reusable skills with ",
+        "explicit user review.",
+    ),
     version: Some("1.0.0"),
     body: include_str!("skill_creator.md"),
 }];
 
-/// Materializes fixed creator documentation and scripts in a new authoring workspace.
+/// Materializes fixed creator documentation and scripts in a new authoring
+/// workspace.
 ///
 /// # Errors
-/// Rejects an existing destination, or filesystem failures. No files are overwritten.
+/// Rejects an existing destination, or filesystem failures. No files are
+/// overwritten.
 pub fn write_resources(destination: &Path) -> Result<(), KitError> {
     std::fs::create_dir(destination).map_err(KitError::internal)?;
     for (relative, bytes) in RESOURCES {

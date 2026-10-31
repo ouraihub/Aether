@@ -4,7 +4,9 @@ import type { IngestBatch } from '../ports'
 import { createLogger } from './logger'
 
 function setup(
-  ingest: (batch: IngestBatch) => Promise<{ accepted: number; rejected: number }> = (b) =>
+  ingest: (
+    batch: IngestBatch,
+  ) => Promise<{ accepted: number; rejected: number }> = (b) =>
     Promise.resolve({ accepted: b.entries.length, rejected: 0 }),
 ) {
   const batches: IngestBatch[] = []
@@ -32,7 +34,13 @@ describe('createLogger', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(batches).toEqual([
       {
-        entries: [{ level: 'info', event: 'ui.panel.opened', fields: { count: 1, ok: true, name: 'x' } }],
+        entries: [
+          {
+            level: 'info',
+            event: 'ui.panel.opened',
+            fields: { count: 1, ok: true, name: 'x' },
+          },
+        ],
         droppedCount: 0,
       },
     ])
@@ -41,7 +49,9 @@ describe('createLogger', () => {
     expect(batches[1]?.entries).toHaveLength(20)
   })
 
-  it('drops entries that break the whitelist and reports them as droppedCount', async () => {
+  it(
+    'drops entries that break the whitelist and reports them as droppedCount',
+    async () => {
     const { batches, logger } = setup()
     logger.info('Bad Event')
     logger.info('single')
@@ -50,14 +60,20 @@ describe('createLogger', () => {
     logger.info('ui.x', { n: Number.NaN })
     logger.warn('ui.ok')
     await logger.flush()
-    expect(batches).toEqual([{ entries: [{ level: 'warn', event: 'ui.ok' }], droppedCount: 5 }])
+    expect(batches).toEqual([
+      { entries: [{ level: 'warn', event: 'ui.ok' }], droppedCount: 5 },
+    ])
   })
 
-  it('keeps warn/error over debug/info when 200 entries are already queued', async () => {
+  it(
+    'keeps warn/error over debug/info when 200 entries are already queued',
+    async () => {
     const gate = Promise.withResolvers<void>()
     let calls = 0
     const { batches, logger } = setup(async (b) => {
-      if (calls++ === 0) await gate.promise // the first request stays in flight while the rest queues up
+      if (calls++ === 0)
+        await gate.promise
+        // The first request stays in flight while the rest queues up.
       return { accepted: b.entries.length, rejected: 0 }
     })
     logger.error('ui.first')

@@ -12,14 +12,18 @@ export function createIdentityPort(options: {
   readonly resolve: (request: Request) => Promise<Actor | null>
   readonly verifyFresh: (request: Request, actor: Actor) => Promise<boolean>
 }): IdentityPort {
-  if (!options.applicationId) throw new KitFailure('needs_config', 'Identity application is required')
+  if (!options.applicationId)
+    throw new KitFailure('needs_config', 'Identity application is required')
   return Object.freeze({
     async resolve(request: Request): Promise<Actor | null> {
       const actor = await options.resolve(request)
-      return isActor(actor) && actor.applicationId === options.applicationId ? immutableActor(actor) : null
+      return isActor(actor) && actor.applicationId === options.applicationId
+        ? immutableActor(actor)
+        : null
     },
     async verifyFresh(request: Request, actor: Actor): Promise<boolean> {
-      if (!isActor(actor) || actor.applicationId !== options.applicationId) return false
+      if (!isActor(actor) || actor.applicationId !== options.applicationId)
+        return false
       const current = await options.resolve(request)
       if (
         !isActor(current) ||
@@ -61,15 +65,27 @@ function parseSession(value: unknown): SessionRecord | null {
     value.expiresAt <= value.lastSeenAt
   )
     return null
-  return { actor: value.actor, createdAt: value.createdAt, lastSeenAt: value.lastSeenAt, expiresAt: value.expiresAt }
+  return {
+    actor: value.actor,
+    createdAt: value.createdAt,
+    lastSeenAt: value.lastSeenAt,
+    expiresAt: value.expiresAt,
+  }
 }
 function opaqueToken(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
 }
 async function tokenKey(token: string): Promise<string | null> {
   if (!/^[a-f0-9]{64}$/u.test(token)) return null
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(token),
+  )
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
 }
 /** Opaque browser sessions only; not OAuth bearer credentials or a login provider. */
 export class OpaqueSessionStore {
@@ -106,29 +122,57 @@ export class OpaqueSessionStore {
     this.#absoluteMs = options.absoluteMs
     this.#now = options.now ?? Date.now
   }
-  async issue(actor: Actor): Promise<{ readonly token: string; readonly actor: Actor; readonly expiresAt: number }> {
-    if (!isActor(actor) || actor.kind !== 'user' || actor.applicationId !== this.#registry.applicationId)
+  async issue(
+    actor: Actor,
+  ): Promise<{
+    readonly token: string
+    readonly actor: Actor
+    readonly expiresAt: number
+  }> {
+    if (
+      !isActor(actor) ||
+      actor.kind !== 'user' ||
+      actor.applicationId !== this.#registry.applicationId
+    )
       throw badRequest('actor', 'invalid_session_owner')
     const token = opaqueToken()
     const key = await tokenKey(token)
-    if (key === null) throw new KitFailure('internal', 'Session generation failed')
+    if (key === null)
+      throw new KitFailure('internal', 'Session generation failed')
     const now = this.#now()
-    const sessionActor = immutableActor({ ...actor, sessionId: crypto.randomUUID() })
-    const expiresAt = now + this.#absoluteMs
-    await this.#store.compareAndSet(this.#registry, 'opaque_sessions', key, null, {
-      actor: sessionActor,
-      createdAt: now,
-      lastSeenAt: now,
-      expiresAt,
+    const sessionActor = immutableActor({
+      ...actor,
+      sessionId: crypto.randomUUID(),
     })
+    const expiresAt = now + this.#absoluteMs
+    await this.#store.compareAndSet(
+      this.#registry,
+      'opaque_sessions',
+      key,
+      null,
+      {
+        actor: sessionActor,
+        createdAt: now,
+        lastSeenAt: now,
+        expiresAt,
+      },
+    )
     return { token, actor: sessionActor, expiresAt }
   }
   async #load(
     token: string,
-  ): Promise<{ readonly key: string; readonly document: StoredDocument; readonly session: SessionRecord } | null> {
+  ): Promise<{
+    readonly key: string
+    readonly document: StoredDocument
+    readonly session: SessionRecord
+  } | null> {
     const key = await tokenKey(token)
     if (key === null) return null
-    const document = await this.#store.get(this.#registry, 'opaque_sessions', key)
+    const document = await this.#store.get(
+      this.#registry,
+      'opaque_sessions',
+      key,
+    )
     if (!document) return null
     const session = parseSession(document.value)
     const now = this.#now()
@@ -146,10 +190,16 @@ export class OpaqueSessionStore {
     const found = await this.#load(token)
     if (!found) return null
     try {
-      await this.#store.compareAndSet(this.#registry, 'opaque_sessions', found.key, found.document.revision, {
-        ...found.session,
-        lastSeenAt: this.#now(),
-      })
+      await this.#store.compareAndSet(
+        this.#registry,
+        'opaque_sessions',
+        found.key,
+        found.document.revision,
+        {
+          ...found.session,
+          lastSeenAt: this.#now(),
+        },
+      )
       return immutableActor(found.session.actor)
     } catch (error) {
       if (error instanceof KitFailure && error.code === 'conflict') return null
@@ -161,24 +211,43 @@ export class OpaqueSessionStore {
     if (key === null) return
     // Retry only metadata CAS, never authentication or external side effects.
     for (let attempt = 0; attempt < 8; attempt++) {
-      const document = await this.#store.get(this.#registry, 'opaque_sessions', key)
+      const document = await this.#store.get(
+        this.#registry,
+        'opaque_sessions',
+        key,
+      )
       if (!document) return
       try {
-        await this.#store.remove(this.#registry, 'opaque_sessions', key, document.revision)
+        await this.#store.remove(
+          this.#registry,
+          'opaque_sessions',
+          key,
+          document.revision,
+        )
         return
       } catch (error) {
-        if (!(error instanceof KitFailure) || error.code !== 'conflict') throw error
+        if (!(error instanceof KitFailure) || error.code !== 'conflict')
+          throw error
       }
     }
     throw new KitFailure('conflict', 'Session revocation conflicted')
   }
   async rotate(
     token: string,
-  ): Promise<{ readonly token: string; readonly actor: Actor; readonly expiresAt: number } | null> {
+  ): Promise<{
+    readonly token: string
+    readonly actor: Actor
+    readonly expiresAt: number
+  } | null> {
     const found = await this.#load(token)
     if (!found) return null
     try {
-      await this.#store.remove(this.#registry, 'opaque_sessions', found.key, found.document.revision)
+      await this.#store.remove(
+        this.#registry,
+        'opaque_sessions',
+        found.key,
+        found.document.revision,
+      )
     } catch (error) {
       if (error instanceof KitFailure && error.code === 'conflict') return null
       throw error
@@ -186,13 +255,23 @@ export class OpaqueSessionStore {
     // Old token is already invalid even if issuing the replacement fails.
     const replacement = opaqueToken()
     const key = await tokenKey(replacement)
-    if (key === null) throw new KitFailure('internal', 'Session generation failed')
-    const actor = immutableActor({ ...found.session.actor, sessionId: crypto.randomUUID() })
-    await this.#store.compareAndSet(this.#registry, 'opaque_sessions', key, null, {
-      ...found.session,
-      actor,
-      lastSeenAt: this.#now(),
+    if (key === null)
+      throw new KitFailure('internal', 'Session generation failed')
+    const actor = immutableActor({
+      ...found.session.actor,
+      sessionId: crypto.randomUUID(),
     })
+    await this.#store.compareAndSet(
+      this.#registry,
+      'opaque_sessions',
+      key,
+      null,
+      {
+        ...found.session,
+        actor,
+        lastSeenAt: this.#now(),
+      },
+    )
     return { token: replacement, actor, expiresAt: found.session.expiresAt }
   }
 }

@@ -18,8 +18,12 @@ describe('createI18n', () => {
   })
 
   it('substitutes params and leaves unknown placeholders', () => {
-    const i18n = createI18n('en', { 'x.greet': 'Hi {name}, {count} new {missing}' })
-    expect(i18n.t('x.greet', { name: 'Ada', count: 3 })).toBe('Hi Ada, 3 new {missing}')
+    const i18n = createI18n('en', {
+      'x.greet': 'Hi {name}, {count} new {missing}',
+    })
+    expect(i18n.t('x.greet', { name: 'Ada', count: 3 })).toBe(
+      'Hi Ada, 3 new {missing}',
+    )
   })
 
   it('shows the key itself when missing', () => {

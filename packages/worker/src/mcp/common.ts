@@ -6,10 +6,14 @@ export function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 export function strings(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item: unknown) => typeof item === 'string')
+  return (
+    Array.isArray(value) &&
+    value.every((item: unknown) => typeof item === 'string')
+  )
 }
 export function text(value: unknown, field: string, max = 1024): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > max) throw badRequest(field, 'invalid')
+  if (typeof value !== 'string' || !value.trim() || value.length > max)
+    throw badRequest(field, 'invalid')
   return value
 }
 export function unique(values: readonly string[]): string[] {
@@ -21,10 +25,17 @@ export function random(): string {
 export function base64url(bytes: Uint8Array): string {
   let value = ''
   for (const byte of bytes) value += String.fromCharCode(byte)
-  return btoa(value).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')
+  return btoa(value)
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replace(/=+$/u, '')
 }
 export async function hash(value: string): Promise<string> {
-  return base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))))
+  return base64url(
+    new Uint8Array(
+      await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)),
+    ),
+  )
 }
 export function equal(a: string, b: string): boolean {
   let difference = a.length ^ b.length
@@ -33,7 +44,8 @@ export function equal(a: string, b: string): boolean {
   return difference === 0
 }
 export async function body(request: Request, max = 65536): Promise<string> {
-  if (Number(request.headers.get('Content-Length')) > max) throw badRequest('body', 'too_large', max)
+  if (Number(request.headers.get('Content-Length')) > max)
+    throw badRequest('body', 'too_large', max)
   if (!request.body) return ''
   const reader = request.body.getReader()
   const chunks: Uint8Array[] = []
@@ -64,7 +76,10 @@ export async function body(request: Request, max = 65536): Promise<string> {
     throw badRequest('body', 'invalid_utf8')
   }
 }
-export async function jsonBody(request: Request, max?: number): Promise<Record<string, unknown>> {
+export async function jsonBody(
+  request: Request,
+  max?: number,
+): Promise<Record<string, unknown>> {
   let value: unknown
   try {
     value = JSON.parse(await body(request, max))
@@ -75,7 +90,11 @@ export async function jsonBody(request: Request, max?: number): Promise<Record<s
   if (!object(value)) throw badRequest('body', 'object_required')
   return value
 }
-export function json(value: unknown, status = 200, extra?: HeadersInit): Response {
+export function json(
+  value: unknown,
+  status = 200,
+  extra?: HeadersInit,
+): Response {
   const headers = new Headers(extra)
   headers.set('Content-Type', 'application/json')
   headers.set('Cache-Control', 'no-store')
@@ -88,13 +107,18 @@ export function forbidden(): never {
 export function notFound(): never {
   throw new KitFailure('not_found', 'Record not found')
 }
-export function validActor(value: unknown, applicationId: string): value is Actor {
+export function validActor(
+  value: unknown,
+  applicationId: string,
+): value is Actor {
   return (
     object(value) &&
     value.applicationId === applicationId &&
     typeof value.subjectId === 'string' &&
     value.subjectId.length > 0 &&
-    (value.kind === 'user' || value.kind === 'service' || value.kind === 'mcp_client') &&
+    (value.kind === 'user' ||
+      value.kind === 'service' ||
+      value.kind === 'mcp_client') &&
     (value.tenantId === null || typeof value.tenantId === 'string') &&
     (value.sessionId === null || typeof value.sessionId === 'string') &&
     strings(value.scopes)

@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use aether_runtime::{
-    Ack, RunAccepted, RunContext, RunEvent, RunOwner, RunRequest, RunService, RunSnapshot,
+    Ack, RunAccepted, RunContext, RunEvent, RunOwner, RunRequest,
+    RunService, RunSnapshot,
 };
 use aether_support::KitError;
 use tauri::ipc::Channel;
@@ -41,8 +42,12 @@ impl Runs {
     }
 
     pub(crate) fn close(&self, label: &str) {
-        // Serialize lookup/removal with registration; commands never create an identity.
-        let mut owners = self.owners.lock().unwrap_or_else(PoisonError::into_inner);
+        // Serialize lookup/removal with registration; commands never create
+        // an identity.
+        let mut owners = self
+            .owners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         if let Some(owner) = owners.remove(label) {
             self.service.cancel_owner(&owner);
         }
@@ -50,7 +55,11 @@ impl Runs {
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_run"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_run"),
+    err(level = "warn")
+)]
 pub(crate) async fn chat_run<R: Runtime>(
     app: AppHandle<R>,
     window: Window<R>,
@@ -73,7 +82,9 @@ pub(crate) async fn chat_run<R: Runtime>(
                 own_mcp_port,
             },
             request,
-            Arc::new(move |event| on_event.send(event).map_err(KitError::internal)),
+            Arc::new(move |event| {
+                on_event.send(event).map_err(KitError::internal)
+            }),
         )
         .await
 }
@@ -86,7 +97,11 @@ fn check_id(field: &str, value: &str) -> Result<(), KitError> {
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_cancel"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_cancel"),
+    err(level = "warn")
+)]
 pub(crate) fn chat_cancel<R: Runtime>(
     app: AppHandle<R>,
     window: Window<R>,
@@ -98,7 +113,11 @@ pub(crate) fn chat_cancel<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_approve"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_approve"),
+    err(level = "warn")
+)]
 pub(crate) fn chat_approve<R: Runtime>(
     app: AppHandle<R>,
     window: Window<R>,
@@ -114,7 +133,11 @@ pub(crate) fn chat_approve<R: Runtime>(
 }
 
 #[tauri::command]
-#[tracing::instrument(skip_all, fields(command = "chat_snapshot"), err(level = "warn"))]
+#[tracing::instrument(
+    skip_all,
+    fields(command = "chat_snapshot"),
+    err(level = "warn")
+)]
 pub(crate) fn chat_snapshot<R: Runtime>(
     app: AppHandle<R>,
     window: Window<R>,
@@ -134,9 +157,9 @@ mod tests {
     impl aether_runtime::KitHost for Host {}
 
     #[tokio::test]
-    async fn destroyed_window_is_not_recreated_by_lookup_and_same_label_gets_new_owner() {
-        let root = tempfile::tempdir().unwrap();
-        let providers = Arc::new(aether_providers::Store::open(root.path()).unwrap());
+    async fn closed_window_lookup_does_not_recreate_owner() {
+        let providers =
+            Arc::new(aether_providers::Store::open(root.path()).unwrap());
         let service = RunService::new(
             Arc::new(Host),
             aether_runtime::RunConfig::default(),
@@ -153,8 +176,13 @@ mod tests {
         let current = runs.owner("main").unwrap();
         let request = || {
             serde_json::from_value(serde_json::json!({
-            "purpose": "chat", "skills": [], "input": "hello", "regenerate": false, "language": "en"
-        })).unwrap()
+                "purpose": "chat",
+                "skills": [],
+                "input": "hello",
+                "regenerate": false,
+                "language": "en"
+            }))
+            .unwrap()
         };
         let closed = runs
             .service

@@ -1,4 +1,6 @@
 //! Independent image contracts, validation and optional Native generation/editing.
+#[cfg(all(test, feature = "client"))]
+mod tests;
 
 use aether_support::KitError;
 use base64::Engine as _;
