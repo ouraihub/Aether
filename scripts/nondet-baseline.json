@@ -1,6 +1,6 @@
 {
   "crates/aether-chat/src/validate.rs": 1,
-  "crates/aether-images/src/client.rs": 1,
+  "crates/aether-images/src/transport.rs": 1,
   "crates/aether-mcp-server/src/store.rs": 1,
   "crates/aether-observability/src/lib.rs": 1,
   "crates/aether-observability/src/writer.rs": 1,

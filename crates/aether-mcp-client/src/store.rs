@@ -6,15 +6,18 @@ use std::sync::{Mutex, MutexGuard};
 pub(crate) use aether_support::clock::now_millis as now_ms;
 
 use aether_support::db::{self, Migration};
-use aether_support::{KitError, KitErrorCode, id, mask, net, secret};
+use aether_support::{KitError, KitErrorCode, id, mask, secret};
 use rusqlite::{OptionalExtension, Row, params};
-use url::Url;
 
 use crate::credentials::Secret;
-use crate::http;
 use crate::protocol::Tool;
 use crate::session::McpTool;
-use crate::{Approval, McpTransport, ServerDto, ServerSave, ServerSecret, ToolDto};
+use crate::{Approval, McpTransport, ServerDto, ServerSave, ToolDto};
+
+#[path = "validation.rs"]
+mod validation;
+pub(crate) use validation::check_stdio;
+use validation::{Columns, approval_str, parse_approval, seal, transport_from_row, validate_slug};
 
 pub(crate) const MIGRATIONS: &[Migration] = &[
     Migration {
@@ -47,10 +50,6 @@ ALTER TABLE servers ADD COLUMN args TEXT;
 ALTER TABLE servers ADD COLUMN cwd TEXT;",
     },
 ];
-
-const MAX_COMMAND_CHARS: usize = 1024;
-const MAX_ARGS: usize = 64;
-const MAX_ARG_CHARS: usize = 4096;
 
 const SERVER_COLUMNS: &str = "id, slug, name, url, secret_ciphertext, enabled, trusted, \
      allow_private, transport, command, args, cwd";
@@ -266,68 +265,6 @@ impl Target {
     }
 }
 
-/// The transport columns of a server row; an invalid combination is a corrupt row.
-fn transport_from_row(row: &Row<'_>) -> rusqlite::Result<McpTransport> {
-    let kind: String = row.get(8)?;
-    let url: String = row.get(3)?;
-    let command: Option<String> = row.get(9)?;
-    let args: Option<String> = row.get(10)?;
-    let cwd: Option<String> = row.get(11)?;
-    let corrupt = |what: &str| {
-        rusqlite::Error::FromSqlConversionFailure(
-            8,
-            rusqlite::types::Type::Text,
-            format!("server row: {what}").into(),
-        )
-    };
-    match (kind.as_str(), command, args) {
-        ("http", None, None) if cwd.is_none() && !url.is_empty() => Ok(McpTransport::Http { url }),
-        ("stdio", Some(command), Some(args)) if url.is_empty() => {
-            let args = serde_json::from_str(&args).map_err(|_| corrupt("args"))?;
-            Ok(McpTransport::Stdio { command, args, cwd })
-        }
-        _ => Err(corrupt("transport")),
-    }
-}
-
-/// The columns `save` writes for a transport, after validating it (docs/27 §2).
-struct Columns {
-    kind: &'static str,
-    /// Empty for stdio.
-    url: String,
-    command: Option<String>,
-    /// JSON array.
-    args: Option<String>,
-    cwd: Option<String>,
-}
-
-impl Columns {
-    fn new(transport: &McpTransport, allow_private: bool) -> Result<Self, KitError> {
-        match transport {
-            McpTransport::Http { url } => {
-                check_server_url(url, allow_private)?;
-                Ok(Self {
-                    kind: "http",
-                    url: url.clone(),
-                    command: None,
-                    args: None,
-                    cwd: None,
-                })
-            }
-            McpTransport::Stdio { command, args, cwd } => {
-                check_stdio(command, args, cwd.as_deref())?;
-                Ok(Self {
-                    kind: "stdio",
-                    url: String::new(),
-                    command: Some(command.clone()),
-                    args: Some(serde_json::to_string(args).map_err(KitError::internal)?),
-                    cwd: cwd.clone(),
-                })
-            }
-        }
-    }
-}
-
 fn lock(db: &Db) -> Result<MutexGuard<'_, rusqlite::Connection>, KitError> {
     db.lock()
         .map_err(|_| KitError::new(KitErrorCode::Internal, "store lock poisoned"))
@@ -496,119 +433,4 @@ fn replace_tools(db: &Db, server_id: &str, tools: Vec<Tool>) -> Result<Vec<ToolD
     tx.commit()?;
     tracing::info!(server_id, count = dtos.len(), "mcp.client.tools_refreshed");
     Ok(dtos)
-}
-
-/// Seals the new secret; `None` = cleared. Fails before anything is written. http takes
-/// headers/query, stdio takes env; the other kind is rejected.
-fn seal(input: ServerSecret, stdio: bool) -> Result<Option<Vec<u8>>, KitError> {
-    let secret = Secret {
-        headers: input.headers.unwrap_or_default(),
-        query: input.query.unwrap_or_default(),
-        env: input.env.unwrap_or_default(),
-    };
-    let foreign = if stdio {
-        !secret.headers.is_empty() || !secret.query.is_empty()
-    } else {
-        !secret.env.is_empty()
-    };
-    if foreign {
-        return Err(KitError::bad_request("secret", "transport_mismatch"));
-    }
-    if secret.is_empty() {
-        return Ok(None);
-    }
-    secret.header_map()?;
-    secret.check_env()?;
-    let plain =
-        zeroize::Zeroizing::new(serde_json::to_string(&secret).map_err(KitError::internal)?);
-    secret::seal(&plain).map(Some)
-}
-
-/// The URL must pass the address policy and carry no credentials (docs/27 §2).
-fn check_server_url(url: &str, allow_private: bool) -> Result<(), KitError> {
-    let parsed = net::check_url(url, &http::policy(url, allow_private))?;
-    // mask_url is the single definition of a credential-looking query: if it would
-    // mask anything, the value belongs in `secret.query`.
-    let masked = Url::parse(&mask::mask_url(url)).map_err(KitError::internal)?;
-    if !parsed.query_pairs().eq(masked.query_pairs()) {
-        return Err(KitError::bad_request("url", "credential_query"));
-    }
-    Ok(())
-}
-
-/// docs/27 §2: command non-empty, ≤ 1024 characters, single line; ≤ 64 args of ≤ 4096
-/// characters; `cwd` an existing absolute directory. Args are listed unmasked, so a
-/// credential-looking one is rejected: it belongs in `secret.env`.
-pub(crate) fn check_stdio(
-    command: &str,
-    args: &[String],
-    cwd: Option<&str>,
-) -> Result<(), KitError> {
-    if command.trim().is_empty() {
-        return Err(KitError::bad_request("command", "empty"));
-    }
-    if command.chars().count() > MAX_COMMAND_CHARS {
-        return Err(KitError::bad_request("command", "too_long"));
-    }
-    if command.contains(['\n', '\r', '\0']) {
-        return Err(KitError::bad_request("command", "invalid"));
-    }
-    if args.len() > MAX_ARGS {
-        return Err(KitError::bad_request("args", "too_many"));
-    }
-    if args.iter().any(|arg| arg.chars().count() > MAX_ARG_CHARS) {
-        return Err(KitError::bad_request("args", "too_long"));
-    }
-    if args.iter().any(|arg| arg.contains('\0')) {
-        return Err(KitError::bad_request("args", "invalid"));
-    }
-    // `--flag=value` is one token to the heuristic, so the parts are checked too.
-    let secret_arg = |arg: &String| arg.split('=').any(mask::looks_like_secret);
-    if args.iter().any(secret_arg) {
-        return Err(KitError::bad_request("args", "credential_arg"));
-    }
-    if let Some(cwd) = cwd {
-        check_cwd(cwd)?;
-    }
-    Ok(())
-}
-
-fn check_cwd(cwd: &str) -> Result<(), KitError> {
-    let path = Path::new(cwd);
-    if !path.is_absolute() {
-        return Err(KitError::bad_request("cwd", "not_absolute"));
-    }
-    if !path.is_dir() {
-        return Err(KitError::bad_request("cwd", "not_found"));
-    }
-    Ok(())
-}
-
-fn validate_slug(slug: &str) -> Result<(), KitError> {
-    let valid = (1..=24).contains(&slug.len())
-        && slug
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
-    if valid {
-        Ok(())
-    } else {
-        Err(KitError::bad_request("slug", "invalid"))
-    }
-}
-
-const fn approval_str(approval: Approval) -> &'static str {
-    match approval {
-        Approval::Auto => "auto",
-        Approval::Ask => "ask",
-        Approval::Deny => "deny",
-    }
-}
-
-/// The CHECK constraint admits only the three values; anything else is treated as `ask`.
-fn parse_approval(value: &str) -> Approval {
-    match value {
-        "auto" => Approval::Auto,
-        "deny" => Approval::Deny,
-        _ => Approval::Ask,
-    }
 }

@@ -13,6 +13,8 @@ import {
   type ProviderSave,
 } from '@ouraihub/aether-contracts'
 import { KitFailure, badRequest } from '@ouraihub/aether-core/error'
+import { inferReasoning } from '@ouraihub/aether-core/providers/infer'
+import { probe as probeEndpoint } from '@ouraihub/aether-core/providers/probe'
 import {
   prepare,
   validateHeaders,
@@ -22,80 +24,22 @@ import {
   charCount,
   type EndpointSnapshot,
 } from '@ouraihub/aether-core/providers/connection'
-import { inferReasoning } from '@ouraihub/aether-core/providers/infer'
-import { probe as probeEndpoint } from '@ouraihub/aether-core/providers/probe'
 import type { Connection } from '@ouraihub/aether-core/types'
 import type { OutboundHttp } from '@ouraihub/aether-core/ports'
 import { ownerKey, type Actor, type WorkerContext } from '../context.js'
-import {
-  isSealedCredential,
-  type CredentialPort,
-  type CredentialScope,
-  type SealedCredential,
-} from '../credentials.js'
+import type { CredentialPort, CredentialScope, SealedCredential } from '../credentials.js'
 import type { DocumentStore, StoredDocument } from '../storage.js'
+import { parseCatalog, type Catalog, type Secret } from './catalog.js'
+import { modelOptions } from './model-options.js'
+import { handleProviderRequest } from './http.js'
 
-interface Secret {
-  endpointId: string
-  keyId: string
-  sealed: SealedCredential
-}
-interface Catalog {
-  providers: Provider[]
-  secrets: Secret[]
-  inferred: string[]
-}
 export interface ProviderServiceOptions {
   documents: DocumentStore
   credentials: CredentialPort
   outbound: OutboundHttp
   authorizeReveal: (request: Request, context: WorkerContext) => Promise<void>
 }
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-function parseCatalog(value: unknown): Catalog {
-  if (
-    !record(value) ||
-    !Array.isArray(value.providers) ||
-    !Array.isArray(value.secrets) ||
-    !Array.isArray(value.inferred)
-  )
-    throw new KitFailure('incompatible_db', 'Invalid provider catalog')
-  const providers: Provider[] = []
-  const secrets: Secret[] = []
-  const inferred: string[] = []
-  for (const item of value.providers) {
-    if (!isContract('Provider', item))
-      throw new KitFailure('incompatible_db', 'Invalid provider document')
-    providers.push(item)
-  }
-  for (const item of value.secrets) {
-    if (
-      !record(item) ||
-      typeof item.endpointId !== 'string' ||
-      typeof item.keyId !== 'string' ||
-      !isSealedCredential(item.sealed)
-    )
-      throw new KitFailure('incompatible_db', 'Invalid provider credential')
-    secrets.push({ endpointId: item.endpointId, keyId: item.keyId, sealed: item.sealed })
-  }
-  for (const item of value.inferred) {
-    if (typeof item !== 'string')
-      throw new KitFailure('incompatible_db', 'Invalid reasoning declaration')
-    inferred.push(item)
-  }
-  const automatic = new Set(inferred)
-  for (const provider of providers)
-    for (const endpoint of provider.endpoints)
-      for (const model of endpoint.models)
-        if (automatic.has(JSON.stringify([endpoint.id, model.id])))
-          model.reasoning =
-            model.modelType === 'chat'
-              ? inferReasoning(model.id, endpoint.protocol, endpoint.baseUrl, model.maxOutput)
-              : null
-  return { providers, secrets, inferred }
-}
+
 const missing = (entity: string): KitFailure =>
   new KitFailure('not_found', `Unknown ${entity}`, { entity })
 const reasoningKey = (endpointId: string, modelId: string): string =>
@@ -469,30 +413,7 @@ export class ProviderService {
   }
   async modelOptions(actor: Actor, filter: ModelFilter = {}): Promise<ModelOption[]> {
     const { catalog } = await this.load(actor)
-    return catalog.providers
-      .filter((provider) => provider.enabled)
-      .flatMap((provider) =>
-        provider.endpoints.flatMap((endpoint) =>
-          endpoint.models
-            .filter(
-              (model) =>
-                (filter.modelType === undefined || model.modelType === filter.modelType) &&
-                (filter.supportsTools === undefined ||
-                  model.supportsTools === filter.supportsTools),
-            )
-            .map((model) => ({
-              endpointId: endpoint.id,
-              modelId: model.id,
-              label: `${provider.name} · ${endpoint.slug} · ${model.id}`,
-              name: model.name,
-              modelType: model.modelType,
-              supportsTools: model.supportsTools,
-              reasoning: model.reasoning,
-              nativeWebSearch: model.nativeWebSearch,
-              canVision: model.canVision,
-            })),
-        ),
-      )
+    return modelOptions(catalog, filter)
   }
   async probe(actor: Actor, target: ProbeTarget, signal: AbortSignal): Promise<ProbeResult> {
     if (!isContract('ProbeTarget', target)) throw badRequest('target', 'invalid')
@@ -519,69 +440,6 @@ export class ProviderService {
     return probeEndpoint(this.options.outbound, { endpoint, signal })
   }
   async handle(request: Request, context: WorkerContext): Promise<Response | null> {
-    const url = new URL(request.url)
-    const path = url.pathname
-    const root = '/api/v1/providers'
-    if (path !== root && !path.startsWith(`${root}/`)) return null
-    const actor = context.actor
-    const json = (value: unknown): Response => Response.json(value)
-    if (path === root && request.method === 'GET') return json(await this.list(actor))
-    if (path === root && request.method === 'POST') {
-      const value: unknown = await request.json()
-      if (!isContract('ProviderSave', value)) throw badRequest('provider', 'invalid')
-      return json(await this.save(actor, value))
-    }
-    if (path === `${root}/model-options` && request.method === 'GET') {
-      const value: unknown = {
-        ...(url.searchParams.has('modelType')
-          ? { modelType: url.searchParams.get('modelType') }
-          : {}),
-        ...(url.searchParams.has('supportsTools')
-          ? { supportsTools: url.searchParams.get('supportsTools') === 'true' }
-          : {}),
-      }
-      if (
-        url.searchParams.has('supportsTools') &&
-        !['true', 'false'].includes(url.searchParams.get('supportsTools') ?? '')
-      )
-        throw badRequest('supportsTools', 'invalid')
-      if (!isContract('ModelFilter', value)) throw badRequest('filter', 'invalid')
-      return json(await this.modelOptions(actor, value))
-    }
-    if (path === `${root}/probe` && request.method === 'POST') {
-      const value: unknown = await request.json()
-      if (!isContract('ProbeTarget', value)) throw badRequest('target', 'invalid')
-      return json(await this.probe(actor, value, context.signal))
-    }
-    if (path === `${root}/keys` && request.method === 'POST') {
-      const value: unknown = await request.json()
-      if (!isContract('EndpointKeySave', value)) throw badRequest('key', 'invalid')
-      return json(await this.saveKey(actor, value))
-    }
-    const reveal = path.match(/^\/api\/v1\/providers\/keys\/([^/]+)\/reveal$/)
-    if (reveal && request.method === 'POST') {
-      await this.options.authorizeReveal(request, context)
-      return json(await this.revealKey(actor, decodeURIComponent(reveal[1] ?? '')))
-    }
-    const key = path.match(/^\/api\/v1\/providers\/([^/]+)\/keys\/([^/]+)$/)
-    if (key && request.method === 'DELETE')
-      return json(
-        await this.removeKey(
-          actor,
-          decodeURIComponent(key[1] ?? ''),
-          decodeURIComponent(key[2] ?? ''),
-        ),
-      )
-    const enabled = path.match(/^\/api\/v1\/providers\/([^/]+)\/enabled$/)
-    if (enabled && request.method === 'POST') {
-      const value: unknown = await request.json()
-      if (!record(value) || Object.keys(value).length !== 1 || typeof value.enabled !== 'boolean')
-        throw badRequest('enabled', 'invalid')
-      return json(await this.setEnabled(actor, decodeURIComponent(enabled[1] ?? ''), value.enabled))
-    }
-    const provider = path.match(/^\/api\/v1\/providers\/([^/]+)$/)
-    if (provider && request.method === 'DELETE')
-      return json(await this.remove(actor, decodeURIComponent(provider[1] ?? '')))
-    throw missing('route')
+    return handleProviderRequest(this, request, context, this.options.authorizeReveal)
   }
 }

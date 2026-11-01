@@ -1,6 +1,19 @@
 // In-memory RunClient, ConversationClient and desktop actions for tests and demos (docs/16, docs/22).
 // Seed storage with initialConversations; override clients independently or omit a capability.
 import { KitClientError } from './contract'
+import {
+  mcpClientDefaults,
+  mcpServerDefaults,
+  searchDefaults,
+  skillSourceDefaults,
+} from './fake-optional'
+
+const clientError = (
+  code: ConstructorParameters<typeof KitClientError>[0]['code'],
+  message: string,
+  details: Record<string, string> = {},
+) => new KitClientError({ code, message, details })
+
 import type {
   ConversationClient,
   DesktopActions,
@@ -40,13 +53,6 @@ export interface FakePortsOptions {
   /** Ports to leave out, as a host without that feature would. */
   omit?: readonly PortName[]
 }
-
-const STOPPED = { running: false, port: 0, url: '', toolCount: 0 }
-const clientError = (
-  code: ConstructorParameters<typeof KitClientError>[0]['code'],
-  message: string,
-  details: Record<string, string> = {},
-) => new KitClientError({ code, message, details })
 
 export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
   let level: LogLevel = 'INFO'
@@ -470,67 +476,13 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       remove: () => Promise.resolve([]),
       ...options.skills,
     },
-    mcpClient: {
-      list: () => Promise.resolve([]),
-      save: () => Promise.resolve([]),
-      remove: () => Promise.resolve([]),
-      refresh: () => Promise.resolve([]),
-      setToolApproval: () => Promise.resolve(),
-      ...options.mcpClient,
-    },
-    mcpServer: {
-      status: () => Promise.resolve(STOPPED),
-      tokens: () => Promise.resolve([]),
-      start: () => Promise.resolve(STOPPED),
-      stop: () => Promise.resolve(STOPPED),
-      setPort: (port) => Promise.resolve({ ...STOPPED, port }),
-      issueToken: (name, scopes) =>
-        Promise.resolve({
-          token: 'kit_fake',
-          id: 'fake-token',
-          name,
-          scopes: [...scopes],
-          createdAt: 0,
-          lastUsedAt: null,
-          revokedAt: null,
-        }),
-      revokeToken: () => Promise.resolve(),
-      scopes: () => Promise.resolve([]),
-      setScopes: () => Promise.resolve([]),
-      ...options.mcpServer,
-    },
+    mcpClient: mcpClientDefaults(options.mcpClient ?? {}),
+    mcpServer: mcpServerDefaults(options.mcpServer ?? {}),
   }
   const result: KitPorts = { ...ports }
-  if (options.search) {
-    const unavailable = () =>
-      Promise.reject(clientError('internal', 'Configure the fake search method'))
-    result.search = {
-      settings: unavailable,
-      save: unavailable,
-      setDefault: unavailable,
-      savePreferences: unavailable,
-      saveKey: unavailable,
-      removeKey: unavailable,
-      reveal: unavailable,
-      check: unavailable,
-      search: unavailable,
-      fetch: unavailable,
-      ...options.search,
-    }
-  }
-  if (options.skillSources) {
-    const unavailable = () =>
-      Promise.reject(clientError('internal', 'Configure the fake skill source method'))
-    result.skillSources = {
-      search: unavailable,
-      prepare: unavailable,
-      discover: unavailable,
-      prepareSystem: unavailable,
-      pickDirectory: unavailable,
-      pickSearchDirectory: unavailable,
-      ...options.skillSources,
-    }
-  }
+  if (options.search) result.search = searchDefaults(options.search, clientError)
+  if (options.skillSources)
+    result.skillSources = skillSourceDefaults(options.skillSources, clientError)
   for (const name of options.omit ?? []) delete result[name]
   return result
 }

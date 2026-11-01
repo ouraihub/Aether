@@ -8,9 +8,10 @@ import type {
 } from '@ouraihub/aether-contracts'
 import type { RunInput, RunSummary } from '@ouraihub/aether-core/types'
 import { KitFailure, badRequest } from '@ouraihub/aether-core/error'
-import { canonicalJson, isRecord } from '@ouraihub/aether-core/guard'
+import { canonicalJson } from '@ouraihub/aether-core/guard'
 import { decodeImage, parseImage } from '@ouraihub/aether-core/images'
 import type { Actor, WorkerContext } from '../context.ts'
+import { handleConversationRequest } from './routes.ts'
 import { retryCas } from '../storage.ts'
 import type { DocumentStore, RetryOptions, StoredDocument } from '../storage.ts'
 import { authoritative, fingerprint, resolveAction } from './action.ts'
@@ -455,91 +456,25 @@ export class ConversationService {
     return project(fork)
   }
   async handle(request: Request, context: WorkerContext): Promise<Response | null> {
-    const url = new URL(request.url),
-      base = '/api/v1/conversations',
-      actor = context.actor
-    if (url.pathname !== base && !url.pathname.startsWith(`${base}/`)) return null
-    const parts = url.pathname
-      .slice(base.length)
-      .split('/')
-      .filter(Boolean)
-      .map((part) => {
-        try {
-          return decodeURIComponent(part)
-        } catch {
-          throw badRequest('path', 'encoding')
-        }
-      })
-    const json = (value: unknown): Response => Response.json(value)
-    if (parts.length === 0 && request.method === 'GET')
-      return json(await this.list(url.searchParams.get('scope'), actor))
-    const id = parts[0]
-    if (!id) throw notFound('route')
-    if (parts.length === 1 && request.method === 'GET') return json(await this.get(id, actor))
-    if (parts.length === 1 && request.method === 'DELETE') {
-      await this.delete(id, actor)
-      return json({ ok: true })
-    }
-    if (
-      parts.length === 6 &&
-      parts[1] === 'turns' &&
-      parts[3] === 'images' &&
-      request.method === 'GET'
-    ) {
-      const turnId = parts[2],
-        kind = parts[4],
-        index = parts[5]
-      if (
-        !turnId ||
-        (kind !== 'input' && kind !== 'generated') ||
-        !index ||
-        !/^(0|[1-9]\d*)$/u.test(index)
-      )
-        throw notFound('image')
-      const { document } = await this.load(id, actor),
-        turn = target(document, turnId),
-        image = (kind === 'input' ? turn.images : turn.generated)[Number(index)]
-      if (!image || image.data === null) throw notFound('image')
-      const bytes = decodeImage({ mime: image.mime, data: image.data })
-      return new Response(bytes, {
-        headers: {
-          'Content-Type': image.mime,
-          'Cache-Control': 'private, no-store',
-          'X-Content-Type-Options': 'nosniff',
-          'Content-Security-Policy': "default-src 'none'",
-        },
-      })
-    }
-    if (parts.length !== 2 || request.method !== 'POST') throw notFound('route')
-    let body: unknown
-    try {
-      body = await request.json()
-    } catch {
-      throw badRequest('body', 'json')
-    }
-    if (!isRecord(body)) throw badRequest('body', 'object')
-    const action = parts[1],
-      fields =
-        action === 'rename'
-          ? ['title']
-          : action === 'edit-turn'
-            ? ['turnId', 'text', 'expectedText']
-            : ['turnId']
-    if (Object.keys(body).some((key) => !fields.includes(key)))
-      throw badRequest('body', 'unknown_field')
-    if (action === 'rename') {
-      if (typeof body.title !== 'string') throw badRequest('title', 'required')
-      return json(await this.rename(id, body.title, actor))
-    }
-    if (typeof body.turnId !== 'string') throw badRequest('turnId', 'required')
-    if (action === 'edit-turn') {
-      if (typeof body.text !== 'string' || typeof body.expectedText !== 'string')
-        throw badRequest('text', 'required')
-      return json(await this.editTurn(id, body.turnId, body.text, body.expectedText, actor))
-    }
-    if (action === 'remove-turn') return json(await this.removeTurn(id, body.turnId, actor))
-    if (action === 'select-turn') return json(await this.selectTurn(id, body.turnId, actor))
-    if (action === 'fork') return json(await this.fork(id, body.turnId, actor))
-    throw notFound('route')
+    return handleConversationRequest(
+      this,
+      request,
+      context,
+      async (id, turnId, kind, index, actor) => {
+        const { document } = await this.load(id, actor),
+          turn = target(document, turnId),
+          image = (kind === 'input' ? turn.images : turn.generated)[index]
+        if (!image || image.data === null) throw notFound('image')
+        const bytes = decodeImage({ mime: image.mime, data: image.data })
+        return new Response(bytes, {
+          headers: {
+            'Content-Type': image.mime,
+            'Cache-Control': 'private, no-store',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'",
+          },
+        })
+      },
+    )
   }
 }

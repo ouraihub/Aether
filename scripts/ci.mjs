@@ -20,7 +20,7 @@ const cargo = (args) =>
     : `cargo ${args}`
 
 const common = [
-  'node --test scripts/ci-scope.test.mjs scripts/ci-gate.test.mjs scripts/scenario-check.test.mjs',
+  'node --test scripts/ci-scope.test.mjs scripts/ci-gate.test.mjs scripts/scenario-check.test.mjs scripts/file-size.test.mjs',
   'pnpm exec release-kit check',
 ]
 const frontend = [

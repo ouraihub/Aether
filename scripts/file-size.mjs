@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { extname } from 'node:path'
 
 const limit = 500
@@ -26,25 +26,31 @@ const ignored = [
   /(^|\/)generated\//,
   /(^|\/)vendor\//,
   /(^|\/)examples\//,
-  /(^|\/)plugin\//,
-  /(^|\/)crates\//,
-  /(^|\/)packages\/contracts\//,
-  /(^|\/)packages\/ui\//,
-  /(^|\/)packages\/worker\/scenarios\//,
-  /(^|\/)tests?\.[^.]+$/,
+  /(^|\/)(tests?|__tests__|fixtures?|scenarios)\//,
+  /(^|\/)(tests?|[\w-]+_tests)\.[^.]+$/,
   /\.(test|spec)\.[^.]+$/,
+  // Embedded third-party creator bundle and translation catalogs are resources, not implementation.
+  /^crates\/aether-skills\/src\/creator\//,
+  /^packages\/ui\/src\/i18n\/(en|zh-CN)\.ts$/,
+  // AJV standalone output is generated alongside the public contract bindings.
+  /^packages\/contracts\/src\/validators\.js$/,
 ]
-const files = execFileSync(
-  'git',
-  ['diff', '--name-only', '--diff-filter=A', 'origin/main...HEAD'],
-  { encoding: 'utf8' },
-)
-  .split(/\r?\n/)
-  .filter(Boolean)
+const files = [
+  ...new Set(
+    execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+      encoding: 'utf8',
+    })
+      .split('\0')
+      .filter(Boolean),
+  ),
+]
+  .filter((file) => existsSync(file))
   .filter((file) => extensions.has(extname(file).toLowerCase()))
   .filter((file) => !ignored.some((pattern) => pattern.test(file)))
 const violations = files.flatMap((file) => {
-  const lines = readFileSync(file, 'utf8').split(/\r?\n/)
+  const text = readFileSync(file, 'utf8')
+  const lines = text.split(/\r?\n/)
+  if (lines.at(-1) === '') lines.pop()
   return lines.length > limit ? [`${file}: ${lines.length} > ${limit}`] : []
 })
 if (violations.length) {
