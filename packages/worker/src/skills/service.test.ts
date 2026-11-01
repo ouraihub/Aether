@@ -14,7 +14,8 @@ const actor: Actor = {
   sessionId: null,
   scopes: [],
 }
-const key = (owner: Actor, id: string) => JSON.stringify([owner.applicationId, owner.tenantId, owner.subjectId, id])
+const key = (owner: Actor, id: string) =>
+  JSON.stringify([owner.applicationId, owner.tenantId, owner.subjectId, id])
 class Documents implements DocumentStore {
   readonly values = new Map<string, StoredDocument>()
   failNext = false
@@ -23,12 +24,21 @@ class Documents implements DocumentStore {
     return this.values.get(key(owner, `${collection}/${id}`)) ?? null
   }
   async list(owner: Actor, collection: string) {
-    const prefix = JSON.stringify([owner.applicationId, owner.tenantId, owner.subjectId]).slice(0, -1)
+    const prefix = JSON.stringify([owner.applicationId, owner.tenantId, owner.subjectId]).slice(
+      0,
+      -1,
+    )
     return [...this.values.entries()]
       .filter(([id]) => id.startsWith(prefix) && id.includes(`${collection}/`))
       .map(([, value]) => value)
   }
-  async compareAndSet(owner: Actor, collection: string, id: string, expected: number | null, value: unknown) {
+  async compareAndSet(
+    owner: Actor,
+    collection: string,
+    id: string,
+    expected: number | null,
+    value: unknown,
+  ) {
     const storageKey = key(owner, `${collection}/${id}`)
     const current = this.values.get(storageKey)
     if (this.failNext || (current?.revision ?? null) !== expected) {
@@ -45,7 +55,8 @@ class Documents implements DocumentStore {
   }
   async remove(owner: Actor, collection: string, id: string, expected: number) {
     const storageKey = key(owner, `${collection}/${id}`)
-    if (this.values.get(storageKey)?.revision !== expected) throw new KitFailure('conflict', 'CAS conflict')
+    if (this.values.get(storageKey)?.revision !== expected)
+      throw new KitFailure('conflict', 'CAS conflict')
     this.values.delete(storageKey)
   }
 }
@@ -80,12 +91,22 @@ describe('actor-scoped skill persistence', () => {
     const before = blobs.values.size
     docs.failNext = true
     await assert.rejects(
-      service.save(actor, { ...input, id: 'one', expectedRevision: 1, body: 'not committed' }, '', 3),
+      service.save(
+        actor,
+        { ...input, id: 'one', expectedRevision: 1, body: 'not committed' },
+        '',
+        3,
+      ),
       { code: 'conflict' },
     )
     assert.equal(blobs.values.size, before)
     assert.equal((await service.get(actor, 'one', 4)).body, 'original')
-    await service.save(actor, { ...input, id: 'one', expectedRevision: 1, body: 'committed' }, '', 5)
+    await service.save(
+      actor,
+      { ...input, id: 'one', expectedRevision: 1, body: 'committed' },
+      '',
+      5,
+    )
     assert.equal(blobs.values.size, before + 1)
     assert.equal(pinned[0]?.body, 'original')
     await assert.rejects(service.snapshot(actor, [{ id: 'one', revision: 1 }], 6), {

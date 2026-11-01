@@ -1,6 +1,19 @@
 // In-memory RunClient, ConversationClient and desktop actions for tests and demos (docs/16, docs/22).
 // Seed storage with initialConversations; override clients independently or omit a capability.
 import { KitClientError } from './contract'
+import {
+  mcpClientDefaults,
+  mcpServerDefaults,
+  searchDefaults,
+  skillSourceDefaults,
+} from './fake-optional'
+
+const clientError = (
+  code: ConstructorParameters<typeof KitClientError>[0]['code'],
+  message: string,
+  details: Record<string, string> = {},
+) => new KitClientError({ code, message, details })
+
 import type {
   ConversationClient,
   DesktopActions,
@@ -12,7 +25,13 @@ import type {
   ProvidersPort,
   SkillsPort,
 } from './contract'
-import type { Conversation, LogLevel, RunEvent, RunSnapshot, Turn } from '@ouraihub/aether-contracts'
+import type {
+  Conversation,
+  LogLevel,
+  RunEvent,
+  RunSnapshot,
+  Turn,
+} from '@ouraihub/aether-contracts'
 import type { SearchPort } from './search'
 import type { SkillSourcesPort } from './skill-sources'
 
@@ -34,13 +53,6 @@ export interface FakePortsOptions {
   /** Ports to leave out, as a host without that feature would. */
   omit?: readonly PortName[]
 }
-
-const STOPPED = { running: false, port: 0, url: '', toolCount: 0 }
-const clientError = (
-  code: ConstructorParameters<typeof KitClientError>[0]['code'],
-  message: string,
-  details: Record<string, string> = {},
-) => new KitClientError({ code, message, details })
 
 export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
   let level: LogLevel = 'INFO'
@@ -95,7 +107,11 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
           turn.status = run.status
           if (run.status === 'cancelled') turn.text = ''
           if (select && run.status === 'completed')
-            conversation.summary = { ...conversation.summary, selectedTurnId: turn.id, updatedAt: Date.now() }
+            conversation.summary = {
+              ...conversation.summary,
+              selectedTurnId: turn.id,
+              updatedAt: Date.now(),
+            }
         }
         signal?.removeEventListener('abort', cancel)
         terminals.push(run.runId)
@@ -111,7 +127,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
   const snapshot = (conversation: Conversation): Conversation => structuredClone(conversation)
   const getConversation = (id: string) => {
     const conversation = conversations.get(id)
-    if (!conversation) throw clientError('not_found', `conversation ${id}`, { entity: 'conversation' })
+    if (!conversation)
+      throw clientError('not_found', `conversation ${id}`, { entity: 'conversation' })
     if (conversation.turns.some((turn) => turn.status === 'running'))
       throw clientError('conflict', 'conversation is active', { reason: 'active_run' })
     return conversation
@@ -130,7 +147,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       ),
     get: async (id: string) => {
       const conversation = conversations.get(id)
-      if (!conversation) throw clientError('not_found', `conversation ${id}`, { entity: 'conversation' })
+      if (!conversation)
+        throw clientError('not_found', `conversation ${id}`, { entity: 'conversation' })
       return snapshot(conversation)
     },
     remove: async (id: string) => {
@@ -142,13 +160,23 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       conversation.summary = { ...conversation.summary, title, updatedAt: Date.now() }
       return { ...conversation.summary }
     },
-    editTurn: async (conversationId: string, turnId: string, text: string, expectedText: string) => {
+    editTurn: async (
+      conversationId: string,
+      turnId: string,
+      text: string,
+      expectedText: string,
+    ) => {
       const conversation = getConversation(conversationId)
       const turn = getTurn(conversationId, turnId)
-      if (turn.text !== expectedText) throw clientError('conflict', 'turn changed', { reason: 'text_changed' })
+      if (turn.text !== expectedText)
+        throw clientError('conflict', 'turn changed', { reason: 'text_changed' })
       if (!text.trim() || Array.from(text).length > 24_000)
         throw clientError('bad_request', 'invalid text', { field: 'text' })
-      if (conversation.turns.some((candidate) => candidate.parentId === turnId || candidate.supersedesId === turnId))
+      if (
+        conversation.turns.some(
+          (candidate) => candidate.parentId === turnId || candidate.supersedesId === turnId,
+        )
+      )
         throw clientError('conflict', 'turn has children', { reason: 'has_children' })
       turn.text = text
       turn.reasoningText = null
@@ -160,7 +188,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       // Same rule as both hosts (AutoNote docs/35 §3.3): reparent onto the successor, then delete.
       const conversation = getConversation(conversationId)
       const turn = getTurn(conversationId, turnId)
-      if (turn.status === 'running') throw clientError('conflict', 'turn running', { reason: 'turn_running' })
+      if (turn.status === 'running')
+        throw clientError('conflict', 'turn running', { reason: 'turn_running' })
       // Turns are stored in creation order, which stands in for `seq`.
       const at = conversation.turns.indexOf(turn)
       const group = conversation.turns.filter(
@@ -202,7 +231,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       const seen = new Set<string>()
       let cursor: Turn | undefined = target
       while (cursor) {
-        if (seen.has(cursor.id)) throw clientError('conflict', 'history cycle', { reason: 'history_cycle' })
+        if (seen.has(cursor.id))
+          throw clientError('conflict', 'history cycle', { reason: 'history_cycle' })
         seen.add(cursor.id)
         chain.unshift(cursor)
         if (!cursor.parentId) break
@@ -247,7 +277,11 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     selectTurn: async (conversationId: string, turnId: string) => {
       const conversation = getConversation(conversationId)
       getTurn(conversationId, turnId)
-      conversation.summary = { ...conversation.summary, selectedTurnId: turnId, updatedAt: Date.now() }
+      conversation.summary = {
+        ...conversation.summary,
+        selectedTurnId: turnId,
+        updatedAt: Date.now(),
+      }
       return snapshot(conversation)
     },
   }
@@ -270,7 +304,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     providers: {
       revealNeedsPassword: false,
       keyStrategies: false,
-      revealKey: () => Promise.reject(clientError('internal', 'Configure the fake provider reveal method')),
+      revealKey: () =>
+        Promise.reject(clientError('internal', 'Configure the fake provider reveal method')),
       list: () => Promise.resolve([]),
       setEnabled: () => Promise.resolve([]),
       save: () => Promise.resolve([]),
@@ -278,7 +313,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       removeKey: () => Promise.resolve([]),
       remove: () => Promise.resolve([]),
       modelOptions: () => Promise.resolve([]),
-      probe: () => Promise.resolve({ probeUrl: '', models: [], error: null, suggestedProtocol: null }),
+      probe: () =>
+        Promise.resolve({ probeUrl: '', models: [], error: null, suggestedProtocol: null }),
       ...options.providers,
     },
     chat: {
@@ -295,10 +331,19 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
         )
           throw clientError('bad_request', 'invalid graph request', { field: 'action' })
         if (request.images?.length && (retry || translation))
-          throw clientError('bad_request', 'images on action', { field: 'images', reason: 'action_conflict' })
-        if (request.purpose === 'writing' && (request.replyToId != null || action || request.targetLanguage != null))
+          throw clientError('bad_request', 'images on action', {
+            field: 'images',
+            reason: 'action_conflict',
+          })
+        if (
+          request.purpose === 'writing' &&
+          (request.replyToId != null || action || request.targetLanguage != null)
+        )
           throw clientError('bad_request', 'writing graph fields', { field: 'action' })
-        if ((retry || translation || request.replyToId != null) && (!request.conversationId || !storesConversations))
+        if (
+          (retry || translation || request.replyToId != null) &&
+          (!request.conversationId || !storesConversations)
+        )
           throw clientError('bad_request', 'conversation required', { field: 'conversationId' })
         const language = request.targetLanguage?.trim() ?? ''
         if (translation && (!language || Array.from(language).length > 80))
@@ -330,18 +375,28 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
           conversation.summary.selectedTurnId ??
           [...conversation.turns].reverse().find((turn) => turn.status === 'completed')?.id ??
           null
-        const sourceId = request.retryTurnId ?? request.translateTurnId ?? (retry ? selectedId : null)
+        const sourceId =
+          request.retryTurnId ?? request.translateTurnId ?? (retry ? selectedId : null)
         const source = sourceId ? getTurn(conversationId, sourceId) : undefined
-        if ((retry || translation) && !source) throw clientError('not_found', 'source turn', { entity: 'turn' })
+        if ((retry || translation) && !source)
+          throw clientError('not_found', 'source turn', { entity: 'turn' })
         if (request.replyToId) getTurn(conversationId, request.replyToId)
-        if (!retry && !translation && selectedId && !request.replyToId) getTurn(conversationId, selectedId)
+        if (!retry && !translation && selectedId && !request.replyToId)
+          getTurn(conversationId, selectedId)
         const model =
           request.model ??
-          (source?.endpointId && source.modelId ? { endpointId: source.endpointId, modelId: source.modelId } : null)
+          (source?.endpointId && source.modelId
+            ? { endpointId: source.endpointId, modelId: source.modelId }
+            : null)
         if (source && !model) throw clientError('needs_config', 'source model unavailable')
         if (source && model && options.providers?.modelOptions) {
           const models = await ports.providers.modelOptions()
-          if (!models.some((option) => option.endpointId === model.endpointId && option.modelId === model.modelId))
+          if (
+            !models.some(
+              (option) =>
+                option.endpointId === model.endpointId && option.modelId === model.modelId,
+            )
+          )
             throw clientError('needs_config', 'source model unavailable')
         }
         if (callOptions?.signal?.aborted) throw clientError('cancelled', 'cancelled')
@@ -400,7 +455,7 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       },
       approve: async (runId) => {
         if (!runs.has(runId)) throw clientError('not_found', `run ${runId}`, { entity: 'run' })
-        throw clientError('conflict', 'no pending approval', { reason: 'approval_expired' })
+        throw clientError('conflict', 'no pending approval', { reason: 'approval_not_pending' })
       },
       getSnapshot: async (runId) => {
         const run = runs.get(runId)
@@ -412,7 +467,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     skills: {
       list: () => Promise.resolve([]),
       get: (id) => Promise.reject(clientError('not_found', `skill ${id}`, { entity: 'skill' })),
-      preview: () => Promise.reject(clientError('bad_request', 'no package', { field: 'SKILL.md' })),
+      preview: () =>
+        Promise.reject(clientError('bad_request', 'no package', { field: 'SKILL.md' })),
       install: () => Promise.resolve([]),
       save: () => Promise.resolve([]),
       duplicate: () => Promise.resolve([]),
@@ -420,65 +476,13 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       remove: () => Promise.resolve([]),
       ...options.skills,
     },
-    mcpClient: {
-      list: () => Promise.resolve([]),
-      save: () => Promise.resolve([]),
-      remove: () => Promise.resolve([]),
-      refresh: () => Promise.resolve([]),
-      setToolApproval: () => Promise.resolve(),
-      ...options.mcpClient,
-    },
-    mcpServer: {
-      status: () => Promise.resolve(STOPPED),
-      tokens: () => Promise.resolve([]),
-      start: () => Promise.resolve(STOPPED),
-      stop: () => Promise.resolve(STOPPED),
-      setPort: (port) => Promise.resolve({ ...STOPPED, port }),
-      issueToken: (name, scopes) =>
-        Promise.resolve({
-          token: 'kit_fake',
-          id: 'fake-token',
-          name,
-          scopes: [...scopes],
-          createdAt: 0,
-          lastUsedAt: null,
-          revokedAt: null,
-        }),
-      revokeToken: () => Promise.resolve(),
-      scopes: () => Promise.resolve([]),
-      setScopes: () => Promise.resolve([]),
-      ...options.mcpServer,
-    },
+    mcpClient: mcpClientDefaults(options.mcpClient ?? {}),
+    mcpServer: mcpServerDefaults(options.mcpServer ?? {}),
   }
   const result: KitPorts = { ...ports }
-  if (options.search) {
-    const unavailable = () => Promise.reject(clientError('internal', 'Configure the fake search method'))
-    result.search = {
-      settings: unavailable,
-      save: unavailable,
-      setDefault: unavailable,
-      savePreferences: unavailable,
-      saveKey: unavailable,
-      removeKey: unavailable,
-      reveal: unavailable,
-      check: unavailable,
-      search: unavailable,
-      fetch: unavailable,
-      ...options.search,
-    }
-  }
-  if (options.skillSources) {
-    const unavailable = () => Promise.reject(clientError('internal', 'Configure the fake skill source method'))
-    result.skillSources = {
-      search: unavailable,
-      prepare: unavailable,
-      discover: unavailable,
-      prepareSystem: unavailable,
-      pickDirectory: unavailable,
-      pickSearchDirectory: unavailable,
-      ...options.skillSources,
-    }
-  }
+  if (options.search) result.search = searchDefaults(options.search, clientError)
+  if (options.skillSources)
+    result.skillSources = skillSourceDefaults(options.skillSources, clientError)
   for (const name of options.omit ?? []) delete result[name]
   return result
 }

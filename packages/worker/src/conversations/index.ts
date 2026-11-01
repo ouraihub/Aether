@@ -8,10 +8,12 @@ import type {
 } from '@ouraihub/aether-contracts'
 import type { RunInput, RunSummary } from '@ouraihub/aether-core/types'
 import { KitFailure, badRequest } from '@ouraihub/aether-core/error'
-import { canonicalJson, isRecord } from '@ouraihub/aether-core/guard'
+import { canonicalJson } from '@ouraihub/aether-core/guard'
 import { decodeImage, parseImage } from '@ouraihub/aether-core/images'
 import type { Actor, WorkerContext } from '../context.ts'
-import type { DocumentStore, StoredDocument } from '../storage.ts'
+import { handleConversationRequest } from './routes.ts'
+import { retryCas } from '../storage.ts'
+import type { DocumentStore, RetryOptions, StoredDocument } from '../storage.ts'
 import { authoritative, fingerprint, resolveAction } from './action.ts'
 import type { PreparedAction, ReservationInput } from './action.ts'
 import {
@@ -51,17 +53,28 @@ export interface ConversationOptions {
   store: DocumentStore
   now?: () => number
   newId?: () => string
+  /** CAS retry schedule; tests inject sleep/random to make contention deterministic. */
+  retry?: RetryOptions
 }
 export class ConversationService {
   private readonly store: DocumentStore
   private readonly now: () => number
   private readonly newId: () => string
+  private readonly retry: RetryOptions
   constructor(options: ConversationOptions) {
     this.store = options.store
     this.now = options.now ?? Date.now
     this.newId = options.newId ?? (() => crypto.randomUUID())
+    this.retry = options.retry ?? {}
   }
-  private async load(id: string, actor: Actor): Promise<{ revision: number; document: ConversationDocument }> {
+  /** Reloads and re-applies `attempt` on revision conflicts; see `retryCas`. */
+  private update<T>(attempt: Parameters<typeof retryCas<T>>[0]): Promise<T> {
+    return retryCas(attempt, () => conflict('conversation_contended'), this.retry)
+  }
+  private async load(
+    id: string,
+    actor: Actor,
+  ): Promise<{ revision: number; document: ConversationDocument }> {
     checkId('conversationId', id)
     const stored = await this.store.get(actor, COLLECTION, id)
     if (!stored) throw notFound('conversation')
@@ -70,7 +83,10 @@ export class ConversationService {
   private async *documents(actor: Actor): AsyncGenerator<StoredDocument> {
     let after: string | undefined
     while (true) {
-      const page = await this.store.list(actor, COLLECTION, { ...(after === undefined ? {} : { after }), limit: 200 })
+      const page = await this.store.list(actor, COLLECTION, {
+        ...(after === undefined ? {} : { after }),
+        limit: 200,
+      })
       for (const stored of page) yield stored
       if (page.length < 200) return
       const last = page.at(-1)?.key
@@ -86,14 +102,18 @@ export class ConversationService {
       const summary = parseDocument(stored.value, stored.key).summary
       if (scope === null || summary.scope === scope) summaries.push(summary)
     }
-    return summaries.sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id)).slice(0, 200)
+    return summaries
+      .sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id))
+      .slice(0, 200)
   }
   async get(id: string, actor: Actor): Promise<Conversation> {
     return project((await this.load(id, actor)).document)
   }
   async resolve(request: RunRequest, actor: Actor): Promise<PreparedAction> {
     const snapshot = structuredClone(request)
-    const document = snapshot.conversationId ? (await this.load(snapshot.conversationId, actor)).document : null
+    const document = snapshot.conversationId
+      ? (await this.load(snapshot.conversationId, actor)).document
+      : null
     return resolveAction(snapshot, document)
   }
   plan(prepared: PreparedAction, runId: string): AcceptedHandle {
@@ -110,7 +130,7 @@ export class ConversationService {
     validate?: (input: ReservationInput, execution: RunInput) => RunInput,
   ): Promise<TurnReservation> {
     const handle = this.plan(prepared, runId)
-    for (let attempt = 0; attempt < 8; attempt++) {
+    return this.update(async (cas) => {
       const stored = await this.store.get(actor, COLLECTION, handle.conversationId)
       if (prepared.request.conversationId && !stored) throw conflict('preparation_changed')
       if (!prepared.request.conversationId && stored) throw conflict('run_identity_exists')
@@ -123,8 +143,13 @@ export class ConversationService {
         throw conflict('preparation_changed')
       }
       if (
-        (await fingerprint(prepared.request, prepared.action, prepared.selectionGuard, document, input)) !==
-        prepared.expected
+        (await fingerprint(
+          prepared.request,
+          prepared.action,
+          prepared.selectionGuard,
+          document,
+          input,
+        )) !== prepared.expected
       )
         throw conflict('preparation_changed')
       const runInput = validate ? validate(input, validatedInput) : validatedInput
@@ -140,9 +165,14 @@ export class ConversationService {
           runInput.connection.endpointId !== input.sourceModel.endpointId ||
           runInput.connection.modelId !== input.sourceModel.modelId)
       )
-        throw new KitFailure('needs_config', 'Source model unavailable', { reason: 'source_model_unavailable' })
+        throw new KitFailure('needs_config', 'Source model unavailable', {
+          reason: 'source_model_unavailable',
+        })
       const now = this.now(),
-        source = document && prepared.action.kind !== 'reply' ? target(document, prepared.action.sourceId) : null
+        source =
+          document && prepared.action.kind !== 'reply'
+            ? target(document, prepared.action.sourceId)
+            : null
       const parentId =
         prepared.action.kind === 'reply'
           ? prepared.action.parentId
@@ -191,30 +221,33 @@ export class ConversationService {
       next.turns.push(turn)
       next.summary.updatedAt = now
       const checked = parseDocument(next, handle.conversationId)
-      try {
-        await this.store.compareAndSet(actor, COLLECTION, handle.conversationId, stored?.revision ?? null, checked)
-      } catch (error) {
-        if (error instanceof KitFailure && error.code === 'conflict' && attempt < 7) continue
-        throw error
-      }
+      await cas(() =>
+        this.store.compareAndSet(
+          actor,
+          COLLECTION,
+          handle.conversationId,
+          stored?.revision ?? null,
+          checked,
+        ),
+      )
       return {
         handle,
         accepted: { runId, conversationId: handle.conversationId, turnId: handle.turnId },
         input,
         runInput,
       }
-    }
-    throw conflict('conversation_contended')
+    })
   }
   private checkHandle(document: ConversationDocument, handle: AcceptedHandle): StoredTurn {
     if (document.summary.id !== handle.conversationId) throw notFound('turn')
     const turn = target(document, handle.turnId)
-    if (turn.runId !== handle.runId || turn.reservationId !== handle.reservationId) throw notFound('turn')
+    if (turn.runId !== handle.runId || turn.reservationId !== handle.reservationId)
+      throw notFound('turn')
     if (turn.status !== 'running') throw conflict('turn_finished')
     return turn
   }
   async finish(handle: AcceptedHandle, summary: RunSummary, actor: Actor): Promise<Conversation> {
-    for (let attempt = 0; attempt < 8; attempt++) {
+    return this.update(async (cas) => {
       const { document, revision } = await this.load(handle.conversationId, actor),
         turn = this.checkHandle(document, handle)
       turn.status = summary.status
@@ -224,88 +257,101 @@ export class ConversationService {
       turn.contextUsage = structuredClone(summary.contextUsage)
       turn.errorCode = summary.status === 'failed' ? (summary.error?.code ?? 'internal') : null
       document.summary.updatedAt = this.now()
-      if (summary.status === 'completed' && turn.supersedesId === null) document.summary.selectedTurnId = turn.id
+      if (summary.status === 'completed' && turn.supersedesId === null)
+        document.summary.selectedTurnId = turn.id
       const checked = parseDocument(document, document.summary.id)
-      try {
-        await this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, checked)
-      } catch (error) {
-        if (error instanceof KitFailure && error.code === 'conflict' && attempt < 7) continue
-        throw error
-      }
+      await cas(() =>
+        this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, checked),
+      )
       return project(checked)
-    }
-    throw conflict('conversation_contended')
+    })
   }
   /** Only the coordinator, having established interruption, may recover a planned run. */
   async recover(handle: AcceptedHandle, actor: Actor): Promise<Conversation> {
-    for (let attempt = 0; attempt < 8; attempt++) {
+    return this.update(async (cas) => {
       const { document, revision } = await this.load(handle.conversationId, actor),
         turn = this.checkHandle(document, handle)
       turn.status = 'failed'
       turn.errorCode = 'interrupted'
       turn.contextUsage = null
       document.summary.updatedAt = this.now()
-      try {
-        await this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document)
-      } catch (error) {
-        if (error instanceof KitFailure && error.code === 'conflict' && attempt < 7) continue
-        throw error
-      }
+      await cas(() =>
+        this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document),
+      )
       return project(document)
-    }
-    throw conflict('conversation_contended')
+    })
   }
-  async addGenerated(handle: AcceptedHandle, images: readonly ImagePart[], actor: Actor): Promise<ImageRef[]> {
+  async addGenerated(
+    handle: AcceptedHandle,
+    images: readonly ImagePart[],
+    actor: Actor,
+  ): Promise<ImageRef[]> {
     for (const image of images) parseImage(image)
-    for (let attempt = 0; attempt < 8; attempt++) {
+    return this.update(async (cas) => {
       const { document, revision } = await this.load(handle.conversationId, actor),
         turn = this.checkHandle(document, handle),
         first = turn.generated.length
       const now = this.now()
       turn.generated.push(...images.map((image) => ({ ...image, createdAt: now })))
-      try {
-        await this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document)
-      } catch (error) {
-        if (error instanceof KitFailure && error.code === 'conflict' && attempt < 7) continue
-        throw error
-      }
-      return imageRefs(handle.conversationId, handle.turnId, 'generated', turn.generated).slice(first)
-    }
-    throw conflict('conversation_contended')
+      await cas(() =>
+        this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document),
+      )
+      return imageRefs(handle.conversationId, handle.turnId, 'generated', turn.generated).slice(
+        first,
+      )
+    })
   }
   async purgeImages(beforeMs: number, actor: Actor): Promise<number> {
     if (!Number.isSafeInteger(beforeMs) || beforeMs < 0) throw badRequest('beforeMs', 'invalid')
     let total = 0
-    for await (const stored of this.documents(actor)) {
-      const document = parseDocument(stored.value, stored.key)
-      let count = 0
-      for (const turn of document.turns)
-        for (const image of [...turn.images, ...turn.generated])
-          if (image.data !== null && image.createdAt < beforeMs) {
-            image.data = null
-            count++
-          }
-      if (count) {
-        await this.store.compareAndSet(actor, COLLECTION, stored.key, stored.revision, document)
-        total += count
-      }
+    for await (const listed of this.documents(actor)) {
+      // The listed revision is tried first; after a conflict the document is reloaded, and one
+      // deleted meanwhile has nothing left to purge.
+      let current: StoredDocument | null = listed
+      total += await this.update(async (cas) => {
+        current ??= await this.store.get(actor, COLLECTION, listed.key)
+        const stored = current
+        current = null
+        if (stored === null) return 0
+        const document = parseDocument(stored.value, stored.key)
+        let count = 0
+        for (const turn of document.turns)
+          for (const image of [...turn.images, ...turn.generated])
+            if (image.data !== null && image.createdAt < beforeMs) {
+              image.data = null
+              count++
+            }
+        if (count)
+          await cas(() =>
+            this.store.compareAndSet(actor, COLLECTION, stored.key, stored.revision, document),
+          )
+        return count
+      })
     }
     return total
   }
   async rename(id: string, title: string, actor: Actor): Promise<ConversationSummary> {
     checkText('title', title, 200, true)
-    const { document, revision } = await this.load(id, actor)
-    idle(document)
-    document.summary.title = title.trim()
-    await this.store.compareAndSet(actor, COLLECTION, id, revision, document)
-    return document.summary
+    return this.update(async (cas) => {
+      const { document, revision } = await this.load(id, actor)
+      idle(document)
+      document.summary.title = title.trim()
+      await cas(() => this.store.compareAndSet(actor, COLLECTION, id, revision, document))
+      return document.summary
+    })
   }
   async delete(id: string, actor: Actor): Promise<void> {
     const { document, revision } = await this.load(id, actor)
     idle(document)
     await this.store.remove(actor, COLLECTION, id, revision)
   }
-  async editTurn(id: string, turnId: string, text: string, expectedText: string, actor: Actor): Promise<Conversation> {
+  async editTurn(
+    id: string,
+    turnId: string,
+    text: string,
+    expectedText: string,
+    actor: Actor,
+  ): Promise<Conversation> {
     checkText('text', text, 24_000, true)
     const { document, revision } = await this.load(id, actor)
     idle(document)
@@ -377,7 +423,8 @@ export class ConversationService {
       ids = new Map(path.map((t) => [t.id, this.newId()])),
       questions = new Map<string, string>()
     for (const turn of path)
-      if (!questions.has(turn.questionId)) questions.set(turn.questionId, ids.get(turn.questionId) ?? this.newId())
+      if (!questions.has(turn.questionId))
+        questions.set(turn.questionId, ids.get(turn.questionId) ?? this.newId())
     const now = this.now(),
       selected = ids.get(turnId)
     if (!selected) throw notFound('turn')
@@ -396,82 +443,38 @@ export class ConversationService {
     })
     const fork: ConversationDocument = {
       version: 1,
-      summary: { ...document.summary, id: forkId, selectedTurnId: selected, createdAt: now, updatedAt: now },
+      summary: {
+        ...document.summary,
+        id: forkId,
+        selectedTurnId: selected,
+        createdAt: now,
+        updatedAt: now,
+      },
       turns,
     }
     await this.store.compareAndSet(actor, COLLECTION, forkId, null, fork)
     return project(fork)
   }
   async handle(request: Request, context: WorkerContext): Promise<Response | null> {
-    const url = new URL(request.url),
-      base = '/api/v1/conversations',
-      actor = context.actor
-    if (url.pathname !== base && !url.pathname.startsWith(`${base}/`)) return null
-    const parts = url.pathname
-      .slice(base.length)
-      .split('/')
-      .filter(Boolean)
-      .map((part) => {
-        try {
-          return decodeURIComponent(part)
-        } catch {
-          throw badRequest('path', 'encoding')
-        }
-      })
-    const json = (value: unknown): Response => Response.json(value)
-    if (parts.length === 0 && request.method === 'GET')
-      return json(await this.list(url.searchParams.get('scope'), actor))
-    const id = parts[0]
-    if (!id) throw notFound('route')
-    if (parts.length === 1 && request.method === 'GET') return json(await this.get(id, actor))
-    if (parts.length === 1 && request.method === 'DELETE') {
-      await this.delete(id, actor)
-      return json({ ok: true })
-    }
-    if (parts.length === 6 && parts[1] === 'turns' && parts[3] === 'images' && request.method === 'GET') {
-      const turnId = parts[2],
-        kind = parts[4],
-        index = parts[5]
-      if (!turnId || (kind !== 'input' && kind !== 'generated') || !index || !/^(0|[1-9]\d*)$/u.test(index))
-        throw notFound('image')
-      const { document } = await this.load(id, actor),
-        turn = target(document, turnId),
-        image = (kind === 'input' ? turn.images : turn.generated)[Number(index)]
-      if (!image || image.data === null) throw notFound('image')
-      const bytes = decodeImage({ mime: image.mime, data: image.data })
-      return new Response(bytes, {
-        headers: {
-          'Content-Type': image.mime,
-          'Cache-Control': 'private, no-store',
-          'X-Content-Type-Options': 'nosniff',
-          'Content-Security-Policy': "default-src 'none'",
-        },
-      })
-    }
-    if (parts.length !== 2 || request.method !== 'POST') throw notFound('route')
-    let body: unknown
-    try {
-      body = await request.json()
-    } catch {
-      throw badRequest('body', 'json')
-    }
-    if (!isRecord(body)) throw badRequest('body', 'object')
-    const action = parts[1],
-      fields =
-        action === 'rename' ? ['title'] : action === 'edit-turn' ? ['turnId', 'text', 'expectedText'] : ['turnId']
-    if (Object.keys(body).some((key) => !fields.includes(key))) throw badRequest('body', 'unknown_field')
-    if (action === 'rename') {
-      if (typeof body.title !== 'string') throw badRequest('title', 'required')
-      return json(await this.rename(id, body.title, actor))
-    }
-    if (typeof body.turnId !== 'string') throw badRequest('turnId', 'required')
-    if (action === 'edit-turn') {
-      if (typeof body.text !== 'string' || typeof body.expectedText !== 'string') throw badRequest('text', 'required')
-      return json(await this.editTurn(id, body.turnId, body.text, body.expectedText, actor))
-    }
-    if (action === 'remove-turn') return json(await this.removeTurn(id, body.turnId, actor))
-    if (action === 'select-turn') return json(await this.selectTurn(id, body.turnId, actor))
-    if (action === 'fork') return json(await this.fork(id, body.turnId, actor))
-    throw notFound('route')
+    return handleConversationRequest(
+      this,
+      request,
+      context,
+      async (id, turnId, kind, index, actor) => {
+        const { document } = await this.load(id, actor),
+          turn = target(document, turnId),
+          image = (kind === 'input' ? turn.images : turn.generated)[index]
+        if (!image || image.data === null) throw notFound('image')
+        const bytes = decodeImage({ mime: image.mime, data: image.data })
+        return new Response(bytes, {
+          headers: {
+            'Content-Type': image.mime,
+            'Cache-Control': 'private, no-store',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'",
+          },
+        })
+      },
+    )
   }
 }

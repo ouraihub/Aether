@@ -1,7 +1,11 @@
 import type { SkillMeta } from '@ouraihub/aether-contracts'
 import { KitFailure } from '@ouraihub/aether-core'
 import { digest, sha256 } from '@ouraihub/aether-core/skills/content'
-import { parseCatalog, type SkillCatalog, type SkillRecord } from '@ouraihub/aether-core/skills/service'
+import {
+  parseCatalog,
+  type SkillCatalog,
+  type SkillRecord,
+} from '@ouraihub/aether-core/skills/service'
 import { exact, object, revision, text } from '@ouraihub/aether-core/skills/validation'
 import type { Actor } from '../context.js'
 import type { FileStore } from '../files.js'
@@ -97,15 +101,23 @@ function decode(value: unknown): number[] {
 }
 export function serializeSkill(skill: SkillRecord): Uint8Array {
   return new TextEncoder().encode(
-    JSON.stringify({ ...skill, files: skill.files.map((file) => ({ ...file, bytes: encode(file.bytes) })) }),
+    JSON.stringify({
+      ...skill,
+      files: skill.files.map((file) => ({ ...file, bytes: encode(file.bytes) })),
+    }),
   )
 }
-export async function loadSkills(files: FileStore, actor: Actor, value: unknown): Promise<LoadedSkills> {
+export async function loadSkills(
+  files: FileStore,
+  actor: Actor,
+  value: unknown,
+): Promise<LoadedSkills> {
   const refs = parseRefs(value)
   const catalog: SkillRecord[] = []
   for (const ref of refs) {
     const blob = await files.get(actor, ref.blobId)
-    if (!blob || blob.mime !== 'application/json') throw new KitFailure('internal', 'Skill package is unavailable')
+    if (!blob || blob.mime !== 'application/json')
+      throw new KitFailure('internal', 'Skill package is unavailable')
     let parsed: unknown
     try {
       parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(blob.data))
@@ -133,7 +145,8 @@ export async function loadSkills(files: FileStore, actor: Actor, value: unknown)
       if ((await sha256(new Uint8Array(file.bytes))) !== file.sha256)
         throw new KitFailure('internal', 'Skill file integrity failure')
     }
-    if ((await digest(skill, skill.files)) !== skill.digest) throw new KitFailure('internal', 'Skill integrity failure')
+    if ((await digest(skill, skill.files)) !== skill.digest)
+      throw new KitFailure('internal', 'Skill integrity failure')
     catalog.push(skill)
   }
   return { catalog, refs }

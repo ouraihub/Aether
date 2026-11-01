@@ -33,7 +33,9 @@
   let reconfirmOpen = $state(false)
 
   const ids = $derived(value.map((r) => r.id))
-  const chars = $derived(skills.filter((s) => ids.includes(s.id)).reduce((sum, s) => sum + s.bodyChars, 0))
+  const chars = $derived(
+    skills.filter((s) => ids.includes(s.id)).reduce((sum, s) => sum + s.bodyChars, 0),
+  )
 
   async function refresh() {
     try {
@@ -74,7 +76,8 @@
 
   function confirmChanged() {
     const skill = reconfirm
-    if (skill) onchange(value.map((r) => (r.id === skill.id ? { id: r.id, revision: skill.revision } : r)))
+    if (skill)
+      onchange(value.map((r) => (r.id === skill.id ? { id: r.id, revision: skill.revision } : r)))
     reconfirm = null
     reconfirmOpen = false
     onresolved()
@@ -101,7 +104,9 @@
     }}
   >
     <Select.Trigger size="sm" class="w-64" aria-label={t('skills.picker')}>
-      {value.length === 0 ? t('skills.picker_none') : t('skills.picker_count', { count: value.length })}
+      {value.length === 0
+        ? t('skills.picker_none')
+        : t('skills.picker_count', { count: value.length })}
     </Select.Trigger>
     <Select.Content>
       <Select.Group>

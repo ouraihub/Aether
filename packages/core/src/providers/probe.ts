@@ -1,11 +1,18 @@
-import type { ProbeError, ProbeErrorKind, ProbeResult, ProbedModel } from '@ouraihub/aether-contracts'
+import type {
+  ProbeError,
+  ProbeErrorKind,
+  ProbeResult,
+  ProbedModel,
+} from '@ouraihub/aether-contracts'
 import type { OutboundHttp } from '../ports.js'
 import { cancelled, excerpt, KitFailure } from '../error.js'
 import { apiBase, authHeaders, prepare, type EndpointSnapshot } from './connection.js'
 import { inferModel, inferReasoning } from './infer.js'
 
 function at(value: unknown, name: string): unknown {
-  return value !== null && typeof value === 'object' && name in value ? Reflect.get(value, name) : undefined
+  return value !== null && typeof value === 'object' && name in value
+    ? Reflect.get(value, name)
+    : undefined
 }
 async function readBody(response: Response, limit: number): Promise<string | null> {
   if (Number(response.headers.get('content-length') ?? 0) > limit) {
@@ -51,15 +58,21 @@ export async function probe(outbound: OutboundHttp, input: ProbeInput): Promise<
       status: null,
       message: null,
       hint:
-        kind === 'connect' && /^\[.*\]$|^\d+\.\d+\.\d+\.\d+$/.test(hostname) ? 'providers.hint.check_network' : null,
+        kind === 'connect' && /^\[.*\]$|^\d+\.\d+\.\d+\.\d+$/.test(hostname)
+          ? 'providers.hint.check_network'
+          : null,
     })
   let hostname: string
   try {
     hostname = new URL(probeUrl).hostname
   } catch {
-    throw new KitFailure('bad_request', 'Invalid probe URL', { field: 'baseUrl', reason: 'invalid_url' })
+    throw new KitFailure('bad_request', 'Invalid probe URL', {
+      field: 'baseUrl',
+      reason: 'invalid_url',
+    })
   }
-  if (!connection.keys.length && !['localhost', '127.0.0.1', '[::1]'].includes(hostname)) return failure('missing_key')
+  if (!connection.keys.length && !['localhost', '127.0.0.1', '[::1]'].includes(hostname))
+    return failure('missing_key')
   let timeout = AbortSignal.timeout(20_000)
   const keys = connection.keys.length ? connection.keys : [null]
   let used: string | null = null
@@ -157,7 +170,8 @@ export async function probe(outbound: OutboundHttp, input: ProbeInput): Promise<
   } catch (error) {
     if (input.signal.aborted) throw cancelled()
     if (timeout.aborted) return failure('timeout')
-    if (error instanceof KitFailure && error.details?.reason === 'blocked_address') return failure('blocked_address')
+    if (error instanceof KitFailure && error.details?.reason === 'blocked_address')
+      return failure('blocked_address')
     return failure('connect')
   }
 }

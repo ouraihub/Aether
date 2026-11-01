@@ -18,7 +18,10 @@ export interface ExposedMcpTool {
   readonly idempotent: boolean
   readonly maxRequestBytes?: number
   readonly validate: (args: Readonly<Record<string, unknown>>) => boolean
-  readonly handler: (args: Readonly<Record<string, unknown>>, context: McpCallContext) => Promise<unknown>
+  readonly handler: (
+    args: Readonly<Record<string, unknown>>,
+    context: McpCallContext,
+  ) => Promise<unknown>
 }
 export interface McpCallContext {
   readonly actor: Actor
@@ -36,7 +39,11 @@ export interface McpServiceOptions {
   readonly tools: readonly ExposedMcpTool[]
   readonly resolveIdentity: (request: Request) => Promise<Actor | null>
   /** Must check the actor may grant every requested scope, not just that login exists. */
-  readonly authorizeConsent: (actor: Actor, scopes: readonly string[], request: Request) => Promise<boolean>
+  readonly authorizeConsent: (
+    actor: Actor,
+    scopes: readonly string[],
+    request: Request,
+  ) => Promise<boolean>
   /** Must check resource/business access immediately before external tool dispatch. */
   readonly authorizeTool: (
     actor: Actor,

@@ -13,7 +13,7 @@ pnpm --dir examples/worker exec wrangler d1 migrations apply AETHER_DB --local
 pnpm --dir examples/worker dev
 ```
 
-`init:local` creates ignored `examples/worker/.dev.vars` with cryptographically random secrets and refuses to overwrite an existing file. Keep that file private. Wrangler listens on **127.0.0.1:8787** and persists local D1/R2/DO data under `.wrangler/state`. Migrations reference `packages/worker/migrations` directly: there is no second schema copy and requests never migrate the database.
+`init:local` creates ignored `examples/worker/.dev.vars` with cryptographically random secrets and refuses to overwrite an existing file. Keep that file private. Values are single-quoted literals (`KEY='value'`) so Wrangler passes JSON such as `CREDENTIAL_KEYS` through unchanged; the smoke script reads the same format and rejects anything else. A `.dev.vars` generated before this format must be deleted and regenerated. Wrangler listens on **127.0.0.1:8787** and persists local D1/R2/DO data under `.wrangler/state`. Migrations reference `packages/worker/migrations` directly: there is no second schema copy and requests never migrate the database.
 
 Default outbound access is restricted to the explicit literal-loopback origin `http://127.0.0.1:9000`. Start your actual tool-capable model service there, or set `OUTBOUND_ORIGINS` to the exact origins of your own configured services. The example does not start a fake upstream. Remote origins require the trusted gateway described below, even in local development.
 

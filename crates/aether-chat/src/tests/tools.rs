@@ -4,7 +4,7 @@ use aether_support::sse::SseParser;
 use aether_support::{Approval, Protocol};
 use serde_json::{Value, json};
 
-use super::{PROTOCOLS, Reply, end, fixture, input, run, runner, upstream};
+use super::{PROTOCOLS, end, fixture, input, requests, run, runner, sse_cut, upstream};
 use crate::protocol::{Decoder, Round};
 use crate::{EndStatus, Message, ToolCall, ToolEffect, ToolSource, ToolSpec, Usage};
 
@@ -85,6 +85,7 @@ fn assembles_tool_call_fragments_in_any_chunking() {
                 let want = Round {
                     tool_calls: expected(protocol, name),
                     truncated: false,
+                    reasoning: Vec::new(),
                 };
                 assert_eq!(round, want, "{protocol:?} {name} {step}");
             }
@@ -143,7 +144,8 @@ fn truncation_is_flagged_and_partial_args_never_pass() {
                 text,
                 Round {
                     tool_calls: Vec::new(),
-                    truncated: true
+                    truncated: true,
+                    reasoning: Vec::new(),
                 },
                 "{protocol:?}"
             );
@@ -151,12 +153,14 @@ fn truncation_is_flagged_and_partial_args_never_pass() {
             let want = Round {
                 tool_calls: expected(protocol, "single-tool"),
                 truncated: true,
+                reasoning: Vec::new(),
             };
             assert_eq!(round, want, "{protocol:?} {step}");
             let round = decode(protocol, &cut, step);
             let want = Round {
                 tool_calls: partial.clone(),
                 truncated: true,
+                reasoning: Vec::new(),
             };
             assert_eq!(round, want, "{protocol:?} {step}");
         }
@@ -175,7 +179,7 @@ async fn tool_calls_round_trip_through_the_next_request() {
         // Round 1: the model asks for two calls.
         let reply = fixture(protocol, "multi-tool");
         let cut = reply.len();
-        let (base, seen) = upstream(Reply::Sse { body: reply, cut }).await;
+        let (base, server) = upstream(sse_cut(&reply, cut)).await;
         let mut first = input(protocol, base);
         first.history.clear();
         // One round: only the first request is inspected here; the loop has its own tests.
@@ -206,12 +210,12 @@ async fn tool_calls_round_trip_through_the_next_request() {
             Protocol::OpenaiResponses => json!([{ "type": "function", "name": "read_file",
                 "description": "Reads a file", "parameters": schema }]),
         };
-        assert_eq!(body(&seen.lock().await[0])["tools"], tools, "{protocol:?}");
+        assert_eq!(body(&requests(&server)[0])["tools"], tools, "{protocol:?}");
 
         // Round 2: results come back in reverse execution order.
         let reply = fixture(protocol, "text");
         let cut = reply.len();
-        let (base, seen) = upstream(Reply::Sse { body: reply, cut }).await;
+        let (base, server) = upstream(sse_cut(&reply, cut)).await;
         let (a, b) = (calls[0].id.as_str(), calls[1].id.as_str());
         let result = |id: &str, text: &str| Message::Tool {
             call_id: id.to_owned(),
@@ -227,7 +231,7 @@ async fn tool_calls_round_trip_through_the_next_request() {
         "next".clone_into(&mut second.input);
         let (_, events) = run(&runner(5_000, 5_000), second, false).await;
         assert_eq!(end(&events).0, EndStatus::Completed, "{protocol:?}");
-        let raw = seen.lock().await[0].clone();
+        let raw = requests(&server).remove(0);
         let sent = body(&raw);
         let args = |c: &ToolCall| c.args.to_string();
         let (field, want) = match protocol {
@@ -284,4 +288,222 @@ async fn tool_calls_round_trip_through_the_next_request() {
         got.retain(|m| m["role"] != "system");
         assert_eq!(Value::Array(got), want, "{protocol:?}");
     }
+}
+
+#[tokio::test]
+async fn native_reasoning_is_displayed_retained_and_replayed_only_for_its_identity() {
+    use crate::RunEvent;
+
+    for protocol in PROTOCOLS {
+        let (events, native) = match protocol {
+            Protocol::AnthropicMessages => {
+                let thinking = json!({"type":"thinking","thinking":"Let me think.","signature":"private-signature"});
+                let redacted = json!({"type":"redacted_thinking","data":"private-redacted"});
+                (
+                    vec![
+                        json!({"type":"content_block_start","index":10,"content_block":{"type":"thinking","thinking":"Let "}}),
+                        json!({"type":"content_block_delta","index":10,"delta":{"type":"thinking_delta","thinking":"me think."}}),
+                        json!({"type":"content_block_delta","index":10,"delta":{"type":"signature_delta","signature":"private-"}}),
+                        json!({"type":"content_block_delta","index":10,"delta":{"type":"signature_delta","signature":"signature"}}),
+                        json!({"type":"content_block_stop","index":10}),
+                        json!({"type":"content_block_start","index":11,"content_block":redacted}),
+                        json!({"type":"content_block_stop","index":11}),
+                    ],
+                    vec![thinking, redacted],
+                )
+            }
+            Protocol::OpenaiChat => (
+                vec![
+                    json!({"choices":[{"delta":{"reasoning_content":"Let "}}]}),
+                    json!({"choices":[{"delta":{"reasoning_content":"me think.","content":"Answer"}}]}),
+                ],
+                vec![json!("Let me think.")],
+            ),
+            Protocol::OpenaiResponses => {
+                let item = json!({"type":"reasoning","id":"rs_private","summary":[{"type":"summary_text","text":"Let me think."}],"encrypted_content":"private-encrypted"});
+                (
+                    vec![
+                        json!({"type":"response.reasoning_summary_text.delta","delta":"Let me think."}),
+                        json!({"type":"response.output_item.done","item":item}),
+                    ],
+                    vec![item],
+                )
+            }
+        };
+        let prefix: String = events
+            .iter()
+            .map(|event| format!("data: {event}\n\n"))
+            .collect();
+        let response = prefix.clone() + &fixture(protocol, "single-tool");
+        let (base, server) = upstream(sse_cut(&response, response.len())).await;
+        let mut first = input(protocol, base);
+        first.connection.endpoint_id = Some("origin".to_owned());
+        first.history.clear();
+        first.budget.max_rounds = 1;
+        let (summary, events) = run(&runner(5_000, 5_000), first, false).await;
+        assert_eq!(summary.status, EndStatus::Completed, "{protocol:?}");
+        let display: String = events
+            .iter()
+            .filter_map(|event| match event {
+                RunEvent::ReasoningDelta { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(display, "Let me think.", "{protocol:?}");
+        assert!(!serde_json::to_string(&events).unwrap().contains("private-"));
+        let Message::Assistant {
+            reasoning,
+            tool_calls,
+            text,
+        } = &summary.messages[0]
+        else {
+            panic!("missing assistant")
+        };
+        assert_eq!(*tool_calls, expected(protocol, "single-tool"));
+        if protocol == Protocol::OpenaiChat {
+            assert!(text.contains("Answer"));
+        }
+        assert_eq!(
+            reasoning
+                .iter()
+                .map(|block| block.value.clone())
+                .collect::<Vec<_>>(),
+            native
+        );
+        for block in reasoning {
+            assert_eq!(block.protocol, protocol);
+            assert_eq!(block.endpoint_id.as_deref(), Some("origin"));
+            assert_eq!(block.model_id.as_deref(), Some("model-x"));
+        }
+
+        let terminal = match protocol {
+            Protocol::AnthropicMessages => json!({"type":"message_stop"}),
+            Protocol::OpenaiChat => json!({"choices":[{"delta":{},"finish_reason":"stop"}]}),
+            Protocol::OpenaiResponses => json!({"type":"response.completed","response":{}}),
+        };
+        let completed = format!("{prefix}data: {terminal}\n\n");
+        let (base, _final_server) = upstream(sse_cut(&completed, completed.len())).await;
+        let mut final_input = input(protocol, base);
+        final_input.connection.endpoint_id = Some("origin".to_owned());
+        final_input.history.clear();
+        let (final_summary, _) = run(&runner(5_000, 5_000), final_input, false).await;
+        assert_eq!(final_summary.status, EndStatus::Completed);
+        let [
+            Message::Assistant {
+                reasoning: final_reasoning,
+                tool_calls: final_calls,
+                ..
+            },
+        ] = final_summary.messages.as_slice()
+        else {
+            panic!("missing reasoning-only completed assistant")
+        };
+        assert!(final_calls.is_empty());
+        assert_eq!(final_reasoning, reasoning);
+
+        for mismatch in ["none", "endpoint", "model", "protocol"] {
+            let target = if mismatch == "protocol" {
+                if protocol == Protocol::OpenaiChat {
+                    Protocol::OpenaiResponses
+                } else {
+                    Protocol::OpenaiChat
+                }
+            } else {
+                protocol
+            };
+            let (next_base, next_server) = upstream(super::sse(fixture(target, "text"))).await;
+            let mut next = input(target, next_base);
+            next.history = summary.messages.clone();
+            next.connection.endpoint_id = Some(
+                if mismatch == "endpoint" {
+                    "other"
+                } else {
+                    "origin"
+                }
+                .to_owned(),
+            );
+            if mismatch == "model" {
+                next.connection.model_id = Some("other-model".to_owned());
+            }
+            let (replayed, _) = run(&runner(5_000, 5_000), next, false).await;
+            assert_eq!(replayed.status, EndStatus::Completed);
+            let request = body(&requests(&next_server)[0]);
+            let sent = &request[if target == Protocol::OpenaiResponses {
+                "input"
+            } else {
+                "messages"
+            }];
+            let blocks: Vec<Value> = match target {
+                Protocol::AnthropicMessages => sent
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .flat_map(|message| message["content"].as_array().into_iter().flatten())
+                    .filter(|block| {
+                        block["type"] == "thinking" || block["type"] == "redacted_thinking"
+                    })
+                    .cloned()
+                    .collect(),
+                Protocol::OpenaiChat => sent
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|message| message.get("reasoning_content").cloned())
+                    .collect(),
+                Protocol::OpenaiResponses => sent
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|item| item["type"] == "reasoning")
+                    .cloned()
+                    .collect(),
+            };
+            assert_eq!(
+                blocks,
+                if mismatch == "none" {
+                    native.clone()
+                } else {
+                    Vec::new()
+                },
+                "{protocol:?} {mismatch}"
+            );
+        }
+        if protocol == Protocol::OpenaiResponses {
+            let request = body(&requests(&server)[0]);
+            assert_eq!(request["store"], false);
+            assert_eq!(request["include"], json!(["reasoning.encrypted_content"]));
+        }
+    }
+}
+
+#[test]
+fn responses_terminal_reasoning_replaces_items_and_never_displays_encrypted_content() {
+    use crate::protocol::Decoded;
+
+    let mut decoder =
+        Decoder::new(Protocol::OpenaiResponses).with_identity(Some("origin"), Some("model-x"));
+    let mut usage = Usage::default();
+    let initial =
+        json!({"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"initial"});
+    let final_item = json!({"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"public"}],"encrypted_content":"final-secret"});
+    let terminal_only =
+        json!({"type":"reasoning","id":"rs_2","encrypted_content":"another-secret","summary":[]});
+    for event in [
+        json!({"type":"response.output_item.done","item":initial}),
+        json!({"type":"response.completed","response":{"output":[final_item, terminal_only]}}),
+    ] {
+        assert!(matches!(
+            decoder.event(&event.to_string(), &mut usage),
+            Decoded::Skip
+        ));
+    }
+    let round = decoder.finish();
+    assert_eq!(
+        round
+            .reasoning
+            .iter()
+            .map(|block| block.value.clone())
+            .collect::<Vec<_>>(),
+        vec![final_item, terminal_only]
+    );
 }

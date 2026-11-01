@@ -8,11 +8,18 @@ import tseslint from 'typescript-eslint'
 const COLOR_SCALES = String.raw`(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)`
 const COLOR_PREFIXES = String.raw`(?:bg|text|border|ring|outline|divide|from|via|to|shadow|decoration|accent|caret|fill|stroke|placeholder)`
 const SCALE_CLASS = new RegExp(String.raw`\b${COLOR_PREFIXES}-${COLOR_SCALES}-\d{2,3}\b`)
-const ARBITRARY_CLASS = new RegExp(String.raw`\b${COLOR_PREFIXES}-\[(?:#|rgba?\(|hsla?\(|okl(?:ch|ab)\()`, 'i')
+const ARBITRARY_CLASS = new RegExp(
+  String.raw`\b${COLOR_PREFIXES}-\[(?:#|rgba?\(|hsla?\(|okl(?:ch|ab)\()`,
+  'i',
+)
 
-// shadcn-svelte rule: semantic color classes only (bg-primary, text-muted-foreground), so hosts can retheme (docs/16 §3).
+// Semantic color classes let hosts retheme the UI (docs/16 §3).
 const noHardcodedColor = {
-  meta: { type: 'problem', schema: [], messages: { color: 'Use a semantic color class instead of {{value}}.' } },
+  meta: {
+    type: 'problem',
+    schema: [],
+    messages: { color: 'Use a semantic color class instead of {{value}}.' },
+  },
   create(context) {
     const check = (node, value) => {
       const match = SCALE_CLASS.exec(value) ?? ARBITRARY_CLASS.exec(value)
@@ -65,7 +72,11 @@ export default [
       'no-console': 'error',
       '@typescript-eslint/no-floating-promises': [
         'error',
-        { allowForKnownSafeCalls: [{ from: 'package', name: ['test', 'describe', 'it'], package: 'node:test' }] },
+        {
+          allowForKnownSafeCalls: [
+            { from: 'package', name: ['test', 'describe', 'it'], package: 'node:test' },
+          ],
+        },
       ],
       '@typescript-eslint/no-misused-promises': 'error',
       '@typescript-eslint/no-non-null-assertion': 'error',
@@ -84,11 +95,16 @@ export default [
     },
     plugins: { 'import-x': importX, kit: { rules: { 'no-hardcoded-color': noHardcodedColor } } },
     settings: {
-      'import-x/resolver-next': [createNodeResolver({ extensions: ['.ts', '.svelte.ts', '.svelte', '.js'] })],
+      'import-x/resolver-next': [
+        createNodeResolver({ extensions: ['.ts', '.svelte.ts', '.svelte', '.js'] }),
+      ],
       // Without this import-x only follows .js files, and no-cycle silently misses TS cycles.
       'import-x/extensions': ['.ts', '.svelte', '.js'],
-      // Per-extension parsers, or no-cycle fails to parse (and skips) imported .svelte files and node_modules JS.
-      'import-x/parsers': { '@typescript-eslint/parser': ['.ts', '.js'], 'svelte-eslint-parser': ['.svelte'] },
+      // Per-extension parsers keep no-cycle from skipping imported Svelte files.
+      'import-x/parsers': {
+        '@typescript-eslint/parser': ['.ts', '.js'],
+        'svelte-eslint-parser': ['.svelte'],
+      },
     },
     rules: {
       'no-console': 'error',
@@ -103,14 +119,21 @@ export default [
       'kit/no-hardcoded-color': 'error',
     },
   },
-  // Only src/tauri/ may touch Tauri APIs, so components and ports stay testable without Tauri (docs/16 §1).
+  // Only src/tauri/ may touch Tauri APIs; other UI code stays testable without Tauri.
   {
     files: UI_SOURCE,
     ignores: ['packages/ui/src/tauri/**'],
     rules: {
       'no-restricted-imports': [
         'error',
-        { patterns: [{ group: ['@tauri-apps/*'], message: 'Only packages/ui/src/tauri may import Tauri APIs.' }] },
+        {
+          patterns: [
+            {
+              group: ['@tauri-apps/*'],
+              message: 'Only packages/ui/src/tauri may import Tauri APIs.',
+            },
+          ],
+        },
       ],
     },
   },

@@ -13,7 +13,10 @@ const actor: Actor = {
   sessionId: 'login',
   scopes: ['settings:write'],
 }
-function sessionDatabase(): { readonly store: DocumentStore; readonly rows: Map<string, StoredDocument | null> } {
+function sessionDatabase(): {
+  readonly store: DocumentStore
+  readonly rows: Map<string, StoredDocument | null>
+} {
   const rows = new Map<string, StoredDocument | null>()
   const store: DocumentStore = {
     async get(owner, collection, key) {
@@ -65,7 +68,13 @@ test('identity validates deployment audience and invokes fresh host verification
 test('opaque sessions persist hashes only and expire/revoke/rotate with absolute lifetime preserved', async () => {
   const { store, rows } = sessionDatabase()
   let now = 1000
-  const sessions = new OpaqueSessionStore({ store, applicationId: 'app', idleMs: 50, absoluteMs: 200, now: () => now })
+  const sessions = new OpaqueSessionStore({
+    store,
+    applicationId: 'app',
+    idleMs: 50,
+    absoluteMs: 200,
+    now: () => now,
+  })
   const issued = await sessions.issue(actor)
   assert.equal(JSON.stringify([...rows]).includes(issued.token), false)
   assert.equal((await sessions.resolve(issued.token))?.subjectId, 'alice')
@@ -84,6 +93,12 @@ test('opaque sessions persist hashes only and expire/revoke/rotate with absolute
   const absolute = await sessions.issue(actor)
   now += 200
   assert.equal(await sessions.resolve(absolute.token), null)
-  const other = new OpaqueSessionStore({ store, applicationId: 'other', idleMs: 50, absoluteMs: 200, now: () => now })
+  const other = new OpaqueSessionStore({
+    store,
+    applicationId: 'other',
+    idleMs: 50,
+    absoluteMs: 200,
+    now: () => now,
+  })
   assert.equal(await other.resolve(absolute.token), null)
 })

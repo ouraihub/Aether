@@ -28,7 +28,8 @@ function base64(bytes: Uint8Array): string {
   return btoa(text)
 }
 function unbase64(text: string): Uint8Array<ArrayBuffer> {
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(text)) throw unreadable()
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(text))
+    throw unreadable()
   const bytes = Uint8Array.from(atob(text), (character) => character.charCodeAt(0))
   if (base64(bytes) !== text) throw unreadable()
   return bytes
@@ -64,7 +65,15 @@ function aad(scope: CredentialScope, keyId: string): Uint8Array<ArrayBuffer> {
   )
     throw badRequest('credentialScope', 'invalid')
   return new TextEncoder().encode(
-    JSON.stringify([1, keyId, scope.applicationId, scope.tenantId, scope.subjectId, scope.purpose, scope.recordId]),
+    JSON.stringify([
+      1,
+      keyId,
+      scope.applicationId,
+      scope.tenantId,
+      scope.subjectId,
+      scope.purpose,
+      scope.recordId,
+    ]),
   )
 }
 /** Supply non-extractable AES-GCM keys from deployment secrets/KMS; old keys are read-only until explicit rotation. */
@@ -100,7 +109,12 @@ export function createCredentialPort(options: {
         key,
         new Uint8Array(value),
       )
-      return { version: 1, keyId: currentKeyId, nonce: base64(nonce), ciphertext: base64(new Uint8Array(ciphertext)) }
+      return {
+        version: 1,
+        keyId: currentKeyId,
+        nonce: base64(nonce),
+        ciphertext: base64(new Uint8Array(ciphertext)),
+      }
     } catch {
       throw unreadable()
     }
@@ -112,7 +126,11 @@ export function createCredentialPort(options: {
       if (!key) throw unreadable()
       const nonce = unbase64(sealed.nonce)
       const ciphertext = unbase64(sealed.ciphertext)
-      if (nonce.byteLength !== 12 || ciphertext.byteLength < 16 || ciphertext.byteLength > MAX_BYTES + 16)
+      if (
+        nonce.byteLength !== 12 ||
+        ciphertext.byteLength < 16 ||
+        ciphertext.byteLength > MAX_BYTES + 16
+      )
         throw unreadable()
       return new Uint8Array(
         await crypto.subtle.decrypt(

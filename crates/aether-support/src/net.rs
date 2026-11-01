@@ -274,8 +274,7 @@ fn is_restricted(ip: IpAddr) -> bool {
 #[cfg(test)]
 mod tests {
     #![expect(clippy::unwrap_used, reason = "a failed unwrap is a failed test")]
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
+    use aether_testkit::{Exhausted, Reply, Server};
 
     use super::*;
 
@@ -293,19 +292,9 @@ mod tests {
             }],
         }
     }
-    /// Answers every connection on a loopback port with `response`.
-    async fn serve(response: &'static str) -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move {
-            while let Ok((mut socket, _)) = listener.accept().await {
-                let mut buf = [0_u8; 4096];
-                let _ = socket.read(&mut buf).await;
-                let _ = socket.write_all(response.as_bytes()).await;
-                let _ = socket.shutdown().await;
-            }
-        });
-        port
+    /// Answers every connection on a loopback port with `response`; stops when dropped.
+    async fn serve(response: &'static str) -> Server {
+        Server::script(vec![Reply::raw(response)], Exhausted::RepeatLast).await
     }
 
     const OK: &str = "HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok";
@@ -411,7 +400,8 @@ mod tests {
 
     #[tokio::test]
     async fn localhost_http_reaches_a_loopback_server() {
-        let port = serve(OK).await;
+        let server = serve(OK).await;
+        let port = server.port();
         let url = check_url(
             &format!("http://localhost:{port}"),
             &AddressPolicy::default(),
@@ -424,7 +414,8 @@ mod tests {
 
     #[tokio::test]
     async fn public_domain_resolving_to_loopback_is_rejected_at_connect() {
-        let port = serve(OK).await;
+        let server = serve(OK).await;
+        let port = server.port();
         let url = format!("https://evil.example:{port}/");
         // The URL string alone looks fine; only the resolved address gives it away.
         assert_eq!(reason(&url, &AddressPolicy::default()), None);
@@ -456,7 +447,8 @@ mod tests {
 
     #[tokio::test]
     async fn allowed_private_domain_connects() {
-        let port = serve(OK).await;
+        let server = serve(OK).await;
+        let port = server.port();
         let policy = allow("intranet.test", port);
         let url = check_url(&format!("http://intranet.test:{port}"), &policy).unwrap();
         let client = build(policy, Duration::from_secs(5), to_loopback).unwrap();
@@ -466,10 +458,11 @@ mod tests {
 
     #[tokio::test]
     async fn redirects_are_not_followed() {
-        let port = serve(
+        let server = serve(
             "HTTP/1.1 302 Found\r\nlocation: /elsewhere\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
         )
         .await;
+        let port = server.port();
         let client = client(AddressPolicy::default(), Duration::from_secs(5)).unwrap();
         let response = client
             .get(format!("http://127.0.0.1:{port}/start"))

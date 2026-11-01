@@ -53,7 +53,8 @@ export interface ConversationDocument {
 }
 export const conflict = (reason: string): KitFailure =>
   new KitFailure('conflict', 'Conversation changed or unavailable', { reason })
-export const notFound = (entity: string): KitFailure => new KitFailure('not_found', 'Resource not found', { entity })
+export const notFound = (entity: string): KitFailure =>
+  new KitFailure('not_found', 'Resource not found', { entity })
 const corrupt = (): never => {
   throw new KitFailure('incompatible_db', 'Invalid stored conversation')
 }
@@ -164,9 +165,18 @@ export function validateImages(images: readonly ImagePart[]): void {
 function reasoning(value: unknown): ReasoningBlock {
   const v = record(value),
     protocol = v.protocol
-  if (protocol !== 'openai-chat' && protocol !== 'openai-responses' && protocol !== 'anthropic-messages')
+  if (
+    protocol !== 'openai-chat' &&
+    protocol !== 'openai-responses' &&
+    protocol !== 'anthropic-messages'
+  )
     return corrupt()
-  return { protocol, endpointId: nullableText(v.endpointId), modelId: nullableText(v.modelId), value: json(v.value) }
+  return {
+    protocol,
+    endpointId: nullableText(v.endpointId),
+    modelId: nullableText(v.modelId),
+    value: json(v.value),
+  }
 }
 function json(value: unknown, depth = 0): unknown {
   if (depth > 64) return corrupt()
@@ -179,7 +189,9 @@ function json(value: unknown, depth = 0): unknown {
     return value
   if (Array.isArray(value)) return value.map((item: unknown) => json(item, depth + 1))
   if (isRecord(value))
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, json(item, depth + 1)]))
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, json(item, depth + 1)]),
+    )
   return corrupt()
 }
 function call(value: unknown): ToolCall {
@@ -192,7 +204,8 @@ function jsonRecord(value: unknown): Record<string, unknown> {
 }
 export function parseMessage(value: unknown): Message {
   const v = record(value)
-  if (['user', 'assistant', 'tool'].filter((key) => Object.hasOwn(v, key)).length !== 1) return corrupt()
+  if (['user', 'assistant', 'tool'].filter((key) => Object.hasOwn(v, key)).length !== 1)
+    return corrupt()
   if (typeof v.user === 'string') {
     if (v.images === undefined) return { user: v.user }
     return {
@@ -243,7 +256,10 @@ export function parseDocument(value: unknown, key: string): ConversationDocument
       status = t.status,
       kind = t.kind
     if (
-      (status !== 'running' && status !== 'completed' && status !== 'failed' && status !== 'cancelled') ||
+      (status !== 'running' &&
+        status !== 'completed' &&
+        status !== 'failed' &&
+        status !== 'cancelled') ||
       (kind !== 'reply' && kind !== 'translation')
     )
       return corrupt()
@@ -280,7 +296,8 @@ export function parseDocument(value: unknown, key: string): ConversationDocument
   let running = 0,
     last = 0
   for (const t of turns) {
-    if (!t.id.trim() || charCount(t.id) > 128 || ids.has(t.id) || seqs.has(t.seq) || t.seq <= last) return corrupt()
+    if (!t.id.trim() || charCount(t.id) > 128 || ids.has(t.id) || seqs.has(t.seq) || t.seq <= last)
+      return corrupt()
     if (
       !t.questionId.trim() ||
       charCount(t.questionId) > 128 ||
@@ -296,7 +313,8 @@ export function parseDocument(value: unknown, key: string): ConversationDocument
     last = t.seq
     if (t.status === 'running') running++
   }
-  if (running > 1 || (summary.selectedTurnId !== null && !ids.has(summary.selectedTurnId))) return corrupt()
+  if (running > 1 || (summary.selectedTurnId !== null && !ids.has(summary.selectedTurnId)))
+    return corrupt()
   for (const t of turns) {
     if (
       (t.parentId !== null && !ids.has(t.parentId)) ||
@@ -323,7 +341,9 @@ export function target(document: ConversationDocument, id: string): StoredTurn {
   return turn
 }
 export function visibleText(turn: StoredTurn): string {
-  return turn.messages.flatMap((m) => ('assistant' in m && m.assistant.text ? [m.assistant.text] : [])).join('\n\n')
+  return turn.messages
+    .flatMap((m) => ('assistant' in m && m.assistant.text ? [m.assistant.text] : []))
+    .join('\n\n')
 }
 export function reasoningText(turn: StoredTurn): string {
   let text = ''
@@ -338,9 +358,14 @@ export function reasoningText(turn: StoredTurn): string {
         typeof block.value.thinking === 'string'
       )
         text += block.value.thinking
-      else if (block.protocol === 'openai-responses' && isRecord(block.value) && Array.isArray(block.value.summary)) {
+      else if (
+        block.protocol === 'openai-responses' &&
+        isRecord(block.value) &&
+        Array.isArray(block.value.summary)
+      ) {
         for (const part of block.value.summary)
-          if (isRecord(part) && part.type === 'summary_text' && typeof part.text === 'string') text += part.text
+          if (isRecord(part) && part.type === 'summary_text' && typeof part.text === 'string')
+            text += part.text
       }
     }
   }

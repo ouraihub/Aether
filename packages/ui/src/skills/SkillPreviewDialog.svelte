@@ -8,7 +8,10 @@
   import type { Preview, PreviewCurrent } from '../ports'
 
   /** What both a Preview and a stored SkillDto carry. */
-  type SkillText = Pick<Preview, 'name' | 'description' | 'version' | 'body' | 'license' | 'extra' | 'files'>
+  type SkillText = Pick<
+    Preview,
+    'name' | 'description' | 'version' | 'body' | 'license' | 'extra' | 'files'
+  >
 
   let {
     open = $bindable(false),
@@ -82,14 +85,19 @@
         </Alert.Root>
       {/if}
       {#if files.length > 0}
-        <section class="flex flex-col gap-1 text-xs" aria-label={t('skills.files', { count: files.length })}>
+        <section
+          class="flex flex-col gap-1 text-xs"
+          aria-label={t('skills.files', { count: files.length })}
+        >
           <h3 class="font-medium">{t('skills.files', { count: files.length })}</h3>
           <ul class="max-h-40 overflow-y-auto font-mono">
             {#each files as file (file.path)}
               <li class="flex gap-3">
                 <span class="min-w-0 flex-1 truncate">{file.path}</span>
                 <span class="text-muted-foreground">{t(`skills.file_kind.${file.kind}`)}</span>
-                <span class="text-muted-foreground">{t('skills.file_size', { size: file.size })}</span>
+                <span class="text-muted-foreground"
+                  >{t('skills.file_size', { size: file.size })}</span
+                >
               </li>
             {/each}
           </ul>
@@ -106,14 +114,20 @@
       {#if onconfirm && current}
         <label class="flex items-center gap-2 text-sm">
           <input type="checkbox" class="accent-primary" bind:checked={replace} />
-          {t('skills.replace', { version: current.version ?? t('skills.unversioned'), revision: current.revision })}
+          {t('skills.replace', {
+            version: current.version ?? t('skills.unversioned'),
+            revision: current.revision,
+          })}
         </label>
       {/if}
     {/if}
     <Dialog.Footer>
       <Button variant="outline" onclick={() => (open = false)}>{t('common.cancel')}</Button>
       {#if onconfirm}
-        <Button disabled={busy || !skill || (current !== null && !replace)} onclick={() => onconfirm(replace)}>
+        <Button
+          disabled={busy || !skill || (current !== null && !replace)}
+          onclick={() => onconfirm(replace)}
+        >
           {confirmLabel ?? t('skills.install')}
         </Button>
       {/if}

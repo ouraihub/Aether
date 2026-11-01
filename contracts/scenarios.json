@@ -1,6 +1,7 @@
 {
   "contractVersion": 1,
-  "description": "Language-neutral backend acceptance scenarios from docs/22, 25 and 26. A runner must drive real services with controlled model/tool/store dependencies, record observations and assert these outcomes; merely parsing this file or echoing fixtures is not a pass. No TS backend execution is claimed.",
+  "description": "Language-neutral backend acceptance scenarios from docs/22, 25 and 26. A runner must drive real services with controlled model/tool/store dependencies, record observations and assert these outcomes; merely parsing this file or echoing fixtures is not a pass. `executable` lists the scenarios both backends run in contracts-check (contracts/scenario-runs.md); the others are specified only.",
+  "executable": ["acceptance-response-race", "tool-approval-allow", "receiver-send-failure", "round-exhaustion"],
   "observationRules": [
     "Collect accepted/rejected responses, emitted RunEvent values, snapshots, model requests, tool dispatches and committed conversation state.",
     "Validate all public values against manifest schemas. Compare concatenated text/reasoning and observable action/state order, not token chunk boundaries or internal SQL.",

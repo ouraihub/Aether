@@ -218,6 +218,8 @@ Skills 提供 `/api/v1/skills` 列表、`/:id` 查询/删除、`/:id/files?revis
 
 单会话的图、预留和版本保存在一个 JSON 文档，D1 单语句 revision CAS 原子提交；不存在 `transaction(async callback)`。删除写 tombstone，旧 key 不可通过 expectedRevision=null 复活。`packages/worker/migrations/0001.sql` 是公共 schema，宿主显式执行，`validateD1Schema` 只校验版本，不在请求中迁移产品表。
 
+会话写入（reserve、finish、recover、addGenerated、rename、purgeImages）与会话撤销统一经 `retryCas`：每次尝试重新读取最新版本并重新应用变更，只重试存储 CAS 本身的版本冲突（无 reason 的 `conflict`）；`preparation_changed`、`turn_finished` 等语义冲突立即返回。最多 8 次，指数退避加抖动（默认基数 5ms），耗尽返回 `conflict{reason:"conversation_contended"}`。退避的 sleep/random 与 `ConversationService` 的 `now`/`newId` 一样可注入，测试不依赖真实计时器。`createRunCoordinator(runtime, {now, newId})` 同样注入 30 秒订阅门禁、alarm 判定、requestId 与 errorId 的来源。
+
 文档 ≤256 KiB 内联 D1，更大文档先写 scoped immutable R2 blob，再 CAS 小指针；默认文档上限64 MiB，缺 R2 时大文档失败。已替换/删除引用及不确定 SQL 提交的旧 blob **有意保留**，避免读者竞争或误删已提交对象；只有确定 CAS 冲突的新 blob 才即时回收。部署方须安排显式、引用感知且具安全保留期的 GC，不能把 R2 生命周期任意过期当成实现。`R2FileStore` 独立保存 actor 隔离的文件/Skills 包；D1 与 R2 不承诺跨服务事务。
 
 `createCredentialPort({currentKeyId, keys})` 使用非可导出的 AES-256-GCM CryptoKey ring；旧 key 用于读取与显式 rotate，AAD 绑定版本/keyId/application/tenant/subject/purpose/recordId，跨记录复制密文无法解开。DO 不持久化明文连接、完整准备输入或凭据；运行快照仅保存公共状态。

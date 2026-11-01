@@ -15,7 +15,10 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     name: '智谱 Zhipu',
     description: 'Web search',
     basicAuth: false,
-    search: { defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4/web_search', keyMode: 'required' },
+    search: {
+      defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4/web_search',
+      keyMode: 'required',
+    },
   },
   {
     id: 'tavily',
@@ -98,7 +101,10 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     fetch: { defaultBaseUrl: '', keyMode: 'none' },
   },
 ]
-export const DEFAULT_PROVIDERS: Readonly<Record<SearchCap, string>> = { search: 'exa-mcp', fetch: 'jina' }
+export const DEFAULT_PROVIDERS: Readonly<Record<SearchCap, string>> = {
+  search: 'exa-mcp',
+  fetch: 'jina',
+}
 export const defaultPreferences = (): SearchPreferences => ({
   maxResults: 5,
   compression: 'none',
@@ -141,7 +147,12 @@ export function targetUrl(value: string): URL {
   return url
 }
 export function normalizeRule(value: unknown): string {
-  if (typeof value !== 'string' || !value || [...value].length > 256 || /[\s[\]\\^{}|#]/u.test(value))
+  if (
+    typeof value !== 'string' ||
+    !value ||
+    [...value].length > 256 ||
+    /[\s[\]\\^{}|#]/u.test(value)
+  )
     throw badRequest('blacklist', 'invalid')
   for (const character of value) {
     const code = character.codePointAt(0)
@@ -150,25 +161,39 @@ export function normalizeRule(value: unknown): string {
   const parts = value.match(/^(https?):\/\/([^/]+)(\/.*)?$/i)
   const hostPort = parts ? (parts[2] ?? '') : value
   const match = hostPort.match(/^([^:]+)(?::([0-9]+))?$/)
-  if (!match || (!parts && match[2]) || (match[2] && (Number(match[2]) < 1 || Number(match[2]) > 65535)))
+  if (
+    !match ||
+    (!parts && match[2]) ||
+    (match[2] && (Number(match[2]) < 1 || Number(match[2]) > 65535))
+  )
     throw badRequest('blacklist', 'invalid')
   const host = (match[1] ?? '').toLowerCase().replace(/\.$/, '')
   if (
     host.length > 253 ||
     host
       .split('.')
-      .some((label) => !label || label.length > 63 || !/^[a-z0-9*?](?:[a-z0-9*?-]*[a-z0-9*?])?$/u.test(label))
+      .some(
+        (label) =>
+          !label || label.length > 63 || !/^[a-z0-9*?](?:[a-z0-9*?-]*[a-z0-9*?])?$/u.test(label),
+      )
   )
     throw badRequest('blacklist', 'invalid')
   const scheme = parts?.[1]?.toLowerCase()
   const port =
-    match[2] && !((scheme === 'https' && match[2] === '443') || (scheme === 'http' && match[2] === '80'))
+    match[2] &&
+    !((scheme === 'https' && match[2] === '443') || (scheme === 'http' && match[2] === '80'))
       ? ':' + match[2]
       : ''
   return parts ? scheme + '://' + host + port + (parts[3] ?? '/') : host
 }
 export function validatePreferences(value: unknown): SearchPreferences {
-  const input = fields(value, ['maxResults', 'compression', 'cutoffLimit', 'blacklist', 'modelToolsPreferred'])
+  const input = fields(value, [
+    'maxResults',
+    'compression',
+    'cutoffLimit',
+    'blacklist',
+    'modelToolsPreferred',
+  ])
   const { maxResults, compression, cutoffLimit, blacklist, modelToolsPreferred } = input
   if (
     typeof maxResults !== 'number' ||
@@ -238,7 +263,10 @@ export function truncate(text: string, limit: number): string {
 export function cutoff(text: string, preferences: SearchPreferences): string {
   return preferences.compression === 'cutoff' ? truncate(text, preferences.cutoffLimit) : text
 }
-export function processHits(hits: readonly SearchHit[], preferences: SearchPreferences): SearchHit[] {
+export function processHits(
+  hits: readonly SearchHit[],
+  preferences: SearchPreferences,
+): SearchHit[] {
   const seen = new Set<string>()
   const result: SearchHit[] = []
   for (const hit of hits) {
@@ -251,7 +279,11 @@ export function processHits(hits: readonly SearchHit[], preferences: SearchPrefe
     }
     if (seen.has(url)) continue
     seen.add(url)
-    result.push({ title: truncate(hit.title || url, 500), url, snippet: cutoff(hit.snippet, preferences) })
+    result.push({
+      title: truncate(hit.title || url, 500),
+      url,
+      snippet: cutoff(hit.snippet, preferences),
+    })
     if (result.length >= preferences.maxResults) break
   }
   return result
@@ -262,6 +294,7 @@ export function validateQuery(value: string): string {
   return query
 }
 export function validateTarget(value: string): string {
-  if (new TextEncoder().encode(stringValue(value, 'url')).length > 8192) throw badRequest('url', 'too_long', 8192)
+  if (new TextEncoder().encode(stringValue(value, 'url')).length > 8192)
+    throw badRequest('url', 'too_long', 8192)
   return targetUrl(value.trim()).href
 }

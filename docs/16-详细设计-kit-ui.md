@@ -29,6 +29,8 @@ flowchart TD
 
 RunSession 是 chat 内 Svelte 展示状态组合，不是所有功能共用的 controller。各模块只依赖所需客户端；会话查询不依赖运行客户端，日志诊断不依赖桌面文件动作。TS Worker后端与Web客户端均已实现，真实浏览器验收结果独立记录于90。
 
+跨产品消费保留两种方式：标准 ChatPanel 组合 RunClient/ConversationClient；Actora 等定制壳复用 ChatSurface/ChatComposer/ChatMessage、ReasoningControl、UsageControl 与既有纯状态函数。组件不请求供应商、不推断宿主权限，不重建万能 controller。公共上下文显示始终携带来源和实际模型身份；草稿预览与运行统计分别输入，模型/草稿变化不得残留旧百分比。设置和费用明细保留已有 snippet 扩展，Cloudflare 预算、业务授权和后台驱动不进入公共核心。图像引用显示与下载须由宿主控制访问，不能把供应商临时 URL 当历史地址。
+
 ### 1.2 目录与子路径
 
 ```text
@@ -37,7 +39,7 @@ packages/ui/src/
   tauri/            # 唯一可以 import @tauri-apps/* 的目录：createTauriPorts()
   web/              # createWebPorts()：公共HTTP/SSE客户端，不引入Tauri
   providers/        # ProvidersSettings 等组件、draft.ts（纯转换）、edit-session.ts（保存/探测流程）
-  chat/             # ChatPanel、MessageItem、ToolCallItem、ApprovalCard、SkillPicker、run-session.svelte.ts
+  chat/             # 无运行依赖的 ChatSurface/ChatComposer/ChatMessage；ChatPanel/MessageItem 组合 RunSession 与宿主回调
   search/           # SearchSettings、settings-flow.ts（保存/可选检测流程）
   skills/           # SkillsSettings、SkillPreviewDialog、SkillEditor
   mcp/              # McpClientSettings、McpServerSettings、config.ts（纯配置生成）、input.ts（纯输入转换）
@@ -295,6 +297,16 @@ setKitContext(ctx) // 宿主根组件调用一次；未自带通知实现的宿�
 
 ### 4.2 chat
 
+`@ouraihub/aether-ui/chat` 同时导出 `ChatSurface`、`ChatComposer`、`ChatMessage` 与原有 `ChatPanel`。前三者仅负责展示与本地交互，不读取 KitContext、RunSession、KitPorts 或宿主 DTO；Actora 的原生会话控制与 Aether 的 ChatPanel 共用它们，不适配第二套运行客户端。
+
+| 组件           | 受控接口与职责                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ChatSurface`  | `label`、可选 `messagesLabel`（默认 label）、`header/children/composer/navigation` snippets；`followKey` 随流内容变化、`scrollKey` 切会话复位，`latestLabel` 本地化返回最新按钮，`class` 宿主布局。独立消息滚动区、800px 正文列、响应式边距；导航宽240px，容器不足900px隐藏，由宿主提供历史 Dialog。向上阅读暂停跟随，返回最新按钮在消息区与输入之间，不遮挡发送。                                                                                                   |
+| `ChatComposer` | `bind:value`、`label/placeholder/submitLabel/stopLabel`、`disabled/running/stopping/maxlength`；`onsubmit/onstop/oninput/onpaste/onfiles` 回调；`top/tools/actions/override` snippets，`expandLabel/collapseLabel` 本地化。disabled仅禁止发送，不禁止写下一条草稿。原生textarea自动增高、Ctrl/Cmd+Enter防IME/重复键，展开与Esc收起保留同一DOM。override保留普通表单挂载但hidden/inert，审批结束仅在焦点仍属于替代区时恢复原焦点；不自行决定审批。tools不能嵌套form。 |
+| `ChatMessage`  | `role: 'user' \| 'assistant'`、`text`、`label/status/reasoning/reasoningLabel`、`process/attachments/children/actions` snippets、`latest/selected`；`showMoreLabel/showLessLabel` 本地化。用户中性气泡，超过5个非空逻辑行折叠；助手开放正文沿用 `renderMarkdown` 清洗与排版。思考默认折叠，最新操作常显，历史操作hover/focus/无hover设备可达；实际操作由宿主注入。                                                                                                   |
+
+ChatPanel保留下述API及全部宿主回调，布局/输入交由ChatSurface/ChatComposer；MessageItem把候选、附件、生成图片、来源、搜索与操作传给ChatMessage。进行中的工具过程展开，终态过程折叠；真实 `tool.pending` 驱动底部审批override，允许/拒绝仍调用 `session.approve(tool, allow)`，停止仍调用 `session.stop()`。该切分不改变CAS、会话选择、失败草稿恢复、权限模式或RunSession生命周期；不将组件代码存在视为已通过运行验收。
+
 ```ts
 interface ChatPanelProps {
   purpose?: string // 默认 'chat'，原样放进 RunRequest
@@ -323,11 +335,13 @@ interface ChatPanelProps {
 ```
 
 - 历史下拉（有 `ports.conversations` 时）、新对话、删除当前会话（`notify.confirm` 确认后 `ports.conversations.remove(id)`，再回到新对话）、上下文标签（× 本轮不带）、Markdown 渲染（`{@attach}` + 已清洗 HTML）、每轮复制（剪贴板，短暂显示"已复制"）/ 插入、最后一轮重新生成、停止、失败原因与重试（= 重新生成最后一轮）、空状态（无模型 → 提示 + "打开设置"；空会话 → 简短提示）、窄屏全屏 + Esc 关闭（有 `onClose`、焦点在面板内且没有运行时）。
-- 2026-10-14 批准并延续的 Voynote 交互：紧凑两行顶部，一体输入卡片（Enter 换行、Ctrl/Cmd+Enter 发送、IME 期间不发送、展开保留草稿），AI 回复卡片与框架独立正文排版；末轮重新生成／重试在回复内。消息区单独滚动，向上阅读暂停跟随。历史／删除／重命名调用独立 `ConversationClient`；加载失败与无模型分开。输入未接纳失败可恢复，终态保留部分输出。通用局部 CSS 在完整框架入口与宿主 Tailwind 入口均有效，不覆盖宿主主题；该批准记录不限制后续已授权的图像功能。
+- 对话表现使用上述共享原语：紧凑顶部、一体输入卡片（Enter换行、Ctrl/Cmd+Enter发送、IME期间不发送、展开保留草稿）、中性用户气泡与开放助手正文；末轮重新生成／重试在回复内。消息区单独滚动，向上阅读暂停跟随。历史／删除／重命名调用独立 `ConversationClient`；加载失败与无模型分开。输入未接纳失败可恢复，终态保留部分输出。通用局部CSS在完整框架入口与宿主Tailwind入口均有效，不覆盖宿主主题。
 - 上下文标签移除仅代表本轮context=null；scope仍为会话归属。宿主必须继续校验会话和关联资源访问权限，不能以无payload免鉴权；若非空context仍需匹配scope。写作必填由宿主继续执行。
 - 用户复核后批准完整回复操作（对齐 Cherry）：展开按钮固定输入卡片右上角；回复操作栏依次为复制、重新生成、@、翻译、👍（仅多候选，设置为上下文）、保存到笔记、删除、更多；更多=编辑／分支／复制为新对话／保存›／导出›。候选共享 questionId 只显示一次问题，来源模型和选中态可读；`conversations.selectTurn` 持久选择同会话路径，“分支”也选择同会话路径并清空草稿，`conversations.fork` 仅“复制为新对话”。编辑调用 `conversations.editTurn` 保留 CAS，Markdown 下载有真实宿主／浏览器行为；编辑／语言 Dialog 错误保草稿。删除调用 `conversations.removeTurn`，生成中禁用结构变更；图结构和继任选择的服务端规则归会话存储合同。所有动作使用稳定 turnId；`end` 后读回通过独立客户端，异步有效性归 30 §2。并发比较不在本轮新增范围。
 - 思考强度：Gauge／当前档位入口向上右对齐弹层，强度／恢复默认、更快—更智能、原生离散range；只遍历模型声明档位。default独立于显式档位，弹层打开和视觉中位不写medium；拖动／方向键／Home/End后才写合法值；none为显式关闭。选中模型时始终保留入口，无能力时明确说明并提供宿主设置入口，不显示伪造滑块；单显式档位用默认＋选项，切模型恢复default，运行中禁用，Esc先关弹层回焦点。复用RunRequest.reasoningEffort，不引入serviceTier/FastMode、模型目录或偏好存储。
 - 思考滑块按合法档位绘制等距刻度点，每个点对应一个effort；当前点由圆形thumb替代，其余点保留在轨道中心。原生range仍step=1，刻度不接管鼠标／触摸／键盘事件；主题色进度和背景色刻度沿用现有token。
+- `ReasoningControl` 从 `@ouraihub/aether-ui/chat` 独立导出；ChatPanel 与自建运行宿主共用同一控件，不复制滑块/刻度/焦点逻辑。输入为 `value`（default 或显式档位）、`efforts`、`disabled`、`i18n`、`onchange`、可选 `onOpenSettings` 与可绑定 `open`；不读取模型目录、偏好或运行客户端。ChatPanel 保留已有 nearestEffort 与宿主偏好策略，自建宿主负责将 default 映射到自己的 null、校验请求与固定运行快照。控件只排序已声明的档位，无能力时不伪造值。
+- `UsageControl` 从 `@ouraihub/aether-ui/chat` 独立导出，提供 Settings2 入口、Portal 向上右对齐浮层和 Cherry 式上下文摘要（标题、原生 meter、已用/窗口/比例、模型名及实测/估算来源）。输入 `context:{tokens,contextWindow,modelName,source}|null`、`i18n` 与可选 `settings/details` snippets；无模型计量时显示未知，不用累计计费 token 冒充上下文。比例限于 0–100%，原始计数不截断。宿主自管参数验证、持久化和运行冻结，组件不构造运行请求。ChatPanel 的 UsageDetails 组合此控件，保留本轮/会话累计 token 与费用明细；Actora 注入输出上限、工具预算、上下文裁剪和独立 Cloudflare 预算，不把平台预算做成 Aether DTO。
 - 回复“换模型”（@）对标 Cherry：@ 按钮本身就是 `ModelSelect` 的自定义 `trigger`，弹层与顶部选择器完全相同，当前值为该回复来源模型（竖条标记）；点选通过 RunSession 使用带 `retryTurnId` 与所选 `model` 的 `RunRequest` 调 `RunClient.start` 生成新候选，原回复保留，不再经过确认 Dialog。末轮重新生成时来源模型失效只 toast 提示“请点 @ 选择其他模型”。Dialog 只保留编辑与翻译。
 - 通用 `CopyInput`（根导出，Input 的替换件，对齐 Cherry ApiHostFields）：非空时在右侧悬停或聚焦才显示复制按钮，复制去掉首尾空白的值并 toast。已用于 API 地址、图像/改图地址、MCP URL 和搜索基础地址。
 - `SkillPicker`：输入框上方的技能选择（列表只含元数据）；显示所选正文合计 / 预算；`end` 或请求错误为 `skill_changed` 时提示"技能已更新，请重新确认"并打开预览。

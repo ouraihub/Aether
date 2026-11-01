@@ -16,17 +16,20 @@
   "scripts": {
     "lint": "eslint packages/ui/src packages/core/src packages/worker/src packages/contracts/src",
     "format:check": "prettier --check \"packages/{ui,core,worker,contracts}/src/**/*.{ts,svelte}\" eslint.config.js scripts/*.mjs",
+    "format:length": "node scripts/line-length.mjs",
+    "format:size": "node scripts/file-size.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test",
+    "check": "pnpm run lint && pnpm run format:check && pnpm run format:length && pnpm run format:size && pnpm run typecheck && pnpm run test",
     "ci": "node scripts/ci.mjs",
     "kit:check-deps": "node scripts/check-deps.mjs",
+    "kit:nondet-check": "node scripts/nondet-check.mjs",
     "kit:dto": "node scripts/dto-check.mjs --write",
     "kit:dto-check": "node scripts/dto-check.mjs",
     "kit:i18n": "node scripts/i18n-check.mjs",
     "aether:check-deps": "pnpm run kit:check-deps",
     "aether:dto-check": "pnpm run kit:dto-check",
-    "aether:i18n": "pnpm run kit:i18n"
+    "aether:line-length": "pnpm run format:length"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -40,7 +43,7 @@
     "globals": "17.4.0",
     "prettier": "3.9.9",
     "prettier-plugin-svelte": "4.1.1",
-    "svelte": "5.57.1",
+    "svelte": "5.57.2",
     "tsx": "4.23.15",
     "wrangler": "4.154.0",
     "typescript": "5.9.3",

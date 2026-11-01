@@ -94,6 +94,8 @@ const MCP_NOTICE: &str =
 #[cfg(feature = "native")]
 const PREVIEW_CHARS: usize = 2000;
 #[cfg(feature = "native")]
+const PREVIEW_MARKER: &str = "…(truncated)";
+#[cfg(feature = "native")]
 const SUMMARY_CHARS: usize = 200;
 
 #[cfg(feature = "native")]
@@ -171,7 +173,17 @@ pub(crate) fn unknown_tool(call: &ToolCall) -> String {
 
 #[cfg(feature = "native")]
 pub(crate) fn args_preview(call: &ToolCall) -> String {
-    call.args.to_string().chars().take(PREVIEW_CHARS).collect()
+    let text = call.args.to_string();
+    let total = text.chars().count();
+    if total <= PREVIEW_CHARS {
+        return text;
+    }
+    let keep = PREVIEW_CHARS - PREVIEW_MARKER.chars().count();
+    format!(
+        "{}{}",
+        text.chars().take(keep).collect::<String>(),
+        PREVIEW_MARKER
+    )
 }
 
 #[cfg(feature = "native")]

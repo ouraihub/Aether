@@ -192,6 +192,41 @@ pub struct ContextUsage {
     pub model_id: Option<String>,
 }
 
+/// Character-budget estimate, not a tokenizer or provider measurement.
+#[must_use]
+pub fn estimate_context_tokens(text: &str) -> u32 {
+    u32::try_from(text.chars().count().div_ceil(3)).unwrap_or(u32::MAX)
+}
+
+impl ContextUsage {
+    /// Builds the most recent request count, never a cumulative usage count.
+    #[must_use]
+    pub fn for_request(
+        usage: TokenUsage,
+        estimated: Option<u32>,
+        window: Option<u32>,
+        endpoint: Option<String>,
+        model: Option<String>,
+    ) -> Self {
+        let reported = usage.input_tokens.zip(usage.output_tokens);
+        Self {
+            tokens: reported
+                .map(|(input, output)| input.saturating_add(output))
+                .or(estimated),
+            context_window: window,
+            source: if reported.is_some() {
+                ContextSource::Reported
+            } else if estimated.is_some() {
+                ContextSource::Estimated
+            } else {
+                ContextSource::Unknown
+            },
+            endpoint_id: endpoint,
+            model_id: model,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

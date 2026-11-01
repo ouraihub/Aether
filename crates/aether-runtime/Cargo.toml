@@ -24,7 +24,7 @@ aether-mcp-client = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
-tokio-util = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true, features = ["rt"] }
 async-trait = { workspace = true, optional = true }
 process-wrap = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
@@ -34,11 +34,18 @@ ts-rs.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+aether-testkit.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["net", "io-util"] }
 
 [[example]]
 name = "contract-output"
+required-features = ["runs"]
+
+# Runs contracts/scenarios.json on the real RunService and prints the observations as JSON;
+# `scripts/contracts-check.mjs` builds and runs it (docs/22 §9).
+[[example]]
+name = "scenario-output"
 required-features = ["runs"]
 
 [lints]

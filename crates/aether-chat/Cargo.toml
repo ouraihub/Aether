@@ -23,6 +23,7 @@ tokio-util.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+aether-testkit.workspace = true
 tokio = { workspace = true, features = ["net", "io-util"] }
 zeroize.workspace = true
 

@@ -24,10 +24,16 @@ export function shellRisk(command: string): Risk | null {
     ['elevation', /(?:^|[\s;&|])(sudo|doas|runas)(?:\s|$)|start-process\b.*-verb\s+runas/i],
     ['delete', /(?:^|[\s;&|])(rm|rmdir|del|erase|remove-item)(?:\s|$)/i],
     ['disk', /(?:^|[\s;&|])(mkfs(?:\.\w+)?|fdisk|diskpart|format)(?:\s|$)|\bdd\b.*\bof=/i],
-    ['git_destructive', /\bgit\s+(?:reset\s+--hard|clean\b[^\n]*-[^\s]*f|push\b[^\n]*(?:--force|-f\b)|checkout\s+--)/i],
+    [
+      'git_destructive',
+      /\bgit\s+(?:reset\s+--hard|clean\b[^\n]*-[^\s]*f|push\b[^\n]*(?:--force|-f\b)|checkout\s+--)/i,
+    ],
     ['permissions', /\b(?:chmod|chown|icacls|set-acl)\b/i],
     ['publish', /\b(?:npm|pnpm|yarn|cargo|dotnet)\s+(?:publish|nuget\s+push)\b/i],
-    ['global_install', /\b(?:npm|pnpm|yarn)\b[^\n]*(?:--global|\s-g\b)|\bpip\b[^\n]*\binstall\b(?![^\n]*--target)/i],
+    [
+      'global_install',
+      /\b(?:npm|pnpm|yarn)\b[^\n]*(?:--global|\s-g\b)|\bpip\b[^\n]*\binstall\b(?![^\n]*--target)/i,
+    ],
     ['home_path', /(?:^|\s)~(?:[\\/]|$)|\$(?:HOME|USERPROFILE)\b|%(?:USERPROFILE|HOMEPATH)%/i],
     ['process_spawn', /\$\(|`[^`]+`|\b(?:eval|exec|cmd\s+\/c|powershell\s+-|bash\s+-c|sh\s+-c)\b/i],
   ]
@@ -40,7 +46,11 @@ export function scriptRisk(language: ScriptLanguage, script: string): Risk | nul
     return { reason: 'process_spawn' }
   if (/\b(?:requests\.|urllib\.|httpx\.|fetch\s*\(|https?\.(?:request|get)|socket\.)/.test(script))
     return { reason: 'network' }
-  if (/\b(?:os\.(?:remove|unlink|rmdir)|shutil\.rmtree|fs\.(?:rm|unlink|rmdir)|Deno\.remove)\b/.test(script))
+  if (
+    /\b(?:os\.(?:remove|unlink|rmdir)|shutil\.rmtree|fs\.(?:rm|unlink|rmdir)|Deno\.remove)\b/.test(
+      script,
+    )
+  )
     return { reason: 'file_delete' }
   return null
 }

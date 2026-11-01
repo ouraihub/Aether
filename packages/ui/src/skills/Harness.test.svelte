@@ -9,7 +9,8 @@
     kit,
     skills,
     onSkillsChange,
-  }: { kit: KitContext; skills?: SkillRef[]; onSkillsChange?: (refs: SkillRef[]) => void } = $props()
+  }: { kit: KitContext; skills?: SkillRef[]; onSkillsChange?: (refs: SkillRef[]) => void } =
+    $props()
   // svelte-ignore state_referenced_locally
   setKitContext(kit)
   // svelte-ignore state_referenced_locally

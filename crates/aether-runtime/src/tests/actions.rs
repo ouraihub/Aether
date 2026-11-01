@@ -38,9 +38,8 @@ impl KitHost for EffectiveHost {
 
 #[tokio::test]
 async fn effective_retry_source_images_reach_every_host_hook_and_real_upstream() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/v1", listener.local_addr().unwrap());
-    let server = tokio::spawn(upstream(listener, vec![HELLO]));
+    let server = upstream(vec![sse(HELLO)]).await;
+    let url = format!("{}/v1", server.url());
     let dir = tempfile::tempdir().unwrap();
     let (providers, mut request) = local_model(dir.path(), &url, "source question");
     request.images = vec![part("aW4x")];
@@ -80,7 +79,7 @@ async fn effective_retry_source_images_reach_every_host_hook_and_real_upstream()
         Some(source.turn_id.as_str())
     );
     assert_eq!(retry.images[0].data.as_deref(), Some("aW4x"));
-    let received = server.await.unwrap();
+    let received = wire_requests(&server, 1);
     assert!(received[0].contains("source question"));
     assert!(received[0].contains("data:image/png;base64,aW4x"));
     assert!(!received[0].contains("client cannot replace source"));
@@ -88,9 +87,8 @@ async fn effective_retry_source_images_reach_every_host_hook_and_real_upstream()
 
 #[tokio::test]
 async fn retry_regenerate_and_translation_keep_source_model_and_branch_ancestry() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/v1", listener.local_addr().unwrap());
-    let server = tokio::spawn(upstream(listener, vec![HELLO]));
+    let server = upstream(vec![sse(HELLO)]).await;
+    let url = format!("{}/v1", server.url());
     let dir = tempfile::tempdir().unwrap();
     let (providers, mut request) = local_model(dir.path(), &url, "q1");
     let model = request.model.clone().unwrap();
@@ -194,7 +192,7 @@ async fn retry_regenerate_and_translation_keep_source_model_and_branch_ancestry(
         .unwrap();
     assert_end(&until_end(&mut receiver).await, EndStatus::Completed);
     service.shutdown(Duration::from_secs(2)).await;
-    let received = server.await.unwrap();
+    let received = wire_requests(&server, 1);
     assert!(received[0].contains("Translate the following reply into French"));
     assert!(received[0].contains("safety rules"));
     request.translate_turn_id = Some("foreign".into());
@@ -378,6 +376,81 @@ fn painting_choices_keep_earlier_generated_images_and_validate_ids_and_expiry() 
         .reason(),
         Some("expired")
     );
+}
+
+#[tokio::test]
+async fn painting_shared_result_persists_and_retains_failed_save_or_unknown_dispatch() {
+    use crate::tools::painting::Painting;
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==";
+    let reply = || {
+        Reply::json(format!(
+            r#"{{"data":[{{"b64_json":"{PNG}","revised_prompt":"fox"}}],"usage":{{"input_tokens":7}}}}"#
+        ))
+    };
+    let server = upstream(vec![reply(), reply(), Reply::json("{}")]).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (providers, request) = local_model(dir.path(), &server.url(), "draw");
+    let model = request.model.clone().unwrap();
+    let store = Arc::new(SqliteStore::open(dir.path()).unwrap());
+    let turn = reserve(&store, providers.clone(), request);
+    let painting = |turn_id| {
+        Painting::new(
+            providers.resolve(&model).unwrap(),
+            AddressPolicy::default(),
+            Some((store.clone(), turn_id)),
+            Vec::new().into(),
+            None,
+        )
+    };
+    let call = ToolCall {
+        id: "image-call".into(),
+        name: "generate_image".into(),
+        args: json!({"prompt":"fox"}),
+    };
+    let result = painting(turn.turn_id.clone())
+        .execute(&call, &CancellationToken::new())
+        .await;
+    let payload = match result {
+        ToolExecution::Ok { payload, .. } => payload.unwrap(),
+        other @ (ToolExecution::Error { .. } | ToolExecution::Unknown { .. }) => {
+            assert!(
+                matches!(other, ToolExecution::Ok { .. }),
+                "generation must succeed"
+            );
+            return;
+        }
+    };
+    assert_eq!(payload["revisedPrompt"], "fox");
+    assert_eq!(payload["usage"]["inputTokens"], 7);
+    assert_eq!(
+        store.load(&turn.conversation_id).unwrap().turns[0].generated[0]
+            .data
+            .as_deref(),
+        Some(PNG)
+    );
+    let result = painting("missing-turn".into())
+        .execute(&call, &CancellationToken::new())
+        .await;
+    let (code, message) = match result {
+        ToolExecution::Error { code, message, .. } => (code, message),
+        other @ (ToolExecution::Ok { .. } | ToolExecution::Unknown { .. }) => {
+            assert!(
+                matches!(other, ToolExecution::Error { .. }),
+                "failed storage must not report success"
+            );
+            return;
+        }
+    };
+    assert_eq!(code, "image_save_failed");
+    assert!(
+        message.contains("generation occurred")
+            && message.contains("Do not automatically generate again")
+    );
+    let result = painting(turn.turn_id)
+        .execute(&call, &CancellationToken::new())
+        .await;
+    assert!(matches!(result, ToolExecution::Unknown { .. }));
+    assert_eq!(server.seen().len(), 3);
 }
 
 #[test]

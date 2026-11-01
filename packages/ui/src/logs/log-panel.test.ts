@@ -11,7 +11,10 @@ it('reads logs without desktop capability and hides the directory action', async
   const ports = createFakePorts({
     omit: ['desktop'],
     logs: {
-      tail: () => Promise.resolve([{ seq: 1, time: 'now', level: 'INFO', target: 'ui', message: 'Readable log' }]),
+      tail: () =>
+        Promise.resolve([
+          { seq: 1, time: 'now', level: 'INFO', target: 'ui', message: 'Readable log' },
+        ]),
     },
   })
   const kit: KitContext = {

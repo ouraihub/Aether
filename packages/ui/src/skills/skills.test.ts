@@ -132,7 +132,9 @@ async function startAuthoring() {
 }
 
 async function authorMessage(text: string) {
-  await fireEvent.input(screen.getByLabelText('Message to the skill creation assistant'), { target: { value: text } })
+  await fireEvent.input(screen.getByLabelText('Message to the skill creation assistant'), {
+    target: { value: text },
+  })
   await fireEvent.click(screen.getByRole('button', { name: /^Send$/ }))
 }
 
@@ -140,7 +142,11 @@ describe('SkillsSettings', () => {
   it('previews the full text, re-confirms after content_changed, installs with the shown digest', async () => {
     const install = vi.fn()
     install.mockRejectedValueOnce(
-      new KitClientError({ code: 'conflict', message: 'changed', details: { reason: 'content_changed' } }),
+      new KitClientError({
+        code: 'conflict',
+        message: 'changed',
+        details: { reason: 'content_changed' },
+      }),
     )
     install.mockResolvedValueOnce([meta(1)])
     const previews = [preview('old body'), preview('new body')]
@@ -150,7 +156,9 @@ describe('SkillsSettings', () => {
     mount({ skills: { preview: previewFn, install } })
 
     const file = new File(['---\nname: writer\n---\nold body'], 'SKILL.md')
-    await fireEvent.change(screen.getByLabelText('Import SKILL.md or .zip'), { target: { files: [file] } })
+    await fireEvent.change(screen.getByLabelText('Import SKILL.md or .zip'), {
+      target: { files: [file] },
+    })
     await screen.findByText('old body')
     const source = previewFn.mock.calls[0]?.[0]
     expect(source).toMatchObject({ bytes: { fileName: 'SKILL.md' } })
@@ -176,7 +184,9 @@ describe('SkillsSettings', () => {
     mount({ skills: { preview: () => Promise.resolve(scripted), install } })
 
     const file = new File(['zip'], 'tool.zip')
-    await fireEvent.change(screen.getByLabelText('Import SKILL.md or .zip'), { target: { files: [file] } })
+    await fireEvent.change(screen.getByLabelText('Import SKILL.md or .zip'), {
+      target: { files: [file] },
+    })
     await screen.findByText('scripts/run.py')
     expect(screen.getByText('references/guide.md')).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toContain('never runs them automatically')
@@ -187,7 +197,10 @@ describe('SkillsSettings', () => {
   })
 
   it('shows no script notice for a skill with only references', async () => {
-    const plain: Preview = { ...preview('read it'), files: [{ path: 'references/a.md', kind: 'reference', size: 1 }] }
+    const plain: Preview = {
+      ...preview('read it'),
+      files: [{ path: 'references/a.md', kind: 'reference', size: 1 }],
+    }
     mount({ skills: { preview: () => Promise.resolve(plain) } })
     await fireEvent.change(screen.getByLabelText('Import SKILL.md or .zip'), {
       target: { files: [new File(['zip'], 'a.zip')] },
@@ -217,7 +230,9 @@ describe('SkillsSettings', () => {
     await fireEvent.click(screen.getByRole('button', { name: /^Search$/ }))
     await fireEvent.click(await screen.findByRole('button', { name: 'Preview skill' }))
     await screen.findByText('online skill body')
-    expect(search).toHaveBeenCalledWith('https://github.com/team/skills', { signal: expect.any(AbortSignal) })
+    expect(search).toHaveBeenCalledWith('https://github.com/team/skills', {
+      signal: expect.any(AbortSignal),
+    })
     expect(prepare).toHaveBeenCalledWith('https://github.com/team/skills/tree/main/writer', {
       signal: expect.any(AbortSignal),
     })
@@ -244,7 +259,10 @@ describe('SkillsSettings', () => {
     const prepareSystem = vi.fn(async () => ({ source, origin: candidate.path }))
     const previewFn = vi.fn(async () => preview('system skill body'))
     const install = vi.fn()
-    mount({ skillSources: { discover, pickSearchDirectory, prepareSystem }, skills: { preview: previewFn, install } })
+    mount({
+      skillSources: { discover, pickSearchDirectory, prepareSystem },
+      skills: { preview: previewFn, install },
+    })
     await addFrom('Search this computer')
     await waitFor(() => expect(discover).toHaveBeenCalledTimes(1))
     await fireEvent.click(await screen.findByRole('button', { name: 'Choose skill folder' }))
@@ -273,7 +291,11 @@ describe('SkillsSettings', () => {
   it('keeps failed authoring output unsaved and permits another turn', async () => {
     const send = vi.fn<SkillAuthoringPort['send']>(async (_id, _input, _model, emit) => {
       emit({ kind: 'text_delta', text: 'partial work' })
-      emit({ kind: 'end', status: 'failed', error: { code: 'needs_config', message: 'not configured' } })
+      emit({
+        kind: 'end',
+        status: 'failed',
+        error: { code: 'needs_config', message: 'not configured' },
+      })
       return { runId: 'failed-run', conversationId: null, turnId: null }
     })
     const api = authoring({ send })
@@ -286,7 +308,9 @@ describe('SkillsSettings', () => {
     await authorMessage('Create a summary skill')
     await screen.findByRole('alert')
     expect(screen.getByText('partial work')).toBeTruthy()
-    expect(screen.getByLabelText('Message to the skill creation assistant').hasAttribute('disabled')).toBe(false)
+    expect(
+      screen.getByLabelText('Message to the skill creation assistant').hasAttribute('disabled'),
+    ).toBe(false)
     expect(save).not.toHaveBeenCalled()
     expect(previewFn).not.toHaveBeenCalled()
     expect(install).not.toHaveBeenCalled()
@@ -302,7 +326,9 @@ describe('SkillsSettings', () => {
     const source: Source = { bytes: { fileName: 'complete-skill.zip', bytes: [1, 2, 3] } }
     const prepare = vi.fn(async () => ({ source, origin: 'Authoring workspace' }))
     const api = authoring({ send, prepare })
-    const previewFn = vi.fn<(source: Source) => Promise<Preview>>(async () => preview('packaged skill body'))
+    const previewFn = vi.fn<(source: Source) => Promise<Preview>>(async () =>
+      preview('packaged skill body'),
+    )
     const save = vi.fn()
     const install = vi.fn()
     mountAuthoring(api, { skills: { preview: previewFn, save, install } })
@@ -351,17 +377,30 @@ describe('SkillsSettings', () => {
     await screen.findByText(args)
     expect(screen.getByText(/Arguments preview/).textContent).toContain('not sandboxed')
     await fireEvent.click(await screen.findByRole('button', { name: 'Allow once' }))
-    await waitFor(() => expect(api.approve).toHaveBeenCalledWith('authoring-1', 'approval-run', 'call-1', true))
+    await waitFor(() =>
+      expect(api.approve).toHaveBeenCalledWith('authoring-1', 'approval-run', 'call-1', true),
+    )
     emit?.({ kind: 'tool_result', callId: 'call-1', outcome: 'ok', summary: 'validation passed' })
     await screen.findByText('shell: validation passed')
     emit?.({ kind: 'tool_call', callId: 'call-2', name: 'shell', source: 'host' })
-    emit?.({ kind: 'approval_required', callId: 'call-2', name: 'shell', argsPreview: '{"command":"unsafe"}' })
+    emit?.({
+      kind: 'approval_required',
+      callId: 'call-2',
+      name: 'shell',
+      argsPreview: '{"command":"unsafe"}',
+    })
     await fireEvent.click(await screen.findByRole('button', { name: 'Deny' }))
-    await waitFor(() => expect(api.approve).toHaveBeenCalledWith('authoring-1', 'approval-run', 'call-2', false))
+    await waitFor(() =>
+      expect(api.approve).toHaveBeenCalledWith('authoring-1', 'approval-run', 'call-2', false),
+    )
   })
 
   it('cancels and closes authoring workspaces and ignores late run acceptance/output', async () => {
-    const acceptance = Promise.withResolvers<{ runId: string; conversationId: null; turnId: null }>()
+    const acceptance = Promise.withResolvers<{
+      runId: string
+      conversationId: null
+      turnId: null
+    }>()
     let emit: ((event: RunEvent) => void) | undefined
     const send = vi.fn<SkillAuthoringPort['send']>((_id, _input, _model, onEvent) => {
       emit = onEvent
@@ -398,7 +437,9 @@ describe('SkillsSettings', () => {
   })
 
   it('cancels an accepted authoring run before closing its session on unmount', async () => {
-    const api = authoring({ send: vi.fn(async () => ({ runId: 'active-run', conversationId: null, turnId: null })) })
+    const api = authoring({
+      send: vi.fn(async () => ({ runId: 'active-run', conversationId: null, turnId: null })),
+    })
     const view = mountAuthoring(api)
     await startAuthoring()
     await selectAuthoringModel()
@@ -425,7 +466,9 @@ describe('SkillsSettings', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Preview artifact' }))
     await screen.findByRole('alert')
     expect(screen.getByText('Create a writer')).toBeTruthy()
-    expect(screen.getByLabelText('Message to the skill creation assistant').hasAttribute('disabled')).toBe(false)
+    expect(
+      screen.getByLabelText('Message to the skill creation assistant').hasAttribute('disabled'),
+    ).toBe(false)
     expect(install).not.toHaveBeenCalled()
   })
 
@@ -452,7 +495,10 @@ describe('SkillsSettings', () => {
     await addFrom('Import local file or folder')
     await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }))
     await fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }))
-    pending.resolve({ source: { bytes: { fileName: 'late.zip', bytes: [9] } }, origin: 'late folder' })
+    pending.resolve({
+      source: { bytes: { fileName: 'late.zip', bytes: [9] } },
+      origin: 'late folder',
+    })
     await pending.promise
     await addFrom('Import local file or folder')
     expect(previewFn).not.toHaveBeenCalled()
@@ -466,7 +512,9 @@ describe('SkillsSettings', () => {
     mountAuthoring(api, { skills: { save } })
     await startAuthoring()
     await authorMessage('Create a writer')
-    expect((await screen.findByRole('alert')).textContent).toBe('Choose a configured chat model before sending')
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Choose a configured chat model before sending',
+    )
     expect(api.send).not.toHaveBeenCalled()
     expect(save).not.toHaveBeenCalled()
   })
@@ -497,13 +545,17 @@ describe('SkillPicker in ChatPanel', () => {
       }
       return Promise.resolve({ runId: 'r2', conversationId: null, turnId: null })
     })
-    const get = vi.fn(() => Promise.resolve({ ...meta(2), body: 'edited body', license: null, extra: {}, files: [] }))
+    const get = vi.fn(() =>
+      Promise.resolve({ ...meta(2), body: 'edited body', license: null, extra: {}, files: [] }),
+    )
     mount({ chat: { start: run }, skills: { list: () => Promise.resolve([meta(2)]), get } }, [
       { id: 's1', revision: 1 },
     ])
 
     const send = async (text: string) => {
-      await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: text } })
+      await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+        target: { value: text },
+      })
       await fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     }
     await send('one')

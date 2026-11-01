@@ -1,56 +1,46 @@
 //! `Store::probe` against loopback upstreams (docs/11 §5).
 #![expect(clippy::unwrap_used, reason = "a failed unwrap is a failed test")]
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aether_providers::{
     KitErrorCode, ProbeError, ProbeErrorKind, ProbeResult, ProbeTarget, Protocol, Store,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use aether_testkit::{Exhausted, Reply, Request, Server};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 const KEY: &str = "sk-test-0123456789abcdefgh";
 
-/// Request heads (lower-cased) seen by an upstream.
-type Seen = Arc<tokio::sync::Mutex<Vec<String>>>;
+/// A loopback upstream that keeps running while held.
+struct Seen(Server);
 
-/// A loopback upstream answering every request with `response`; `None` never answers.
+impl Seen {
+    /// Request heads (lower-cased) seen so far.
+    fn heads(&self) -> Vec<String> {
+        self.0.seen().iter().map(head).collect()
+    }
+}
+
+/// The lower-cased request head, up to and including the blank line.
+fn head(request: &Request) -> String {
+    let raw = &request.raw;
+    let end = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map_or(raw.len(), |at| at + 4);
+    String::from_utf8_lossy(&raw[..end]).to_lowercase()
+}
+
+/// A loopback upstream answering every request with `response`; `None` stays silent for 60s.
 async fn upstream(response: Option<Vec<u8>>) -> (String, Seen) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-    let seen = Seen::default();
-    let log = Arc::clone(&seen);
-    tokio::spawn(async move {
-        while let Ok((mut socket, _)) = listener.accept().await {
-            let mut head = Vec::new();
-            let mut buf = [0_u8; 1024];
-            while !head.windows(4).any(|w| w == b"\r\n\r\n") {
-                match socket.read(&mut buf).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => head.extend_from_slice(&buf[..n]),
-                }
-            }
-            log.lock()
-                .await
-                .push(String::from_utf8_lossy(&head).to_lowercase());
-            match &response {
-                Some(bytes) => {
-                    // The client may hang up early (oversized body); that is the point.
-                    let _ = socket.write_all(bytes).await;
-                    let _ = socket.shutdown().await;
-                }
-                None => tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(60)).await;
-                    drop(socket);
-                })
-                .await
-                .unwrap(),
-            }
-        }
-    });
-    (base, seen)
+    // The client may hang up early (oversized body); the write error is then ignored.
+    let reply = match response {
+        Some(bytes) => Reply::raw(bytes),
+        None => Reply::default().then_sleep(Duration::from_secs(60)),
+    };
+    let server = Server::script(vec![reply], Exhausted::RepeatLast).await;
+    (server.url(), Seen(server))
 }
 
 fn http(status: &str, body: &str) -> Option<Vec<u8>> {
@@ -125,7 +115,7 @@ async fn parses_the_three_shapes_sorted_and_deduplicated() {
         r#"{"models":[{"name":"gpt-4o"},{"id":"claude-sonnet-4-5"}]}"#,
         r#"["gpt-4o","claude-sonnet-4-5","gpt-4o"]"#,
     ] {
-        let (base, _) = upstream(http("200 OK", body)).await;
+        let (base, _upstream) = upstream(http("200 OK", body)).await;
         let result = probe(&store, draft(&base, Protocol::OpenaiChat, None)).await;
         assert_eq!(result.error, None, "{body}");
         assert_eq!(result.probe_url, format!("{base}/v1/models"));
@@ -138,32 +128,16 @@ async fn parses_the_three_shapes_sorted_and_deduplicated() {
 
 /// A loopback upstream: `GET …/models` lists `listed`, `POST …/messages` answers `messages`.
 async fn relay(listed: &'static str, messages: &'static str) -> (String, Seen) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-    let seen = Seen::default();
-    let log = Arc::clone(&seen);
-    tokio::spawn(async move {
-        while let Ok((mut socket, _)) = listener.accept().await {
-            let mut head = Vec::new();
-            let mut buf = [0_u8; 1024];
-            while !head.windows(4).any(|w| w == b"\r\n\r\n") {
-                match socket.read(&mut buf).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => head.extend_from_slice(&buf[..n]),
-                }
-            }
-            let head = String::from_utf8_lossy(&head).to_lowercase();
-            let reply = if head.starts_with("post /v1/messages ") {
-                http(messages, r#"{"error":{"type":"invalid_request_error"}}"#)
-            } else {
-                http("200 OK", listed)
-            };
-            log.lock().await.push(head);
-            let _ = socket.write_all(&reply.unwrap()).await;
-            let _ = socket.shutdown().await;
-        }
-    });
-    (base, seen)
+    let server = Server::handler(move |request| {
+        let wire = if head(request).starts_with("post /v1/messages ") {
+            http(messages, r#"{"error":{"type":"invalid_request_error"}}"#)
+        } else {
+            http("200 OK", listed)
+        };
+        Reply::raw(wire.unwrap())
+    })
+    .await;
+    (server.url(), Seen(server))
 }
 
 #[tokio::test]
@@ -180,7 +154,7 @@ async fn suggests_messages_only_when_claude_relay_answers_there() {
             Some(Protocol::AnthropicMessages),
             "{status}"
         );
-        let seen = seen.lock().await;
+        let seen = seen.heads();
         let post = seen
             .iter()
             .find(|h| h.starts_with("post /v1/messages "))
@@ -197,7 +171,7 @@ async fn suggests_messages_only_when_claude_relay_answers_there() {
         "401 Unauthorized",
         "500 Internal Server Error",
     ] {
-        let (base, _) = relay(claude, status).await;
+        let (base, _upstream) = relay(claude, status).await;
         let result = probe(&store, draft(&base, Protocol::OpenaiChat, None)).await;
         assert_eq!(result.error, None);
         assert_eq!(result.suggested_protocol, None, "{status}");
@@ -210,7 +184,7 @@ async fn suggests_messages_only_when_claude_relay_answers_there() {
         let (base, seen) = relay(listed, "400 Bad Request").await;
         let result = probe(&store, draft(&base, protocol, None)).await;
         assert_eq!(result.suggested_protocol, None);
-        assert_eq!(seen.lock().await.len(), 1, "only GET /models");
+        assert_eq!(seen.heads().len(), 1, "only GET /models");
     }
 }
 
@@ -238,7 +212,7 @@ async fn maps_upstream_statuses_with_hints_and_masked_text() {
         ("429 Too Many Requests", ProbeErrorKind::RateLimited, None),
         ("502 Bad Gateway", ProbeErrorKind::Status, None),
     ] {
-        let (base, _) = upstream(http(status, &body)).await;
+        let (base, _upstream) = upstream(http(status, &body)).await;
         let result = probe(&store, draft(&base, Protocol::OpenaiChat, Some(&endpoint))).await;
         let error = error(&result);
         assert_eq!(error.kind, kind, "{status}");
@@ -251,7 +225,7 @@ async fn maps_upstream_statuses_with_hints_and_masked_text() {
         );
     }
     // A 404 on an address that already names /v1 is not the missing-v1 mistake.
-    let (base, _) = upstream(http("404 Not Found", "")).await;
+    let (base, _upstream) = upstream(http("404 Not Found", "")).await;
     let result = probe(
         &store,
         draft(&format!("{base}/v1"), Protocol::OpenaiChat, None),
@@ -271,7 +245,7 @@ async fn invalid_and_empty_bodies_are_invalid_body() {
         r#"{"data":[{"x":1}]}"#,
         "{}",
     ] {
-        let (base, _) = upstream(http("200 OK", body)).await;
+        let (base, _upstream) = upstream(http("200 OK", body)).await;
         let result = probe(&store, draft(&base, Protocol::OpenaiChat, None)).await;
         assert_eq!(error(&result).kind, ProbeErrorKind::InvalidBody, "{body}");
     }
@@ -287,13 +261,13 @@ async fn bodies_over_4_mib_are_rejected() {
     let mut streamed = b"HTTP/1.1 200 OK\r\nconnection: close\r\n\r\n".to_vec();
     streamed.extend_from_slice(big.as_bytes());
     for response in [declared, Some(streamed)] {
-        let (base, _) = upstream(response).await;
+        let (base, _upstream) = upstream(response).await;
         let result = probe(&store, draft(&base, Protocol::OpenaiChat, None)).await;
         assert_eq!(error(&result).kind, ProbeErrorKind::InvalidBody);
     }
     // At exactly the cap the same shape is accepted.
     let fits = format!(r#"["{}"]"#, "a".repeat(limit - 4));
-    let (base, _) = upstream(http("200 OK", &fits)).await;
+    let (base, _upstream) = upstream(http("200 OK", &fits)).await;
     let result = probe(&store, draft(&base, Protocol::OpenaiChat, None)).await;
     assert_eq!(result.error, None);
     assert_eq!(result.models.len(), 1);
@@ -331,7 +305,7 @@ async fn unauthorized_keys_fail_over_and_key_id_pins_one() {
             })
             .collect()
     };
-    assert_eq!(auth(&seen.lock().await), ["k1", "k2"]);
+    assert_eq!(auth(&seen.heads()), ["k1", "k2"]);
 
     let key_id = store.list().unwrap()[0].endpoints[0].keys[1].id.clone();
     let pinned = ProbeTarget::Draft {
@@ -341,7 +315,7 @@ async fn unauthorized_keys_fail_over_and_key_id_pins_one() {
         key_id: Some(key_id),
     };
     probe(&store, pinned).await;
-    assert_eq!(auth(&seen.lock().await)[2..], ["k2"]);
+    assert_eq!(auth(&seen.heads())[2..], ["k2"]);
     // Only Saved consumed a rotation reservation; probing a pinned key did not.
     assert_eq!(
         store.endpoint_snapshot(&endpoint).unwrap().api_keys[0].as_str(),
@@ -426,7 +400,7 @@ async fn blocked_addresses_are_reported() {
     let url = format!("https://localhost.:{port}");
     let result = probe(&store, draft(&url, Protocol::OpenaiChat, Some(&endpoint))).await;
     assert_eq!(error(&result).kind, ProbeErrorKind::BlockedAddress);
-    assert!(seen.lock().await.is_empty());
+    assert!(seen.heads().is_empty());
 }
 
 #[tokio::test]
@@ -444,7 +418,7 @@ async fn refused_connection_is_connect_with_network_hint() {
 #[tokio::test]
 async fn silent_upstream_times_out_after_20s() {
     let (_dir, store) = store();
-    let (base, _) = upstream(None).await;
+    let (base, _upstream) = upstream(None).await;
     let started = Instant::now();
     let result = probe(&store, draft(&base, Protocol::OpenaiChat, None)).await;
     assert_eq!(error(&result).kind, ProbeErrorKind::Timeout);
@@ -468,7 +442,7 @@ async fn cancel_aborts_a_pending_request() {
         .unwrap_err();
     assert_eq!(err.code(), KitErrorCode::Cancelled);
     assert!(started.elapsed() < Duration::from_secs(5));
-    assert_eq!(seen.lock().await.len(), 1, "the request was in flight");
+    assert_eq!(seen.heads().len(), 1, "the request was in flight");
 }
 
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
@@ -494,7 +468,7 @@ async fn saved_and_draft_targets_send_the_stored_key() {
     );
     assert_eq!(ids(&probe(&store, reuse).await), ["m"]);
 
-    let anthropic = seen.lock().await[0].clone();
+    let anthropic = seen.heads()[0].clone();
     assert!(anthropic.starts_with("get /v1/models "), "{anthropic}");
     for header in [
         format!("authorization: bearer {KEY}"),
@@ -503,7 +477,7 @@ async fn saved_and_draft_targets_send_the_stored_key() {
     ] {
         assert!(anthropic.contains(&header.to_lowercase()), "{header}");
     }
-    let openai = edited_seen.lock().await[0].clone();
+    let openai = edited_seen.heads()[0].clone();
     assert!(openai.contains(&format!("authorization: bearer {}", KEY.to_lowercase())));
     assert!(!openai.contains("x-api-key"));
 }
@@ -529,7 +503,7 @@ async fn saved_and_draft_targets_send_the_stored_custom_headers() {
     assert_eq!(ids(&probe(&store, reuse).await), ["m"]);
     let fresh = draft(&base, Protocol::OpenaiChat, None);
     assert_eq!(ids(&probe(&store, fresh).await), ["m"]);
-    let seen = seen.lock().await;
+    let seen = seen.heads();
     assert!(seen[0].contains("x-relay-tag: team-a"), "{}", seen[0]);
     assert!(seen[1].contains("x-relay-tag: team-a"), "{}", seen[1]);
     assert!(!seen[2].contains("x-relay-tag"), "{}", seen[2]);

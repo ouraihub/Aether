@@ -2,7 +2,13 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { KitFailure } from '../error.js'
 import type { OutboundHttp } from '../ports.js'
-import { defaultPreferences, fetch, search, validatePreferences, type ResolvedSearchConfig } from './index.js'
+import {
+  defaultPreferences,
+  fetch,
+  search,
+  validatePreferences,
+  type ResolvedSearchConfig,
+} from './index.js'
 import { fetchRequest, parseMcp, parsePage, parseSearchResponse, searchRequest } from './vendor.js'
 
 const config = (provider = 'tavily'): ResolvedSearchConfig => ({
@@ -34,7 +40,12 @@ test('key fallback is limited to 401/403/429 and applies strict Unicode policy a
     const result = await search(
       {
         ...config(),
-        preferences: { ...defaultPreferences(), compression: 'cutoff', cutoffLimit: 100, blacklist: ['BLOCKED.TEST.'] },
+        preferences: {
+          ...defaultPreferences(),
+          compression: 'cutoff',
+          cutoffLimit: 100,
+          blacklist: ['BLOCKED.TEST.'],
+        },
       },
       '  query 😀  ',
       outbound,
@@ -94,7 +105,11 @@ test('direct fetch omits every provider credential and validates every redirect 
   )
   assert.deepEqual(sent, ['https://public.test/start', 'https://public.test/next'])
   assert.deepEqual(checked, sent)
-  assert.deepEqual(result, { title: 'Title', url: 'https://public.test/next', content: 'Hello world' })
+  assert.deepEqual(result, {
+    title: 'Title',
+    url: 'https://public.test/next',
+    content: 'Hello world',
+  })
   let calls = 0
   await assert.rejects(
     fetch(
@@ -244,7 +259,12 @@ test('all provider paths, authentication variants, and response aliases remain i
   const cases: readonly [string, string, string, string][] = [
     ['zhipu', '', 'authorization', 'Bearer first'],
     ['tavily', '/search', 'authorization', 'Bearer first'],
-    ['searxng', '/search?q=query&format=json&language=auto', 'authorization', 'Basic dXNlcjpmaXJzdA=='],
+    [
+      'searxng',
+      '/search?q=query&format=json&language=auto',
+      'authorization',
+      'Basic dXNlcjpmaXJzdA==',
+    ],
     ['exa', '/search', 'x-api-key', 'first'],
     ['exa-mcp', '', 'x-api-key', 'first'],
     ['bocha', '/v1/web-search', 'authorization', 'Bearer first'],
@@ -255,7 +275,11 @@ test('all provider paths, authentication variants, and response aliases remain i
     ['firecrawl', '/v2/search', 'authorization', 'Bearer first'],
   ]
   for (const [provider, suffix, header, expected] of cases) {
-    const request = searchRequest({ ...config(provider), basicAuthUsername: 'user' }, 'query', 'first')
+    const request = searchRequest(
+      { ...config(provider), basicAuthUsername: 'user' },
+      'query',
+      'first',
+    )
     assert.equal(request.url, 'https://api.example.test' + suffix)
     assert.equal(new Headers(request.init.headers).get(header), expected)
   }
@@ -277,9 +301,16 @@ test('all provider paths, authentication variants, and response aliases remain i
       { title: 'Title', url: 'https://source.test/', snippet: 'first\nsecond' },
     ])
   for (const provider of ['bocha', 'querit', 'firecrawl'])
-    assert.throws(() => parseSearchResponse(provider, JSON.stringify({ code: 400, error_code: 400, success: false })), {
-      code: 'upstream',
-    })
+    assert.throws(
+      () =>
+        parseSearchResponse(
+          provider,
+          JSON.stringify({ code: 400, error_code: 400, success: false }),
+        ),
+      {
+        code: 'upstream',
+      },
+    )
   assert.equal(
     parsePage(
       'querit',
@@ -294,7 +325,11 @@ test('each fetch protocol preserves target body and authentication semantics', (
   const target = 'https://source.test/page?q=one'
   const querit = fetchRequest(config('querit'), target, 'key')
   assert.equal(querit.url, 'https://api.example.test/v1/contents')
-  assert.deepEqual(JSON.parse(String(querit.init.body)), { urls: [target], format: 'markdown', extrasMeta: true })
+  assert.deepEqual(JSON.parse(String(querit.init.body)), {
+    urls: [target],
+    format: 'markdown',
+    extrasMeta: true,
+  })
   const jina = fetchRequest(config('jina'), target, undefined)
   assert.equal(jina.url, 'https://api.example.test/' + target)
   assert.equal(new Headers(jina.init.headers).get('x-retain-images'), 'none')
@@ -304,13 +339,20 @@ test('each fetch protocol preserves target body and authentication semantics', (
   assert.deepEqual(JSON.parse(String(firecrawl.init.body)), { url: target, formats: ['markdown'] })
   assert.equal(new Headers(firecrawl.init.headers).get('authorization'), 'Bearer key')
   assert.equal(
-    parsePage('jina', JSON.stringify({ data: { title: 'Title', markdown: '😀'.repeat(24001) } }), target).content,
+    parsePage(
+      'jina',
+      JSON.stringify({ data: { title: 'Title', markdown: '😀'.repeat(24001) } }),
+      target,
+    ).content,
     '😀'.repeat(24000),
   )
   assert.equal(
     parsePage(
       'firecrawl',
-      JSON.stringify({ success: true, data: { markdown: 'Body', metadata: { title: 'Title', sourceURL: target } } }),
+      JSON.stringify({
+        success: true,
+        data: { markdown: 'Body', metadata: { title: 'Title', sourceURL: target } },
+      }),
       'https://other.test/',
     ).url,
     target,
@@ -328,7 +370,11 @@ test('static HTML extraction excludes document metadata and non-visible blocks f
     { title: 'Page title', url: target, content: 'Visible' },
   )
   assert.deepEqual(
-    parsePage('fetch', '<title>Fragment title</title><p>Visible</p><!--noise--><style>noise</style>', target),
+    parsePage(
+      'fetch',
+      '<title>Fragment title</title><p>Visible</p><!--noise--><style>noise</style>',
+      target,
+    ),
     { title: 'Fragment title', url: target, content: 'Visible' },
   )
 })
@@ -342,21 +388,28 @@ test('Exa MCP JSON and SSE retain multiple Highlights paragraphs and reject RPC 
     { title: 'Second', url: 'https://two.test/', snippet: 'other' },
   ]
   assert.deepEqual(parseMcp(JSON.stringify(envelope)), expected)
-  assert.deepEqual(parseMcp('event: message\r\ndata: ' + JSON.stringify(envelope) + '\r\n\r\n'), expected)
+  assert.deepEqual(
+    parseMcp('event: message\r\ndata: ' + JSON.stringify(envelope) + '\r\n\r\n'),
+    expected,
+  )
   assert.throws(() => parseMcp('{"error":{"code":-1}}'), { code: 'upstream' })
   assert.throws(() => parseMcp('{"result":{"isError":true,"content":[]}}'), { code: 'upstream' })
 })
 
 test('public boundaries reject invalid preferences, unsupported capabilities, and missing credentials', async () => {
   for (const rule of ['bad[host', 'https://user@host/path', 'host:80', 'https://host:99999/'])
-    assert.throws(() => validatePreferences({ ...defaultPreferences(), blacklist: [rule] }), { code: 'bad_request' })
+    assert.throws(() => validatePreferences({ ...defaultPreferences(), blacklist: [rule] }), {
+      code: 'bad_request',
+    })
   const http: OutboundHttp = {
     async fetch() {
       throw new Error('must not dispatch')
     },
   }
   await assert.rejects(search(config('fetch'), 'query', http), { code: 'bad_request' })
-  await assert.rejects(search({ ...config(), apiKeys: [] }, 'query', http), { code: 'needs_config' })
+  await assert.rejects(search({ ...config(), apiKeys: [] }, 'query', http), {
+    code: 'needs_config',
+  })
   await assert.rejects(search(config(), '😀'.repeat(4097), http), { code: 'bad_request' })
   await assert.rejects(
     fetch(config('fetch'), 'https://public.test/' + '😀'.repeat(3000), http, async () => {}),

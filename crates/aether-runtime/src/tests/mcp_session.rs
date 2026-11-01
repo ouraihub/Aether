@@ -2,11 +2,16 @@ use super::*;
 
 #[tokio::test]
 async fn host_mcp_false_prevents_even_protocol_discovery() {
-    let model_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let model_url = format!("http://{}/v1", model_listener.local_addr().unwrap());
-    let model_server = tokio::spawn(upstream(model_listener, vec![HELLO, HELLO]));
-    let mcp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let mcp_url = format!("http://{}/mcp", mcp_listener.local_addr().unwrap());
+    let model_server = upstream(vec![sse(HELLO), sse(HELLO)]).await;
+    let model_url = format!("{}/v1", model_server.url());
+    let mut mcp_server = Server::script(
+        vec![Reply::raw(
+            "HTTP/1.1 503 Unavailable\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+        )],
+        Exhausted::Reply(Reply::close()),
+    )
+    .await;
+    let mcp_url = format!("{}/mcp", mcp_server.url());
     let dir = tempfile::tempdir().unwrap();
     let (providers, request) = local_model(dir.path(), &model_url, "hi");
     let mcp_store = Arc::new(aether_mcp_client::Store::open(dir.path()).unwrap());
@@ -47,34 +52,13 @@ async fn host_mcp_false_prevents_even_protocol_discovery() {
         .unwrap();
     assert_end(&until_end(&mut receiver).await, EndStatus::Completed);
     // A real enabled endpoint exists, but even initialize must not be dispatched.
-    assert!(
-        tokio::time::timeout(Duration::from_millis(30), mcp_listener.accept())
-            .await
-            .is_err()
-    );
+    mcp_server.no_request(Duration::from_millis(30)).await;
     // The same runtime and host allow discovery for chat; observe an actual request.
-    let discovery = tokio::spawn(async move {
-        let (mut socket, _) = mcp_listener.accept().await.unwrap();
-        let request = read_request(&mut socket).await;
-        socket
-            .write_all(
-                b"HTTP/1.1 503 Unavailable\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
-            )
-            .await
-            .unwrap();
-        request
-    });
     let (sink, mut receiver) = events();
     service.start(context(&owner), request, sink).await.unwrap();
     assert_end(&until_end(&mut receiver).await, EndStatus::Completed);
-    assert!(
-        tokio::time::timeout(Duration::from_secs(10), discovery)
-            .await
-            .unwrap()
-            .unwrap()
-            .contains("initialize")
-    );
+    assert!(mcp_server.request().await.raw_text().contains("initialize"));
     service.shutdown(Duration::from_secs(2)).await;
     mcp.shutdown().await;
-    model_server.await.unwrap();
+    wire_requests(&model_server, 2);
 }

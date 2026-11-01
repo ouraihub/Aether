@@ -1,4 +1,4 @@
-import type { SearchHit } from './generated/SearchHit'
+import type { SearchHit } from './generated/SearchHit.js'
 
 export type SearchCap = 'search' | 'fetch'
 export interface SearchKey {

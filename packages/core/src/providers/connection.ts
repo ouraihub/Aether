@@ -56,7 +56,9 @@ export function validateUrl(field: string, raw: string): void {
   )
     throw badRequest(field, 'invalid_url')
 }
-export function validateHeaders(input: Readonly<Record<string, string | undefined>>): Record<string, string> {
+export function validateHeaders(
+  input: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
   const entries = Object.entries(input)
   if (entries.length > 20) throw badRequest('headers', 'too_many')
   const headers: Record<string, string> = {}
@@ -117,10 +119,16 @@ export function validateReasoning(
   if (!fits) throw badRequest('reasoning', 'protocol_mismatch')
   const budget = config.budgetTokens
   if (config.dialect === 'anthropic-budget') {
-    if (budget == null || !Number.isSafeInteger(budget) || budget < 1024 || budget >= (maxOutput ?? 4096))
+    if (
+      budget == null ||
+      !Number.isSafeInteger(budget) ||
+      budget < 1024 ||
+      budget >= (maxOutput ?? 4096)
+    )
       throw badRequest('reasoning', 'invalid_budget')
   } else if (config.dialect === 'qwen') {
-    if (budget != null && (!Number.isSafeInteger(budget) || budget < 1)) throw badRequest('reasoning', 'invalid_budget')
+    if (budget != null && (!Number.isSafeInteger(budget) || budget < 1))
+      throw badRequest('reasoning', 'invalid_budget')
   } else if (budget != null) throw badRequest('reasoning', 'unexpected_budget')
 }
 export function validatePricing(pricing: ModelPricing | null, modelType: string): void {
@@ -164,7 +172,8 @@ export function validateModel(model: Model, protocol: Protocol): void {
     if (value !== null && charCount(value.trim()) > 80) throw badRequest(field, 'too_long', 80)
   if (model.nativeWebSearch && (model.modelType !== 'chat' || protocol === 'openai-chat'))
     throw badRequest('nativeWebSearch', 'unsupported_protocol')
-  if (model.reasoning) validateReasoning(model.reasoning, protocol, model.modelType, model.maxOutput)
+  if (model.reasoning)
+    validateReasoning(model.reasoning, protocol, model.modelType, model.maxOutput)
   validatePricing(model.pricing, model.modelType)
 }
 /** Prepares one immutable-by-ownership snapshot; network consumers still enforce address policy. */
@@ -207,6 +216,8 @@ export function prepare(snapshot: ConnectionSnapshot): Connection {
     pricing: model?.pricing ?? null,
     nativeWebSearch: model?.nativeWebSearch ?? false,
     ...(endpoint.imageBaseUrl?.trim() ? { imageBaseUrl: apiBase(endpoint.imageBaseUrl) } : {}),
-    ...(endpoint.imageEditBaseUrl?.trim() ? { imageEditBaseUrl: apiBase(endpoint.imageEditBaseUrl) } : {}),
+    ...(endpoint.imageEditBaseUrl?.trim()
+      ? { imageEditBaseUrl: apiBase(endpoint.imageEditBaseUrl) }
+      : {}),
   }
 }

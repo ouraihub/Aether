@@ -15,7 +15,10 @@ const fresh = mkdtempSync(join(tmpdir(), 'kit-dto-'))
 const test = ['test', '--workspace', '--all-features', 'export_bindings']
 const [command, args] =
   process.platform === 'win32'
-    ? ['cmd.exe', ['/d', '/c', 'node_modules\\@ouraihub\\desktop-kit\\msvc\\cargo-msvc.bat', ...test]]
+    ? [
+        'cmd.exe',
+        ['/d', '/c', 'node_modules\\@ouraihub\\desktop-kit\\msvc\\cargo-msvc.bat', ...test],
+      ]
     : ['cargo', test]
 
 try {
@@ -29,14 +32,19 @@ try {
     cpSync(fresh, committed, { recursive: true })
     process.stdout.write(`dto-check: wrote ${readdirSync(fresh).length} files\n`)
   } else {
-    const list = (dir) => new Set(readdirSync(dir, { recursive: true }).filter((f) => f.endsWith('.ts')))
+    const list = (dir) =>
+      new Set(readdirSync(dir, { recursive: true }).filter((f) => f.endsWith('.ts')))
     const want = list(fresh)
     const have = list(committed)
     const problems = [
       ...[...want].filter((f) => !have.has(f)).map((f) => `missing ${f}`),
       ...[...have].filter((f) => !want.has(f)).map((f) => `stale ${f}`),
       ...[...want]
-        .filter((f) => have.has(f) && readFileSync(join(fresh, f), 'utf8') !== readFileSync(join(committed, f), 'utf8'))
+        .filter(
+          (f) =>
+            have.has(f) &&
+            readFileSync(join(fresh, f), 'utf8') !== readFileSync(join(committed, f), 'utf8'),
+        )
         .map((f) => `changed ${f}`),
     ]
     if (problems.length > 0) {

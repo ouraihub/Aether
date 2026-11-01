@@ -13,7 +13,11 @@ export interface DocumentListOptions {
 }
 export interface DocumentStore {
   get(owner: Actor, collection: string, key: string): Promise<StoredDocument | null>
-  list(owner: Actor, collection: string, options?: DocumentListOptions): Promise<readonly StoredDocument[]>
+  list(
+    owner: Actor,
+    collection: string,
+    options?: DocumentListOptions,
+  ): Promise<readonly StoredDocument[]>
   compareAndSet(
     owner: Actor,
     collection: string,
@@ -32,19 +36,34 @@ function revision(value: number): void {
   if (!Number.isSafeInteger(value) || value < 1 || value >= Number.MAX_SAFE_INTEGER)
     throw badRequest('revision', 'invalid')
 }
-function scope(owner: Actor, collection: string): readonly [string, string, string, string, string] {
+function scope(
+  owner: Actor,
+  collection: string,
+): readonly [string, string, string, string, string] {
   identifier(collection)
-  return [owner.applicationId, JSON.stringify(owner.tenantId), owner.subjectId, ownerKey(owner), collection]
+  return [
+    owner.applicationId,
+    JSON.stringify(owner.tenantId),
+    owner.subjectId,
+    ownerKey(owner),
+    collection,
+  ]
 }
 export async function validateD1Schema(database: D1Database): Promise<void> {
   let row: unknown
   try {
     row = await database.prepare('SELECT version FROM aether_schema WHERE singleton = 1').first()
   } catch {
-    throw new KitFailure('incompatible_db', 'Apply the supported Aether public migration before startup')
+    throw new KitFailure(
+      'incompatible_db',
+      'Apply the supported Aether public migration before startup',
+    )
   }
   if (typeof row !== 'object' || row === null || !('version' in row) || row.version !== 1) {
-    throw new KitFailure('incompatible_db', 'Apply the supported Aether public migration before startup')
+    throw new KitFailure(
+      'incompatible_db',
+      'Apply the supported Aether public migration before startup',
+    )
   }
 }
 /** D1 rows stay below its 2,000,000 byte limit. Large functional documents live
@@ -56,7 +75,10 @@ export class D1DocumentStore implements DocumentStore {
   readonly #database: D1Database
   readonly #blobs: R2Bucket | undefined
   readonly #maxBytes: number
-  constructor(database: D1Database, options: { readonly blobs?: R2Bucket; readonly maxDocumentBytes?: number } = {}) {
+  constructor(
+    database: D1Database,
+    options: { readonly blobs?: R2Bucket; readonly maxDocumentBytes?: number } = {},
+  ) {
     this.#database = database
     this.#blobs = options.blobs
     this.#maxBytes = options.maxDocumentBytes ?? 64 * 1024 * 1024
@@ -85,10 +107,14 @@ export class D1DocumentStore implements DocumentStore {
     if (typeof row.value_json === 'string' && row.blob_key === null) json = row.value_json
     else if (row.value_json === null && typeof row.blob_key === 'string' && this.#blobs) {
       const prefix = await this.#blobPrefix(owner)
-      if (!row.blob_key.startsWith(prefix) || !/^[a-f0-9-]{36}$/u.test(row.blob_key.slice(prefix.length)))
+      if (
+        !row.blob_key.startsWith(prefix) ||
+        !/^[a-f0-9-]{36}$/u.test(row.blob_key.slice(prefix.length))
+      )
         throw new KitFailure('internal', 'Stored document is unreadable')
       const blob = await this.#blobs.get(row.blob_key)
-      if (!blob || blob.size > this.#maxBytes) throw new KitFailure('internal', 'Stored document is unreadable')
+      if (!blob || blob.size > this.#maxBytes)
+        throw new KitFailure('internal', 'Stored document is unreadable')
       const bytes = await blob.arrayBuffer()
       if (bytes.byteLength !== blob.size || bytes.byteLength > this.#maxBytes)
         throw new KitFailure('internal', 'Stored document is unreadable')
@@ -113,9 +139,14 @@ export class D1DocumentStore implements DocumentStore {
       .first()
     return row === null ? null : this.#parse(owner, row)
   }
-  async list(owner: Actor, collection: string, options: DocumentListOptions = {}): Promise<readonly StoredDocument[]> {
+  async list(
+    owner: Actor,
+    collection: string,
+    options: DocumentListOptions = {},
+  ): Promise<readonly StoredDocument[]> {
     const limit = options.limit ?? MAX_LIST
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIST) throw badRequest('limit', 'invalid', MAX_LIST)
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LIST)
+      throw badRequest('limit', 'invalid', MAX_LIST)
     if (options.after !== undefined) identifier(options.after)
     const result = await this.#database
       .prepare(
@@ -123,7 +154,8 @@ export class D1DocumentStore implements DocumentStore {
       )
       .bind(...scope(owner, collection), options.after ?? '', limit)
       .all()
-    if (!result.success || !Array.isArray(result.results)) throw new KitFailure('internal', 'Document listing failed')
+    if (!result.success || !Array.isArray(result.results))
+      throw new KitFailure('internal', 'Document listing failed')
     const documents: StoredDocument[] = []
     // Sequential hydration bounds R2 concurrency/memory to one document at a time.
     for (const row of result.results) documents.push(await this.#parse(owner, row))
@@ -151,7 +183,8 @@ export class D1DocumentStore implements DocumentStore {
     let inline: string | null = json
     let blobKey: string | null = null
     if (bytes.byteLength > INLINE_BYTES) {
-      if (!this.#blobs) throw new KitFailure('needs_config', 'Large documents require an R2 blob binding')
+      if (!this.#blobs)
+        throw new KitFailure('needs_config', 'Large documents require an R2 blob binding')
       blobKey = `${await this.#blobPrefix(owner)}${crypto.randomUUID()}`
       const written = await this.#blobs.put(blobKey, bytes, {
         httpMetadata: { contentType: 'application/json' },
@@ -184,7 +217,12 @@ export class D1DocumentStore implements DocumentStore {
     const parsed: unknown = JSON.parse(json)
     return { key, revision: row.revision, value: parsed }
   }
-  async remove(owner: Actor, collection: string, key: string, expectedRevision: number): Promise<void> {
+  async remove(
+    owner: Actor,
+    collection: string,
+    key: string,
+    expectedRevision: number,
+  ): Promise<void> {
     identifier(key)
     revision(expectedRevision)
     const row = await this.#database
@@ -195,4 +233,61 @@ export class D1DocumentStore implements DocumentStore {
       .first()
     if (row === null) throw new KitFailure('conflict', 'Document revision conflict')
   }
+}
+
+export interface RetryOptions {
+  readonly attempts?: number
+  readonly baseMs?: number
+  /** Injected for deterministic tests; defaults to a real timer. */
+  readonly sleep?: (ms: number) => Promise<unknown>
+  readonly random?: () => number
+}
+/** Marks the store call inside a `retryCas` attempt; only its revision conflicts are retried. */
+export type CasCall = <T>(write: () => Promise<T>) => Promise<T>
+class RevisionConflict extends Error {}
+
+/**
+ * Runs `attempt` until its CAS write succeeds. Each attempt must reload and re-apply its change
+ * to the newest revision. Only a conflict raised by the `cas`-wrapped store call is retried;
+ * semantic conflicts from the attempt itself (stale preparation, finished turn) surface at once.
+ * Retries back off exponentially with jitter, so contending writers spread out instead of
+ * exhausting their attempts in lockstep.
+ */
+export async function retryCas<T>(
+  attempt: (cas: CasCall) => Promise<T>,
+  exhausted: () => KitFailure,
+  options: RetryOptions = {},
+): Promise<T> {
+  const attempts = options.attempts ?? 8,
+    baseMs = options.baseMs ?? 5,
+    random = options.random ?? Math.random
+  const sleep =
+    options.sleep ??
+    ((ms: number) => {
+      const { promise, resolve } = Promise.withResolvers<void>()
+      setTimeout(resolve, ms)
+      return promise
+    })
+  const cas: CasCall = async (write) => {
+    try {
+      return await write()
+    } catch (error) {
+      if (
+        error instanceof KitFailure &&
+        error.code === 'conflict' &&
+        error.details?.reason === undefined
+      )
+        throw new RevisionConflict()
+      throw error
+    }
+  }
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await attempt(cas)
+    } catch (error) {
+      if (!(error instanceof RevisionConflict)) throw error
+    }
+    if (i < attempts - 1) await sleep(baseMs * 2 ** i * (0.5 + random()))
+  }
+  throw exhausted()
 }

@@ -84,7 +84,8 @@
     }
   }
   /** Same rule as the backend `image_base`: optional, http(s), ≤2048 bytes. */
-  const badImage = (url: string) => !!url && (!validUrl(url) || new TextEncoder().encode(url).length > 2048)
+  const badImage = (url: string) =>
+    !!url && (!validUrl(url) || new TextEncoder().encode(url).length > 2048)
   function save() {
     error = null
     const url = baseUrl.trim()
@@ -125,13 +126,20 @@
     <Field.Group>
       <Field.Field>
         <Field.Label for="kit-endpoint-protocol">{t('providers.protocol')}</Field.Label>
-        <Select.Root type="single" value={protocol} onValueChange={(value) => (protocol = value as Protocol)}>
+        <Select.Root
+          type="single"
+          value={protocol}
+          onValueChange={(value) => (protocol = value as Protocol)}
+        >
           <Select.Trigger id="kit-endpoint-protocol" class="w-full"
             >{t(`providers.protocol.${protocol}`)}</Select.Trigger
           >
           <Select.Content>
             <Select.Group>
-              {#each PROTOCOLS as p (p)}<Select.Item value={p} label={t(`providers.protocol.${p}`)} />{/each}
+              {#each PROTOCOLS as p (p)}<Select.Item
+                  value={p}
+                  label={t(`providers.protocol.${p}`)}
+                />{/each}
             </Select.Group>
           </Select.Content>
         </Select.Root>
@@ -139,7 +147,9 @@
       <Field.Field>
         <div class="flex items-center gap-2">
           <Field.Label for="kit-request-url">{t('providers.base_url')}</Field.Label>
-          <span class="bg-primary/10 text-primary rounded-kit px-1.5 text-kit-xs">{t('providers.default')}</span>
+          <span class="bg-primary/10 text-primary rounded-kit px-1.5 text-kit-xs"
+            >{t('providers.default')}</span
+          >
         </div>
         <CopyInput
           id="kit-request-url"
@@ -149,7 +159,9 @@
         />
         {#if validUrl(baseUrl)}
           <Field.Description class="truncate font-mono text-kit-xs"
-            >{t('providers.base_url_hint', { url: `POST ${chatUrl(baseUrl, protocol)}` })}</Field.Description
+            >{t('providers.base_url_hint', {
+              url: `POST ${chatUrl(baseUrl, protocol)}`,
+            })}</Field.Description
           >
         {/if}
       </Field.Field>
@@ -171,26 +183,36 @@
           placeholder="https://example.com"
           bind:value={imageBaseUrl}
         />
-        <Field.Description class="text-kit-xs">{t('providers.image_base_url_hint')}</Field.Description>
+        <Field.Description class="text-kit-xs"
+          >{t('providers.image_base_url_hint')}</Field.Description
+        >
       </Field.Field>
       <Field.Field>
-        <Field.Label for="kit-request-image-edit-url">{t('providers.image_edit_base_url')}</Field.Label>
+        <Field.Label for="kit-request-image-edit-url"
+          >{t('providers.image_edit_base_url')}</Field.Label
+        >
         <CopyInput
           id="kit-request-image-edit-url"
           class="font-mono"
           placeholder="https://example.com"
           bind:value={imageEditBaseUrl}
         />
-        <Field.Description class="text-kit-xs">{t('providers.image_edit_base_url_hint')}</Field.Description>
+        <Field.Description class="text-kit-xs"
+          >{t('providers.image_edit_base_url_hint')}</Field.Description
+        >
       </Field.Field>
       <Field.Field>
         <div class="flex items-center justify-between gap-2">
-          <Field.Label for={json === null ? undefined : 'kit-request-headers'}>{t('providers.headers')}</Field.Label>
+          <Field.Label for={json === null ? undefined : 'kit-request-headers'}
+            >{t('providers.headers')}</Field.Label
+          >
           <Button
             variant="ghost"
             size="icon"
             title={json === null ? t('providers.headers_to_json') : t('providers.headers_to_list')}
-            aria-label={json === null ? t('providers.headers_to_json') : t('providers.headers_to_list')}
+            aria-label={json === null
+              ? t('providers.headers_to_json')
+              : t('providers.headers_to_list')}
             onclick={toggle}
             >{#if json === null}<BracesIcon />{:else}<ListIcon />{/if}</Button
           >
@@ -222,10 +244,16 @@
             variant="ghost"
             class="self-start"
             disabled={rows.length >= 20}
-            onclick={() => rows.push({ name: '', value: '' })}><PlusIcon />{t('providers.headers_add')}</Button
+            onclick={() => rows.push({ name: '', value: '' })}
+            ><PlusIcon />{t('providers.headers_add')}</Button
           >
         {:else}
-          <Textarea id="kit-request-headers" class="min-h-32 font-mono text-xs" spellcheck={false} bind:value={json} />
+          <Textarea
+            id="kit-request-headers"
+            class="min-h-32 font-mono text-xs"
+            spellcheck={false}
+            bind:value={json}
+          />
         {/if}
       </Field.Field>
     </Field.Group>

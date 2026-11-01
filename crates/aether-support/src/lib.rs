@@ -3,6 +3,7 @@
 //!
 //! Design: `docs/10-详细设计-基础与可观测性.md` part 1.
 
+pub mod clock;
 pub mod connection;
 pub mod contract;
 #[cfg(feature = "native")]

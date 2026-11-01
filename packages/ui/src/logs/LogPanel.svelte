@@ -18,7 +18,9 @@
   let entries = $state<LogEntry[]>([])
   let failed = $state(false)
   let problemsOnly = $state(false)
-  const shown = $derived(problemsOnly ? entries.filter((e) => e.level === 'ERROR' || e.level === 'WARN') : entries)
+  const shown = $derived(
+    problemsOnly ? entries.filter((e) => e.level === 'ERROR' || e.level === 'WARN') : entries,
+  )
 
   async function refresh() {
     if (!logs) return
@@ -66,11 +68,15 @@
         {t('logs.problemsOnly')}
       </label>
       {#if ports.desktop}
-        <Button variant="outline" size="sm" onclick={() => void openDir()}>{t('logs.openDir')}</Button>
+        <Button variant="outline" size="sm" onclick={() => void openDir()}
+          >{t('logs.openDir')}</Button
+        >
       {/if}
     </header>
     {#if failed}
-      <Alert variant="destructive"><AlertDescription>{t('logs.loadFailed')}</AlertDescription></Alert>
+      <Alert variant="destructive"
+        ><AlertDescription>{t('logs.loadFailed')}</AlertDescription></Alert
+      >
     {/if}
     {#if shown.length === 0}
       <Empty.Root>

@@ -1,125 +1,38 @@
-import { isContract, type EndStatus, type KitError, type RunEvent, type RunSnapshot } from '@ouraihub/aether-contracts'
+import { isContract, type RunEvent, type RunSnapshot } from '@ouraihub/aether-contracts'
 import { KitFailure, type Approver } from '@ouraihub/aether-core'
 import type { DurableObjectState } from './cloudflare.js'
 import { immutableActor, isActor, ownerKey, type Actor, type WorkerContext } from './context.js'
-import type { AcceptedHandle } from './conversations/index.js'
 import type { PreparedExecution, WorkerRuntime } from './runtime.js'
+import {
+  actorHeader,
+  conflict,
+  encoder,
+  endEvent,
+  interrupted,
+  missing,
+  publicError,
+  statusCode,
+  storageKey,
+  terminal,
+  type Metadata,
+  type Pending,
+} from './coordinator-helpers.js'
 
 type Runtime = Pick<WorkerRuntime, 'prepare' | 'execute' | 'abandon' | 'recover'>
-type Phase = 'creating' | 'accepted' | 'running' | EndStatus
-interface Metadata {
-  phase: Phase
-  runId: string
-  actor: Actor
-  handle: AcceptedHandle | null
-  snapshot: RunSnapshot
-  revision: number
-  acceptedUntil: number | null
-  pending: { callId: string; revision: number } | null
-}
-interface Pending {
-  callId: string
-  revision: number
-  decision: boolean | undefined
-  resolve: ((decision: boolean) => void) | null
-}
-const storageKey = 'run'
-const encoder = new TextEncoder()
-const conflict = (reason: string): KitFailure => new KitFailure('conflict', 'Run state conflict', { reason })
-const missing = (): KitFailure => new KitFailure('not_found', 'Run not found')
-const interrupted = (): KitError => ({
-  code: 'internal',
-  message: 'Run interrupted',
-  details: { reason: 'interrupted', errorId: crypto.randomUUID() },
-})
-
-/** No arbitrary messages/details cross this boundary, even from host KitFailures. */
-function publicError(error: unknown): KitError {
-  const code = error instanceof KitFailure ? error.code : isContract('KitError', error) ? error.code : 'internal'
-  const messages: Record<KitError['code'], string> = {
-    bad_request: 'Invalid request',
-    not_found: 'Run not found',
-    conflict: 'Run state conflict',
-    unsupported: 'Unsupported operation',
-    cancelled: 'Cancelled',
-    unauthorized: 'Authentication required',
-    forbidden: 'Access denied',
-    rate_limited: 'Rate limit exceeded',
-    upstream: 'Upstream execution failed',
-    timeout: 'Execution timed out',
-    network: 'Network execution failed',
-    needs_config: 'Configuration required',
-    budget_exceeded: 'Execution budget exceeded',
-    incompatible_db: 'Incompatible database',
-    internal: 'Internal execution failure',
-  }
-  // Error IDs are generated here, never copied from a potentially secret-bearing host error.
-  const reason = error instanceof KitFailure ? error.details?.reason : undefined
-  const safeReason =
-    reason === 'event_replay_unavailable' || reason === 'subscriber_already_active' || reason === 'approval_not_pending'
-      ? reason
-      : undefined
-  return {
-    code,
-    message: messages[code],
-    ...(code === 'internal' || safeReason
-      ? {
-          details: {
-            ...(safeReason ? { reason: safeReason } : {}),
-            ...(code === 'internal' ? { errorId: crypto.randomUUID() } : {}),
-          },
-        }
-      : {}),
-  }
-}
-function statusCode(error: KitError): number {
-  switch (error.code) {
-    case 'bad_request':
-      return 400
-    case 'unauthorized':
-      return 401
-    case 'forbidden':
-      return 403
-    case 'not_found':
-      return 404
-    case 'conflict':
-      return 409
-    case 'rate_limited':
-      return 429
-    case 'internal':
-    case 'incompatible_db':
-      return 500
-    default:
-      return 422
-  }
-}
-function actorHeader(request: Request): Actor {
-  try {
-    const encoded = request.headers.get('x-aether-actor')
-    if (!encoded || encoded.length > 131072) throw missing()
-    const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0))
-    const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
-    if (!isActor(value)) throw missing()
-    return immutableActor(value)
-  } catch {
-    throw missing()
-  }
-}
-function terminal(phase: Phase): phase is EndStatus {
-  return phase === 'completed' || phase === 'failed' || phase === 'cancelled'
-}
-function endEvent(snapshot: RunSnapshot): RunEvent {
-  if (snapshot.status === 'running') throw conflict('run_not_terminal')
-  return {
-    kind: 'end',
-    status: snapshot.status,
-    ...(snapshot.error ? { error: snapshot.error } : {}),
-    ...(snapshot.exhausted === undefined ? {} : { exhausted: snapshot.exhausted }),
-  }
+/** Time and identifiers the coordinator uses for leases, request ids and error ids. */
+export interface CoordinatorOptions {
+  /** Milliseconds since the epoch; drives the 30 s subscription lease and alarms. */
+  readonly now?: () => number
+  readonly newId?: () => string
 }
 
 /** The router alone constructs this private protocol after authentication. */
-export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) {
+export function createRunCoordinator<Env>(
+  createRuntime: (env: Env) => Runtime,
+  options: CoordinatorOptions = {},
+) {
+  const now = options.now ?? Date.now
+  const newId = options.newId ?? (() => crypto.randomUUID())
   return class RunCoordinator {
     private readonly state: DurableObjectState
     private readonly runtime: Runtime
@@ -147,12 +60,16 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
           try {
             await this.runtime.recover(record.handle, this.context(record.actor))
           } catch (error) {
-            if (!(record.phase === 'creating' && error instanceof KitFailure && error.code === 'not_found'))
+            if (!(
+              record.phase === 'creating' &&
+              error instanceof KitFailure &&
+              error.code === 'not_found'
+            ))
               recoveryFailure = error
           }
         }
         record.phase = 'failed'
-        record.snapshot = { ...record.snapshot, status: 'failed', error: interrupted() }
+        record.snapshot = { ...record.snapshot, status: 'failed', error: interrupted(newId) }
         record.pending = null
         record.acceptedUntil = null
         await this.persist()
@@ -162,7 +79,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
     }
 
     private context(actor: Actor): WorkerContext {
-      return { actor, signal: this.abort.signal, requestId: crypto.randomUUID(), now: Date.now() }
+      return { actor, signal: this.abort.signal, requestId: newId(), now: now() }
     }
     private serialize<T>(action: () => Promise<T>): Promise<T> {
       const result = this.queue.then(action)
@@ -189,9 +106,12 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
       if (!controller) return
       try {
         // Bound an unread subscriber rather than retaining an unbounded transcript in memory.
-        if (controller.desiredSize !== null && controller.desiredSize <= 0) throw new Error('Subscriber stalled')
+        if (controller.desiredSize !== null && controller.desiredSize <= 0)
+          throw new Error('Subscriber stalled')
         controller.enqueue(
-          encoder.encode(`event: run_event\nid: ${++this.sequence}\ndata: ${JSON.stringify(event)}\n\n`),
+          encoder.encode(
+            `event: run_event\nid: ${++this.sequence}\ndata: ${JSON.stringify(event)}\n\n`,
+          ),
         )
       } catch {
         this.close()
@@ -276,7 +196,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
           turnId: record.snapshot.turnId,
           status: snapshot.status,
           cancelRequested: record.snapshot.cancelRequested || snapshot.cancelRequested,
-          ...(snapshot.error ? { error: publicError(snapshot.error) } : {}),
+          ...(snapshot.error ? { error: publicError(snapshot.error, newId) } : {}),
           ...(snapshot.exhausted === undefined ? {} : { exhausted: snapshot.exhausted }),
         }
         record.phase = snapshot.status
@@ -306,7 +226,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
             throw recoveryError
         }
       }
-      await this.finish({ ...record.snapshot, status: 'failed', error: publicError(error) })
+      await this.finish({ ...record.snapshot, status: 'failed', error: publicError(error, newId) })
     }
     private async run(prepared: PreparedExecution, execute: boolean): Promise<void> {
       try {
@@ -369,7 +289,13 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
           revision: 0,
           pending: null,
           acceptedUntil: null,
-          snapshot: { runId, conversationId: null, turnId: null, status: 'running', cancelRequested: false },
+          snapshot: {
+            runId,
+            conversationId: null,
+            turnId: null,
+            status: 'running',
+            cancelRequested: false,
+          },
         }
         await this.persist()
       })
@@ -383,7 +309,8 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
         try {
           const prepared = await this.runtime.prepare(runId, input, this.context(actor), (handle) =>
             this.serialize(async () => {
-              if (!this.metadata || this.abort.signal.aborted) throw new KitFailure('cancelled', 'Cancelled')
+              if (!this.metadata || this.abort.signal.aborted)
+                throw new KitFailure('cancelled', 'Cancelled')
               this.metadata.handle = handle
               this.metadata.snapshot.conversationId = handle?.conversationId ?? null
               this.metadata.snapshot.turnId = handle?.turnId ?? null
@@ -401,7 +328,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
             this.metadata.phase = 'accepted'
             this.metadata.snapshot.conversationId = prepared.accepted.conversationId
             this.metadata.snapshot.turnId = prepared.accepted.turnId
-            this.metadata.acceptedUntil = Date.now() + 30000
+            this.metadata.acceptedUntil = now() + 30000
             await this.state.storage.setAlarm(this.metadata.acceptedUntil)
             await this.persist()
           })
@@ -477,7 +404,8 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
         // A rejected competing subscriber must never cancel the actual owner stream.
         if (
           this.owns(actor) &&
-          ((this.subscribed && !this.operation) || (this.metadata?.phase === 'accepted' && request.signal.aborted))
+          ((this.subscribed && !this.operation) ||
+            (this.metadata?.phase === 'accepted' && request.signal.aborted))
         ) {
           this.close()
           await this.cancelRun()
@@ -540,7 +468,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
         }
         throw missing()
       } catch (error) {
-        const safe = publicError(error)
+        const safe = publicError(error, newId)
         return Response.json(safe, { status: statusCode(safe) })
       }
     }
@@ -548,7 +476,7 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime) 
       await this.ready
       const record = this.metadata
       if (record?.phase === 'accepted' && record.acceptedUntil !== null) {
-        if (Date.now() >= record.acceptedUntil) await this.cancelRun()
+        if (now() >= record.acceptedUntil) await this.cancelRun()
         else
           await this.serialize(async () => {
             if (this.metadata?.phase === 'accepted' && this.metadata.acceptedUntil !== null)

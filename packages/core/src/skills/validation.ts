@@ -14,8 +14,13 @@ export function object(value: unknown, field: string): Record<string, unknown> {
   if (!isObject(value)) throw badRequest(field, 'invalid')
   return value
 }
-export function exact(value: Record<string, unknown>, keys: readonly string[], field: string): void {
-  if (Object.keys(value).some((key) => !keys.includes(key))) throw badRequest(field, 'unknown_field')
+export function exact(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+  field: string,
+): void {
+  if (Object.keys(value).some((key) => !keys.includes(key)))
+    throw badRequest(field, 'unknown_field')
 }
 export function text(value: unknown, field: string): string {
   if (typeof value !== 'string') throw badRequest(field, 'invalid')
@@ -31,7 +36,17 @@ export function strings(value: unknown, field: string): string[] {
   return value.map((entry: unknown) => text(entry, field))
 }
 export function checkSecrets(value: string, field: string): void {
-  const prefixes = ['sk-', 'ghp_', 'gho_', 'github_pat_', 'xoxb-', 'xoxp-', 'AKIA', 'AIza', 'glpat-']
+  const prefixes = [
+    'sk-',
+    'ghp_',
+    'gho_',
+    'github_pat_',
+    'xoxb-',
+    'xoxp-',
+    'AKIA',
+    'AIza',
+    'glpat-',
+  ]
   let lineNumber = 0
   for (const line of value.split('\n')) {
     lineNumber++
@@ -40,17 +55,22 @@ export function checkSecrets(value: string, field: string): void {
     if (
       (line.includes('-----BEGIN') && line.includes('PRIVATE KEY')) ||
       (bearer?.[1] !== undefined && /^[A-Za-z0-9_./+=-]{20}/u.test(bearer[1])) ||
-      tokens.some((token) => token.length >= 20 && prefixes.some((prefix) => token.startsWith(prefix)))
+      tokens.some(
+        (token) => token.length >= 20 && prefixes.some((prefix) => token.startsWith(prefix)),
+      )
     ) {
       throw badRequest(`${field}:${lineNumber}`, 'secret_detected')
     }
   }
 }
-export function validateSkillContent(skill: Pick<ContentIdentity, 'name' | 'description' | 'version' | 'body'>): void {
+export function validateSkillContent(
+  skill: Pick<ContentIdentity, 'name' | 'description' | 'version' | 'body'>,
+): void {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/u.test(skill.name)) throw badRequest('name', 'invalid')
   if ([...skill.description].length < 1 || [...skill.description].length > 500)
     throw badRequest('description', 'invalid', 500)
-  if (skill.version !== null && [...skill.version].length > 32) throw badRequest('version', 'invalid', 32)
+  if (skill.version !== null && [...skill.version].length > 32)
+    throw badRequest('version', 'invalid', 32)
   if (!skill.body.trim()) throw badRequest('body', 'empty')
   if (encoder.encode(skill.body).length > 65536) throw badRequest('body', 'too_large', 65536)
   checkSecrets(skill.name, 'name')
@@ -65,7 +85,8 @@ export function parseManualSave(value: unknown): ManualSave {
     name: text(input.name, 'name'),
     description: text(input.description, 'description'),
     body: text(input.body, 'body'),
-    version: input.version === undefined || input.version === null ? null : text(input.version, 'version'),
+    version:
+      input.version === undefined || input.version === null ? null : text(input.version, 'version'),
     ...(input.id === undefined ? {} : { id: text(input.id, 'id') }),
     ...(input.expectedRevision === undefined
       ? {}
@@ -136,7 +157,8 @@ export function parseSkillMarkdown(raw: string): ParsedSkill {
     fields.set(key, value)
   }
   if (body === undefined) throw badRequest(String(lineNumber + 1), 'frontmatter_unsupported')
-  if (body.split('\n', 1)[0] === '---') throw badRequest(String(lineNumber + 1), 'frontmatter_unsupported')
+  if (body.split('\n', 1)[0] === '---')
+    throw badRequest(String(lineNumber + 1), 'frontmatter_unsupported')
   const name = fields.get('name')
   const description = fields.get('description')
   if (name === undefined) throw badRequest('name', 'missing')
@@ -145,7 +167,14 @@ export function parseSkillMarkdown(raw: string): ParsedSkill {
   fields.delete('name')
   fields.delete('description')
   fields.delete('version')
-  const skill: ParsedSkill = { name, description, version, body, license: null, extra: Object.fromEntries(fields) }
+  const skill: ParsedSkill = {
+    name,
+    description,
+    version,
+    body,
+    license: null,
+    extra: Object.fromEntries(fields),
+  }
   validateSkillContent(skill)
   return skill
 }

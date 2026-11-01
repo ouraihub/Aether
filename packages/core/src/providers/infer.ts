@@ -71,7 +71,7 @@ export function inferModel(modelId: string): Inferred {
   }
 }
 
-// ponytail: bounded known-family rules; add a catalog only when provider-specific metadata is needed.
+// ponytail: bounded known-family rules; add a catalog only when provider metadata is needed.
 export function inferReasoning(
   modelId: string,
   protocol: Protocol,
@@ -96,7 +96,9 @@ export function inferReasoning(
     const adaptive =
       newest ||
       families.some((family) => matches(`claude-${family}-5`)) ||
-      ['opus', 'sonnet'].some((family) => ['6', '7', '8'].some((minor) => matches(`claude-${family}-4-${minor}`)))
+      ['opus', 'sonnet'].some((family) =>
+        ['6', '7', '8'].some((minor) => matches(`claude-${family}-4-${minor}`)),
+      )
     if (adaptive)
       return {
         dialect: 'anthropic-adaptive',
@@ -160,11 +162,13 @@ export function inferReasoning(
   return null
 }
 
-/** Official vendor endpoints switch reasoning with their own fields (docs/28 RT4); a relay serving the same model keeps the OpenAI dialect. */
+/** Official vendor endpoints use their own reasoning fields; relays keep the OpenAI dialect. */
 function vendorReasoning(name: string, baseUrl: string): ReasoningConfig | null {
   const host = (baseUrl.split('://').at(-1) ?? '').split(/[/:?]/)[0]?.toLowerCase() ?? ''
-  const on = (...domains: string[]): boolean => domains.some((domain) => host === domain || host.endsWith(`.${domain}`))
-  const starts = (...prefixes: string[]): boolean => prefixes.some((prefix) => name.startsWith(prefix))
+  const on = (...domains: string[]): boolean =>
+    domains.some((domain) => host === domain || host.endsWith(`.${domain}`))
+  const starts = (...prefixes: string[]): boolean =>
+    prefixes.some((prefix) => name.startsWith(prefix))
   const thinking = (efforts: ReasoningConfig['efforts']): ReasoningConfig => ({
     dialect: 'thinking-type',
     efforts,
@@ -181,7 +185,8 @@ function vendorReasoning(name: string, baseUrl: string): ReasoningConfig | null 
   if (on('volces.com')) return starts('doubao-seed') ? toggle : null
   if (on('moonshot.cn', 'moonshot.ai')) {
     if (starts('kimi-k3')) return thinking(['none', 'low', 'high', 'max'])
-    return starts('kimi-k2-5', 'kimi-k2-6', 'kimi-k2-7', 'kimi-k2-8', 'kimi-k2-9') && !name.includes('-code')
+    return starts('kimi-k2-5', 'kimi-k2-6', 'kimi-k2-7', 'kimi-k2-8', 'kimi-k2-9') &&
+      !name.includes('-code')
       ? toggle
       : null
   }

@@ -1,12 +1,17 @@
-//! Request encoding and stream decoding of the three wire protocols (docs/12 §3).
+//! Request encoding for three wire protocols (docs/12 §3); stream decoding lives in `protocol_decode`.
 
 use std::iter;
 
-use aether_support::{Connection, Protocol, ReasoningDialect, ReasoningEffort};
-use serde_json::{Map, Value, json};
+use aether_support::{Connection, Protocol, ReasoningBlock, ReasoningDialect, ReasoningEffort};
+use serde_json::{Value, json};
 
-use crate::types::{Message, ToolCall, ToolSpec, Usage};
+use crate::types::{Message, ToolCall, ToolSpec};
 use aether_images::ImagePart;
+
+#[path = "protocol_decode.rs"]
+mod decode;
+
+pub use decode::{Decoded, Decoder, Round};
 
 /// Endpoint path below the `/v1` base URL produced by providers.
 pub const fn path(protocol: Protocol) -> &'static str {
@@ -68,10 +73,9 @@ impl Request<'_> {
     pub fn encode(&self) -> Description<'_> {
         let protocol = self.connection.protocol;
         let mut messages = Vec::new();
-        let vision = self.connection.can_vision;
-        encode_messages(protocol, vision, self.history, &mut messages);
+        encode_messages(self, self.history, &mut messages);
         push_user(&mut messages, protocol, self.input, self.images);
-        encode_messages(protocol, vision, self.turn, &mut messages);
+        encode_messages(self, self.turn, &mut messages);
         let has_system = !self.system.is_empty();
         let mut body = match protocol {
             Protocol::AnthropicMessages => {
@@ -96,7 +100,8 @@ impl Request<'_> {
             Protocol::OpenaiResponses => {
                 let mut body = json!({
                     "model": self.model, "max_output_tokens": self.max_output,
-                    "stream": true, "input": messages,
+                    "stream": true, "input": messages, "store": false,
+                    "include": ["reasoning.encrypted_content"],
                 });
                 if has_system {
                     body["instructions"] = json!(self.system);
@@ -165,6 +170,8 @@ impl Request<'_> {
             body,
             headers: &self.connection.headers,
             protocol,
+            endpoint_id: self.connection.endpoint_id.as_deref(),
+            model_id: self.model,
         }
     }
 }
@@ -177,22 +184,27 @@ pub struct Description<'a> {
     pub headers: &'a [(String, String)],
     /// Authentication plan: Bearer, plus Anthropic API key/version for Messages.
     pub protocol: Protocol,
+    /// Origin identity used to retain native reasoning for same-model replay only.
+    pub endpoint_id: Option<&'a str>,
+    /// Actual requested model, including when selected outside a stored connection.
+    pub model_id: &'a str,
 }
 
 /// `vision = false` strips history images: only their text is sent (docs/19 §3).
-fn encode_messages(protocol: Protocol, vision: bool, messages: &[Message], out: &mut Vec<Value>) {
-    if protocol == Protocol::AnthropicMessages {
-        anthropic_messages(vision, messages, out);
+fn encode_messages(request: &Request<'_>, messages: &[Message], out: &mut Vec<Value>) {
+    if request.connection.protocol == Protocol::AnthropicMessages {
+        anthropic_messages(request, messages, out);
     } else {
         for message in messages {
-            openai_message(protocol, vision, message, out);
+            openai_message(request, message, out);
         }
     }
 }
 
 /// Anthropic: consecutive tool results become one user message of `tool_result` blocks,
 /// ordered like the `tool_use` blocks of the assistant message they answer.
-fn anthropic_messages(vision: bool, history: &[Message], out: &mut Vec<Value>) {
+fn anthropic_messages(request: &Request<'_>, history: &[Message], out: &mut Vec<Value>) {
+    let vision = request.connection.can_vision;
     let is_tool = |m: &Message| matches!(m, Message::Tool { .. });
     let mut calls: &[ToolCall] = &[];
     for group in history.chunk_by(|a, b| is_tool(a) && is_tool(b)) {
@@ -215,7 +227,7 @@ fn anthropic_messages(vision: bool, history: &[Message], out: &mut Vec<Value>) {
                 calls = tool_calls;
                 let mut content = Vec::new();
                 for block in reasoning {
-                    if block.protocol == Protocol::AnthropicMessages {
+                    if same_identity(block, request) {
                         content.push(block.value.clone());
                     }
                 }
@@ -292,7 +304,15 @@ fn user_blocks(protocol: Protocol, text: &str, images: &[ImagePart]) -> Vec<Valu
     }
 }
 
-fn openai_message(protocol: Protocol, vision: bool, message: &Message, out: &mut Vec<Value>) {
+fn same_identity(block: &ReasoningBlock, request: &Request<'_>) -> bool {
+    block.protocol == request.connection.protocol
+        && block.endpoint_id == request.connection.endpoint_id
+        && block.model_id.as_deref() == Some(request.model)
+}
+
+fn openai_message(request: &Request<'_>, message: &Message, out: &mut Vec<Value>) {
+    let protocol = request.connection.protocol;
+    let vision = request.connection.can_vision;
     let responses = protocol == Protocol::OpenaiResponses;
     match message {
         Message::User(text) => out.push(json!({ "role": "user", "content": text })),
@@ -306,7 +326,7 @@ fn openai_message(protocol: Protocol, vision: bool, message: &Message, out: &mut
             reasoning,
         } if responses => {
             for block in reasoning {
-                if block.protocol == Protocol::OpenaiResponses {
+                if same_identity(block, request) {
                     out.push(block.value.clone());
                 }
             }
@@ -321,13 +341,13 @@ fn openai_message(protocol: Protocol, vision: bool, message: &Message, out: &mut
             reasoning,
         } => {
             let mut message = json!({ "role": "assistant", "content": text });
+            let reasoning: String = reasoning
+                .iter()
+                .filter(|block| same_identity(block, request))
+                .filter_map(|block| block.value.as_str())
+                .collect();
             if !reasoning.is_empty() {
-                message["reasoning_content"] = reasoning
-                    .iter()
-                    .filter(|b| b.protocol == Protocol::OpenaiChat)
-                    .filter_map(|b| b.value.as_str())
-                    .collect::<String>()
-                    .into();
+                message["reasoning_content"] = reasoning.into();
             }
             if !tool_calls.is_empty() {
                 message["tool_calls"] = tool_calls.iter().map(|c| json!({ "id": c.id, "type": "function", "function": { "name": c.name, "arguments": c.args.to_string() } })).collect();
@@ -358,273 +378,6 @@ fn tool_json(protocol: Protocol, tool: &ToolSpec) -> Value {
             "parameters": parameters,
         }),
     }
-}
-
-/// What one SSE event's data meant.
-pub enum Decoded {
-    /// Assistant text delta.
-    Text(String),
-    /// In-stream upstream error with its raw (unsanitized) message.
-    Error(String),
-    /// Event does not produce display text.
-    Skip,
-}
-
-/// A tool call whose arguments are still streaming in.
-struct Partial {
-    /// Per-protocol fragment key: anthropic block index, openai-chat `index`, responses `item_id`.
-    key: Value,
-    id: String,
-    name: String,
-    args: String,
-}
-
-/// What a finished stream asked for.
-#[derive(Debug, PartialEq)]
-pub struct Round {
-    /// Calls in stream order; with `truncated`, none may run (unparsable args are `null`).
-    pub tool_calls: Vec<ToolCall>,
-    /// The output limit cut the reply, or some call's arguments are not a JSON object.
-    pub truncated: bool,
-}
-
-/// Per-stream state; `done` is set by the protocol's terminal event.
-pub struct Decoder {
-    protocol: Protocol,
-    /// Whether a protocol terminal event was received.
-    pub done: bool,
-    calls: Vec<Partial>,
-    truncated: bool,
-    /// Anthropic `input_tokens` without cache; `usage.input_tokens` adds cache back.
-    base_input: Option<u32>,
-}
-
-impl Decoder {
-    /// Starts one fresh protocol stream.
-    pub const fn new(protocol: Protocol) -> Self {
-        Self {
-            protocol,
-            done: false,
-            calls: Vec::new(),
-            truncated: false,
-            base_input: None,
-        }
-    }
-
-    /// Assembles the calls; each one's arguments must parse as a JSON object (docs/12 §3).
-    pub fn finish(self) -> Round {
-        let mut truncated = self.truncated;
-        let tool_calls = self
-            .calls
-            .into_iter()
-            .map(|call| {
-                // No-argument tools may stream no fragment at all.
-                let args = if call.args.is_empty() {
-                    "{}"
-                } else {
-                    &call.args
-                };
-                let args = serde_json::from_str::<Map<String, Value>>(args).map_or_else(
-                    |_| {
-                        truncated = true;
-                        Value::Null
-                    },
-                    Value::Object,
-                );
-                ToolCall {
-                    id: call.id,
-                    name: call.name,
-                    args,
-                }
-            })
-            .collect();
-        Round {
-            tool_calls,
-            truncated,
-        }
-    }
-
-    fn call(&mut self, key: &Value) -> Option<&mut Partial> {
-        self.calls.iter_mut().find(|call| call.key == *key)
-    }
-
-    fn start(&mut self, key: &Value, id: &Value, name: &Value) {
-        self.calls.push(Partial {
-            key: key.clone(),
-            id: id.as_str().unwrap_or_default().to_owned(),
-            name: name.as_str().unwrap_or_default().to_owned(),
-            args: String::new(),
-        });
-    }
-
-    fn append(&mut self, key: &Value, fragment: &Value) {
-        if let (Some(call), Some(fragment)) = (self.call(key), fragment.as_str()) {
-            call.args.push_str(fragment);
-        }
-    }
-
-    /// openai-chat: fragments of several calls may interleave; `id`/`name` come with the first.
-    fn chat_tool_calls(&mut self, deltas: &Value) {
-        for delta in deltas.as_array().into_iter().flatten() {
-            let key = &delta["index"];
-            let function = &delta["function"];
-            if self.call(key).is_none() {
-                self.start(key, &delta["id"], &function["name"]);
-            }
-            self.append(key, &function["arguments"]);
-        }
-    }
-
-    /// Decodes one SSE data field and updates known usage.
-    pub fn event(&mut self, data: &str, usage: &mut Usage) -> Decoded {
-        if data == "[DONE]" {
-            self.done = true;
-            return Decoded::Skip;
-        }
-        let Ok(v) = serde_json::from_str::<Value>(data) else {
-            return Decoded::Skip;
-        };
-        let kind = v["type"].as_str().unwrap_or_default();
-        match self.protocol {
-            Protocol::AnthropicMessages => match kind {
-                "content_block_start" if v["content_block"]["type"] == "tool_use" => {
-                    let block = &v["content_block"];
-                    self.start(&v["index"], &block["id"], &block["name"]);
-                }
-                "content_block_start"
-                    if v["content_block"]["type"] == "web_search_tool_result"
-                        && v["content_block"]["content"]["type"]
-                            == "web_search_tool_result_error" =>
-                {
-                    return Decoded::Error("native web search failed".to_owned());
-                }
-                "content_block_delta" if v["delta"]["type"] == "input_json_delta" => {
-                    self.append(&v["index"], &v["delta"]["partial_json"]);
-                }
-                "message_start" | "message_delta" => {
-                    let raw = if kind == "message_start" {
-                        &v["message"]["usage"]
-                    } else {
-                        &v["usage"]
-                    };
-                    self.base_input = tokens(&raw["input_tokens"]).or(self.base_input);
-                    usage.output_tokens = tokens(&raw["output_tokens"]).or(usage.output_tokens);
-                    usage.cache_read_tokens =
-                        tokens(&raw["cache_read_input_tokens"]).or(usage.cache_read_tokens);
-                    usage.cache_write_tokens =
-                        tokens(&raw["cache_creation_input_tokens"]).or(usage.cache_write_tokens);
-                    usage.reasoning_tokens =
-                        tokens(&raw["reasoning_tokens"]).or(usage.reasoning_tokens);
-                    // `inputTokens` always includes cache (docs/41 §4).
-                    usage.input_tokens = self.base_input.map(|base| {
-                        base.saturating_add(usage.cache_read_tokens.unwrap_or(0))
-                            .saturating_add(usage.cache_write_tokens.unwrap_or(0))
-                    });
-                    if v["delta"]["stop_reason"] == "max_tokens" {
-                        self.truncated = true;
-                    }
-                }
-                "content_block_delta" if v["delta"]["type"] == "text_delta" => {
-                    return text(&v["delta"]["text"]);
-                }
-                "content_block_delta" if v["delta"]["type"] == "citations_delta" => {
-                    return citation(&v["delta"]["citation"]);
-                }
-                "message_stop" => self.done = true,
-                "error" => return error(&v["error"]),
-                _ => {}
-            },
-            Protocol::OpenaiChat => {
-                if !v["error"].is_null() {
-                    return error(&v["error"]);
-                }
-                let raw = &v["usage"];
-                if raw.is_object() {
-                    usage.input_tokens = tokens(&raw["prompt_tokens"]).or(usage.input_tokens);
-                    usage.output_tokens = tokens(&raw["completion_tokens"]).or(usage.output_tokens);
-                    usage.cache_read_tokens =
-                        tokens(&raw["prompt_tokens_details"]["cached_tokens"])
-                            .or(usage.cache_read_tokens);
-                    usage.cache_write_tokens =
-                        tokens(&raw["prompt_tokens_details"]["cache_write_tokens"])
-                            .or(usage.cache_write_tokens);
-                    usage.reasoning_tokens =
-                        tokens(&raw["completion_tokens_details"]["reasoning_tokens"])
-                            .or(usage.reasoning_tokens);
-                }
-                let choice = &v["choices"][0];
-                self.chat_tool_calls(&choice["delta"]["tool_calls"]);
-                if !choice["finish_reason"].is_null() {
-                    self.done = true;
-                    self.truncated |= choice["finish_reason"] == "length";
-                }
-                return text(&choice["delta"]["content"]);
-            }
-            Protocol::OpenaiResponses => match kind {
-                "response.output_text.delta" => return text(&v["delta"]),
-                "response.output_item.added" if v["item"]["type"] == "function_call" => {
-                    let item = &v["item"];
-                    // `call_id` (not the item id) is what `function_call_output` must echo.
-                    self.start(&item["id"], &item["call_id"], &item["name"]);
-                }
-                "response.function_call_arguments.delta" => self.append(&v["item_id"], &v["delta"]),
-                "response.output_text.annotation.added" => return citation(&v["annotation"]),
-                "response.completed" | "response.incomplete" => {
-                    let raw = &v["response"]["usage"];
-                    usage.input_tokens = tokens(&raw["input_tokens"]);
-                    usage.output_tokens = tokens(&raw["output_tokens"]);
-                    usage.cache_read_tokens = tokens(&raw["input_tokens_details"]["cached_tokens"]);
-                    usage.cache_write_tokens =
-                        tokens(&raw["input_tokens_details"]["cache_write_tokens"]);
-                    usage.reasoning_tokens =
-                        tokens(&raw["output_tokens_details"]["reasoning_tokens"]);
-                    self.done = true;
-                    self.truncated |=
-                        v["response"]["incomplete_details"]["reason"] == "max_output_tokens";
-                }
-                "response.failed" => return error(&v["response"]["error"]),
-                "error" => return error(&v),
-                _ => {}
-            },
-        }
-        Decoded::Skip
-    }
-}
-
-fn text(value: &Value) -> Decoded {
-    match value.as_str() {
-        Some(text) if !text.is_empty() => Decoded::Text(text.to_owned()),
-        _ => Decoded::Skip,
-    }
-}
-
-fn error(value: &Value) -> Decoded {
-    Decoded::Error(
-        value["message"]
-            .as_str()
-            .unwrap_or("upstream error")
-            .to_owned(),
-    )
-}
-
-fn citation(value: &Value) -> Decoded {
-    let Some(url) = value["url"].as_str() else {
-        return Decoded::Skip;
-    };
-    let Ok(parsed) = url::Url::parse(url) else {
-        return Decoded::Skip;
-    };
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Decoded::Skip;
-    }
-    Decoded::Text(format!(
-        " [source](<{}>)",
-        parsed.as_str().replace('<', "%3C").replace('>', "%3E")
-    ))
-}
-
-fn tokens(value: &Value) -> Option<u32> {
-    value.as_u64().and_then(|n| u32::try_from(n).ok())
 }
 
 #[cfg(test)]

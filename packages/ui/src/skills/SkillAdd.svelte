@@ -68,7 +68,9 @@
     invalidate()
   })
 
-  async function act(work: (signal: AbortSignal, current: () => boolean) => Promise<void>): Promise<void> {
+  async function act(
+    work: (signal: AbortSignal, current: () => boolean) => Promise<void>,
+  ): Promise<void> {
     invalidate()
     const id = generation
     const controller = new AbortController()
@@ -130,7 +132,9 @@
   function scan(pick: boolean): Promise<void> {
     return act(async (signal, current) => {
       if (!sources) return
-      const found = await (pick ? sources.pickSearchDirectory({ signal }) : sources.discover({ signal }))
+      const found = await (pick
+        ? sources.pickSearchDirectory({ signal })
+        : sources.discover({ signal }))
       if (current() && found !== null) {
         system = found
         searched = true
@@ -155,7 +159,9 @@
     input.value = ''
     if (!picked) return
     void act(async (_signal, current) => {
-      const next: Source = { bytes: { fileName: picked.name, bytes: [...new Uint8Array(await picked.arrayBuffer())] } }
+      const next: Source = {
+        bytes: { fileName: picked.name, bytes: [...new Uint8Array(await picked.arrayBuffer())] },
+      }
       await showPreview(next, picked.name, current)
     })
   }
@@ -195,7 +201,9 @@
     <DropdownMenu.Trigger>
       {#snippet child({ props })}
         <Button {...props} {disabled}
-          ><Plus data-icon="inline-start" />{t('skills.add.title')}<ChevronDown data-icon="inline-end" /></Button
+          ><Plus data-icon="inline-start" />{t('skills.add.title')}<ChevronDown
+            data-icon="inline-end"
+          /></Button
         >
       {/snippet}
     </DropdownMenu.Trigger>
@@ -203,13 +211,20 @@
       <DropdownMenu.Group>
         {#if sources}
           {#if sources.authoring && ports.providers}
-            <DropdownMenu.Item onSelect={() => open('agent')}><Bot />{t('skills.add.agent')}</DropdownMenu.Item>
+            <DropdownMenu.Item onSelect={() => open('agent')}
+              ><Bot />{t('skills.add.agent')}</DropdownMenu.Item
+            >
           {/if}
-          <DropdownMenu.Item onSelect={() => open('online')}><Search />{t('skills.add.online')}</DropdownMenu.Item>
-          <DropdownMenu.Item onSelect={() => open('system')}><FolderSearch />{t('skills.add.system')}</DropdownMenu.Item
+          <DropdownMenu.Item onSelect={() => open('online')}
+            ><Search />{t('skills.add.online')}</DropdownMenu.Item
+          >
+          <DropdownMenu.Item onSelect={() => open('system')}
+            ><FolderSearch />{t('skills.add.system')}</DropdownMenu.Item
           >
         {/if}
-        <DropdownMenu.Item onSelect={() => open('local')}><Import />{t('skills.add.local')}</DropdownMenu.Item>
+        <DropdownMenu.Item onSelect={() => open('local')}
+          ><Import />{t('skills.add.local')}</DropdownMenu.Item
+        >
       </DropdownMenu.Group>
     </DropdownMenu.Content>
   </DropdownMenu.Root>
@@ -265,10 +280,15 @@
               <div class="flex min-w-0 flex-1 flex-col gap-1">
                 <strong class="text-sm">{candidate.name}</strong>
                 <p class="text-muted-foreground text-xs">{candidate.description}</p>
-                <p class="text-muted-foreground break-all text-xs">{candidate.origin} · {candidate.url}</p>
+                <p class="text-muted-foreground break-all text-xs">
+                  {candidate.origin} · {candidate.url}
+                </p>
               </div>
-              <Button size="sm" variant="outline" disabled={busy} onclick={() => void prepare(candidate)}
-                >{t('skills.add.preview')}</Button
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onclick={() => void prepare(candidate)}>{t('skills.add.preview')}</Button
               >
             </li>
           {/each}
@@ -276,9 +296,13 @@
       {:else if mode === 'system'}
         <p class="text-muted-foreground text-sm">{t('skills.add.system_hint')}</p>
         <div class="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={busy} onclick={() => void scan(false)}>{t('skills.add.rescan')}</Button>
+          <Button variant="outline" disabled={busy} onclick={() => void scan(false)}
+            >{t('skills.add.rescan')}</Button
+          >
           <Button variant="outline" disabled={busy} onclick={() => void scan(true)}
-            ><FolderSearch data-icon="inline-start" />{t('skills.add.pick_search_directory')}</Button
+            ><FolderSearch data-icon="inline-start" />{t(
+              'skills.add.pick_search_directory',
+            )}</Button
           >
         </div>
         <ul class="flex flex-col gap-2" aria-label={t('skills.add.results')}>
@@ -286,10 +310,15 @@
             <li class="flex items-start gap-3 rounded-md border p-3">
               <div class="flex min-w-0 flex-1 flex-col gap-1">
                 <strong class="text-sm">{candidate.name}</strong>
-                <p class="text-muted-foreground break-all text-xs">{candidate.origin} · {candidate.path}</p>
+                <p class="text-muted-foreground break-all text-xs">
+                  {candidate.origin} · {candidate.path}
+                </p>
               </div>
-              <Button size="sm" variant="outline" disabled={busy} onclick={() => void prepareSystem(candidate)}
-                >{t('skills.add.preview')}</Button
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onclick={() => void prepareSystem(candidate)}>{t('skills.add.preview')}</Button
               >
             </li>
           {/each}
@@ -305,12 +334,16 @@
           >
         </div>
       {/if}
-      {#if busy}<p role="status" class="text-muted-foreground text-sm">{t('skills.add.working')}</p>{/if}
+      {#if busy}<p role="status" class="text-muted-foreground text-sm">
+          {t('skills.add.working')}
+        </p>{/if}
       {#if !busy && searched && ((mode === 'online' && candidates.length === 0) || (mode === 'system' && system.length === 0))}
         <p role="status" class="text-muted-foreground text-sm">{t('skills.add.no_results')}</p>
       {/if}
     </div>
-    <Dialog.Footer><Button variant="outline" onclick={close}>{t('common.cancel')}</Button></Dialog.Footer>
+    <Dialog.Footer
+      ><Button variant="outline" onclick={close}>{t('common.cancel')}</Button></Dialog.Footer
+    >
   </Dialog.Content>
 </Dialog.Root>
 

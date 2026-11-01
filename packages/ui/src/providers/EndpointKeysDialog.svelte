@@ -73,8 +73,10 @@
   const enabled = $derived(endpoint.keys.filter((k) => k.enabled).length)
   const name = (key: EndpointKey) => key.label || maskedText(key, t)
   /** Set aside by fill-first and not yet recovered; the host clears it lazily, so the time decides. */
-  const paused = (key: EndpointKey) => key.exhaustedUntil !== null && key.exhaustedUntil > Date.now()
-  const until = (ms: number) => new Date(ms).toLocaleString(i18n.locale, { dateStyle: 'short', timeStyle: 'short' })
+  const paused = (key: EndpointKey) =>
+    key.exhaustedUntil !== null && key.exhaustedUntil > Date.now()
+  const until = (ms: number) =>
+    new Date(ms).toLocaleString(i18n.locale, { dateStyle: 'short', timeStyle: 'short' })
 
   async function run(action: (port: ProvidersPort) => Promise<Provider[]>): Promise<boolean> {
     if (!ports.providers || busy || !open) return false
@@ -123,7 +125,10 @@
       return text
     } catch (error) {
       if (session.isCurrent(token))
-        notify.toast('error', error instanceof Error ? error.message : t('providers.key_reveal_failed'))
+        notify.toast(
+          'error',
+          error instanceof Error ? error.message : t('providers.key_reveal_failed'),
+        )
       return null
     } finally {
       if (session.isCurrent(token)) {
@@ -268,11 +273,14 @@
                 onclick={() => void copy(key)}
               >
                 {#if key.label}<span class="truncate text-sm">{key.label}</span>{/if}
-                <span class="truncate font-mono text-xs text-muted-foreground">{maskedText(key, t)}</span>
-                {#if paused(key) && key.exhaustedUntil !== null}<span class="text-warning truncate text-xs"
-                    >{t('providers.key_exhausted', { time: until(key.exhaustedUntil) })}{key.exhaustedReason
-                      ? ` · ${key.exhaustedReason}`
-                      : ''}</span
+                <span class="truncate font-mono text-xs text-muted-foreground"
+                  >{maskedText(key, t)}</span
+                >
+                {#if paused(key) && key.exhaustedUntil !== null}<span
+                    class="text-warning truncate text-xs"
+                    >{t('providers.key_exhausted', {
+                      time: until(key.exhaustedUntil),
+                    })}{key.exhaustedReason ? ` · ${key.exhaustedReason}` : ''}</span
                   >{/if}
               </button>
               {#if paused(key)}<Button
@@ -280,8 +288,9 @@
                   size="xs"
                   disabled={busy}
                   onclick={() =>
-                    void run((port) => port.saveKey({ endpointId: endpoint.id, id: key.id, restore: true }))}
-                  >{t('providers.key_restore')}</Button
+                    void run((port) =>
+                      port.saveKey({ endpointId: endpoint.id, id: key.id, restore: true }),
+                    )}>{t('providers.key_restore')}</Button
                 >{/if}
               <Button
                 variant="ghost"
@@ -306,7 +315,8 @@
                 title={t('providers.key_delete')}
                 aria-label={t('providers.key_delete')}
                 disabled={busy}
-                onclick={() => void run((port) => port.removeKey(endpoint.id, key.id))}><TrashIcon /></Button
+                onclick={() => void run((port) => port.removeKey(endpoint.id, key.id))}
+                ><TrashIcon /></Button
               >
               <Switch
                 size="sm"
@@ -315,14 +325,18 @@
                 checked={key.enabled}
                 disabled={busy}
                 onCheckedChange={(next) =>
-                  void run((port) => port.saveKey({ endpointId: endpoint.id, id: key.id, enabled: next }))}
+                  void run((port) =>
+                    port.saveKey({ endpointId: endpoint.id, id: key.id, enabled: next }),
+                  )}
               />
             </div>
           {/if}
         </li>
       {:else}
         {#if edit?.id !== null}
-          <li class="text-muted-foreground py-6 text-center text-kit-sm">{t('providers.keys_empty')}</li>
+          <li class="text-muted-foreground py-6 text-center text-kit-sm">
+            {t('providers.keys_empty')}
+          </li>
         {/if}
       {/each}
       {#if edit?.id === null}<li class="min-w-0">{@render editRow(true)}</li>{/if}

@@ -31,13 +31,19 @@ function fixture(overrides: Partial<WebPortsOptions> = {}) {
   const fetch: WebPortsOptions['fetch'] = async (url, init) => {
     const path = new URL(url).pathname
     calls.push({ path, init })
-    if (path === '/api/v1/runs') return Response.json({ accepted, events: '/api/v1/runs/run/events' }, { status: 202 })
+    if (path === '/api/v1/runs')
+      return Response.json({ accepted, events: '/api/v1/runs/run/events' }, { status: 202 })
     if (path.endsWith('/events')) return stream.response
     if (path.endsWith('/cancel') || path.endsWith('/approval')) return Response.json({ ok: true })
-    if (path === '/api/v1/runs/run') return Response.json({ ...accepted, status: 'cancelled', cancelRequested: true })
+    if (path === '/api/v1/runs/run')
+      return Response.json({ ...accepted, status: 'cancelled', cancelRequested: true })
     return Response.json({ code: 'not_found', message: 'Missing' }, { status: 404 })
   }
-  return { stream, calls, ports: createWebPorts({ baseURL, fetch, csrf: 'csrf', chat: true, ...overrides }) }
+  return {
+    stream,
+    calls,
+    ports: createWebPorts({ baseURL, fetch, csrf: 'csrf', chat: true, ...overrides }),
+  }
 }
 
 describe('web RunClient', () => {
@@ -52,7 +58,9 @@ describe('web RunClient', () => {
         if (event.kind === 'end') done.resolve()
       }),
     ).toEqual(accepted)
-    f.stream.push(': ping\r\nevent: run_event\r\nid: 1\r\ndata: {"kind":"text_delta","text":"雪"}\r')
+    f.stream.push(
+      ': ping\r\nevent: run_event\r\nid: 1\r\ndata: {"kind":"text_delta","text":"雪"}\r',
+    )
     f.stream.push(
       '\n\r\nevent: run_event\r\ndata: {"kind":"end","status":"completed"}\r\n\r\ndata: {"kind":"text_delta","text":"stale"}\n\n',
     )
@@ -69,7 +77,9 @@ describe('web RunClient', () => {
   it('does not send an already aborted request', async () => {
     const f = fixture()
     const signal = AbortSignal.abort()
-    await expect(required(f.ports.chat).start(input, () => undefined, { signal })).rejects.toMatchObject({
+    await expect(
+      required(f.ports.chat).start(input, () => undefined, { signal }),
+    ).rejects.toMatchObject({
       code: 'cancelled',
     })
     expect(f.calls).toEqual([])
@@ -97,7 +107,9 @@ describe('web RunClient', () => {
       { signal: controller.signal },
     )
     controller.abort()
-    response.resolve(Response.json({ accepted, events: '/api/v1/runs/run/events' }, { status: 202 }))
+    response.resolve(
+      Response.json({ accepted, events: '/api/v1/runs/run/events' }, { status: 202 }),
+    )
     await expect(pending).resolves.toEqual(accepted)
     stream.push('data: {"kind":"end","status":"cancelled"}\n\n')
     await done.promise
@@ -153,27 +165,40 @@ describe('web RunClient', () => {
       return Response.json({ ...accepted, status: 'running', cancelRequested: true })
     }
     const chat = required(
-      createWebPorts({ baseURL, fetch, csrf: 'x', chat: true, onStreamError: (_, error) => report.resolve(error) })
-        .chat,
+      createWebPorts({
+        baseURL,
+        fetch,
+        csrf: 'x',
+        chat: true,
+        onStreamError: (_, error) => report.resolve(error),
+      }).chat,
     )
     await chat.start(input, (event) => received.push(event))
     stream.close()
-    await expect(report.promise).resolves.toMatchObject({ code: 'network', details: { reason: 'stream_disconnected' } })
+    await expect(report.promise).resolves.toMatchObject({
+      code: 'network',
+      details: { reason: 'stream_disconnected' },
+    })
     expect(received).toEqual([])
   })
 
   it('returns preaccept errors without subscribing or emitting a failure event', async () => {
-    const fetch = vi
-      .fn<WebPortsOptions['fetch']>()
-      .mockImplementation(async () =>
-        Response.json(
-          { code: 'needs_config', message: 'Select a model', details: { reason: 'model_required' } },
-          { status: 400 },
-        ),
-      )
+    const fetch = vi.fn<WebPortsOptions['fetch']>().mockImplementation(async () =>
+      Response.json(
+        {
+          code: 'needs_config',
+          message: 'Select a model',
+          details: { reason: 'model_required' },
+        },
+        { status: 400 },
+      ),
+    )
     const onEvent = vi.fn()
     await expect(
-      required(createWebPorts({ baseURL, fetch, csrf: 'x', chat: true }).chat).start(input, onEvent),
+      required(createWebPorts({ baseURL, fetch, csrf: 'x', chat: true }).chat).start(
+        input,
+        onEvent,
+      ),
     ).rejects.toMatchObject({ code: 'needs_config', details: { reason: 'model_required' } })
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(onEvent).not.toHaveBeenCalled()
@@ -192,8 +217,13 @@ describe('web RunClient', () => {
       return Response.json({ code: 'not_found', message: 'Not found' }, { status: 404 })
     }
     const chat = required(
-      createWebPorts({ baseURL, fetch, csrf: 'x', chat: true, onStreamError: (_, error) => report.resolve(error) })
-        .chat,
+      createWebPorts({
+        baseURL,
+        fetch,
+        csrf: 'x',
+        chat: true,
+        onStreamError: (_, error) => report.resolve(error),
+      }).chat,
     )
     await expect(chat.start(input, onEvent)).resolves.toEqual(accepted)
     await expect(report.promise).resolves.toMatchObject({ code: 'not_found' })
@@ -203,9 +233,15 @@ describe('web RunClient', () => {
 
   it('rejects untrusted transport URLs and malformed acceptance data', async () => {
     const fetch: WebPortsOptions['fetch'] = async () =>
-      Response.json({ accepted, events: 'https://evil.example/api/v1/runs/run/events' }, { status: 202 })
+      Response.json(
+        { accepted, events: 'https://evil.example/api/v1/runs/run/events' },
+        { status: 202 },
+      )
     await expect(
-      required(createWebPorts({ baseURL, fetch, csrf: '', chat: true }).chat).start(input, () => undefined),
+      required(createWebPorts({ baseURL, fetch, csrf: '', chat: true }).chat).start(
+        input,
+        () => undefined,
+      ),
     ).rejects.toMatchObject({ code: 'upstream' })
   })
 })
@@ -233,7 +269,13 @@ describe('web settings and conversation boundaries', () => {
           { status: 403 },
         ),
       )
-    const ports = createWebPorts({ baseURL, fetch, csrf: 'x', conversations: true, providers: true })
+    const ports = createWebPorts({
+      baseURL,
+      fetch,
+      csrf: 'x',
+      conversations: true,
+      providers: true,
+    })
     await expect(required(ports.conversations).get('c')).rejects.toMatchObject({ code: 'upstream' })
     await expect(required(ports.providers).revealKey('k', 'pw')).rejects.toMatchObject({
       code: 'forbidden',
@@ -242,7 +284,9 @@ describe('web settings and conversation boundaries', () => {
   })
 
   it('maps settings writes to canonical routes with explicit CSRF and JSON bodies', async () => {
-    const fetch = vi.fn<WebPortsOptions['fetch']>().mockImplementation(async () => Response.json([]))
+    const fetch = vi
+      .fn<WebPortsOptions['fetch']>()
+      .mockImplementation(async () => Response.json([]))
     const ports = createWebPorts({
       baseURL,
       fetch,
@@ -254,11 +298,17 @@ describe('web settings and conversation boundaries', () => {
     await required(ports.providers).setEnabled('p/a', false)
     await required(ports.skills).reorder(['s'])
     await required(ports.mcpClient).remove('m')
-    expect(fetch.mock.calls.map(([url, init]) => [new URL(url).pathname, init.method, init.body])).toEqual([
+    expect(
+      fetch.mock.calls.map(([url, init]) => [new URL(url).pathname, init.method, init.body]),
+    ).toEqual([
       ['/api/v1/providers/p%2Fa/enabled', 'POST', '{"enabled":false}'],
       ['/api/v1/skills/reorder', 'POST', '{"ids":["s"]}'],
       ['/api/v1/mcp/servers/m', 'DELETE', undefined],
     ])
-    expect(fetch.mock.calls.every(([, init]) => new Headers(init.headers).get('X-CSRF-Token') === 'fresh')).toBe(true)
+    expect(
+      fetch.mock.calls.every(
+        ([, init]) => new Headers(init.headers).get('X-CSRF-Token') === 'fresh',
+      ),
+    ).toBe(true)
   })
 })

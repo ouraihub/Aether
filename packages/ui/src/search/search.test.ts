@@ -2,7 +2,14 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { createI18n } from '../i18n'
 import { createFakePorts } from '../ports'
-import type { CallOptions, SearchCap, SearchKey, SearchPreferences, SearchSave, SearchSettingsDto } from '../ports'
+import type {
+  CallOptions,
+  SearchCap,
+  SearchKey,
+  SearchPreferences,
+  SearchSave,
+  SearchSettingsDto,
+} from '../ports'
 import Harness from './Harness.test.svelte'
 
 const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
@@ -56,8 +63,8 @@ function mount() {
       },
     ],
   })
-  const save = vi.fn<(input: SearchSave, options?: CallOptions) => Promise<SearchSettingsDto>>(async () =>
-    settings('search'),
+  const save = vi.fn<(input: SearchSave, options?: CallOptions) => Promise<SearchSettingsDto>>(
+    async () => settings('search'),
   )
   const saveKey = vi.fn(async (cap: SearchCap, _provider: string, _value: string, id?: string) => {
     if (!id) keys.push({ id: 'new', masked: 'new-mask' })
@@ -103,8 +110,16 @@ test('visible key input saves before checking; empty input never deletes stored 
   await fireEvent.input(input, { target: { value: 'replacement' } })
   await fireEvent.click(c.getByRole('button', { name: 'Check' }))
   await waitFor(() => expect(h.check).toHaveBeenCalledOnce())
-  expect(h.saveKey).toHaveBeenCalledWith('search', 'jina', 'replacement', undefined, expect.any(Object))
-  expect(h.saveKey.mock.invocationCallOrder[0]).toBeLessThan(h.check.mock.invocationCallOrder[0] ?? 0)
+  expect(h.saveKey).toHaveBeenCalledWith(
+    'search',
+    'jina',
+    'replacement',
+    undefined,
+    expect.any(Object),
+  )
+  expect(h.saveKey.mock.invocationCallOrder[0]).toBeLessThan(
+    h.check.mock.invocationCallOrder[0] ?? 0,
+  )
   await fireEvent.click(c.getByRole('button', { name: 'Save' }))
   await waitFor(() => expect(h.save).toHaveBeenCalledTimes(2))
   expect(h.saveKey).toHaveBeenCalledTimes(1)
@@ -130,11 +145,22 @@ test('key manager updates scoped identity, requires password for reveal, and cle
   await fireEvent.click(d.getByRole('button', { name: 'Edit key' }))
   await fireEvent.input(d.getByLabelText('Edit key'), { target: { value: 'updated' } })
   await fireEvent.click(d.getByRole('button', { name: 'Save' }))
-  await waitFor(() => expect(h.saveKey).toHaveBeenCalledWith('search', 'jina', 'updated', 'stored', expect.any(Object)))
+  await waitFor(() =>
+    expect(h.saveKey).toHaveBeenCalledWith(
+      'search',
+      'jina',
+      'updated',
+      'stored',
+      expect.any(Object),
+    ),
+  )
   await fireEvent.click(d.getByRole('button', { name: 'Cancel' }))
   await fireEvent.click(c.getByRole('button', { name: 'Manage keys' }))
   expect(screen.queryByText('private-key')).toBeNull()
-  expect((within(screen.getByRole('dialog')).getByLabelText('Current password') as HTMLInputElement).value).toBe('')
+  expect(
+    (within(screen.getByRole('dialog')).getByLabelText('Current password') as HTMLInputElement)
+      .value,
+  ).toBe('')
 })
 
 test('advanced preferences preserve supported policies and submit blacklist with native search choice', async () => {
@@ -260,17 +286,23 @@ for (const action of ['Reveal', 'Copy'] as const) {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
     await fireEvent.click(c.getByRole('button', { name: 'Manage keys' }))
     let d = within(screen.getByRole('dialog'))
-    await fireEvent.input(d.getByLabelText('Current password'), { target: { value: 'old-password' } })
+    await fireEvent.input(d.getByLabelText('Current password'), {
+      target: { value: 'old-password' },
+    })
     await fireEvent.click(d.getByRole('button', { name: action }))
     await fireEvent.click(d.getByRole('button', { name: 'Cancel' }))
     // The other capability remains available while the old target is pending.
     const other = within(screen.getByRole('region', { name: 'Read webpage' }))
     await fireEvent.click(other.getByRole('button', { name: 'Manage keys' }))
     d = within(screen.getByRole('dialog'))
-    await fireEvent.input(d.getByLabelText('Current password'), { target: { value: 'new-password' } })
+    await fireEvent.input(d.getByLabelText('Current password'), {
+      target: { value: 'new-password' },
+    })
     revealing.resolve('late-secret')
     await waitFor(() =>
-      expect((c.getByRole('button', { name: 'Manage keys' }) as HTMLButtonElement).disabled).toBe(false),
+      expect((c.getByRole('button', { name: 'Manage keys' }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
     )
     expect(screen.queryByText('late-secret')).toBeNull()
     expect((d.getByLabelText('Current password') as HTMLInputElement).value).toBe('new-password')
@@ -295,7 +327,9 @@ test('clipboard completion after close cannot toast into the new dialog', async 
   await fireEvent.click(other.getByRole('button', { name: 'Manage keys' }))
   copying.resolve()
   await waitFor(() =>
-    expect((c.getByRole('button', { name: 'Manage keys' }) as HTMLButtonElement).disabled).toBe(false),
+    expect((c.getByRole('button', { name: 'Manage keys' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
   )
   expect(h.notify.toast).not.toHaveBeenCalled()
 })
@@ -325,7 +359,9 @@ for (const fail of [false, true]) {
       saving.resolve(stale)
     }
     await waitFor(() =>
-      expect((c.getByRole('button', { name: 'Manage keys' }) as HTMLButtonElement).disabled).toBe(false),
+      expect((c.getByRole('button', { name: 'Manage keys' }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
     )
     expect((d.getByLabelText('New key') as HTMLInputElement).value).toBe('new-edit')
     expect(d.queryByRole('alert')).toBeNull()
@@ -341,7 +377,9 @@ test('closing the key dialog clears its secrets and the corresponding inline key
   await fireEvent.input(input, { target: { value: 'inline-secret' } })
   await fireEvent.click(c.getByRole('button', { name: 'Manage keys' }))
   let d = within(screen.getByRole('dialog'))
-  await fireEvent.input(d.getByLabelText('Current password'), { target: { value: 'password-secret' } })
+  await fireEvent.input(d.getByLabelText('Current password'), {
+    target: { value: 'password-secret' },
+  })
   await fireEvent.input(d.getByLabelText('New key'), { target: { value: 'edit-secret' } })
   await fireEvent.click(d.getByRole('button', { name: 'Cancel' }))
   expect(input.value).toBe('')
@@ -364,7 +402,9 @@ test('same-target reopen after a closed reveal failure starts a clean generation
   expect((c.getByRole('button', { name: 'Manage keys' }) as HTMLButtonElement).disabled).toBe(true)
   revealing.reject(new Error('closed request failed'))
   await waitFor(() =>
-    expect((c.getByRole('button', { name: 'Manage keys' }) as HTMLButtonElement).disabled).toBe(false),
+    expect((c.getByRole('button', { name: 'Manage keys' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
   )
   await fireEvent.click(c.getByRole('button', { name: 'Manage keys' }))
   d = within(screen.getByRole('dialog'))
@@ -391,7 +431,9 @@ test('key save cleanup preserves a newly edited identical value and replacement 
   await fireEvent.input(edit, { target: { value: 'other-edit' } })
   await fireEvent.input(edit, { target: { value: 'same-edit' } })
   saving.resolve(h.settings('search'))
-  await waitFor(() => expect((d.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false))
+  await waitFor(() =>
+    expect((d.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false),
+  )
   expect(edit.value).toBe('same-edit')
 })
 
@@ -421,7 +463,9 @@ test('unmount during reveal prevents clipboard writes and secret notifications',
   h.reveal.mockReturnValueOnce(revealing.promise)
   await fireEvent.click(c.getByRole('button', { name: 'Manage keys' }))
   const d = within(screen.getByRole('dialog'))
-  await fireEvent.input(d.getByLabelText('Current password'), { target: { value: 'unmounted-password' } })
+  await fireEvent.input(d.getByLabelText('Current password'), {
+    target: { value: 'unmounted-password' },
+  })
   await fireEvent.click(d.getByRole('button', { name: 'Copy' }))
   h.view.unmount()
   revealing.resolve('unmounted-secret')

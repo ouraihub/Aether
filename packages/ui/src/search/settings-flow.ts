@@ -17,7 +17,8 @@ export async function saveSearchSettings(
   const config = { ...input.config }
   const key = input.key ? { ...input.key } : undefined
   const check = input.check
-  const cancelled = () => new KitClientError({ code: 'cancelled', message: 'Search settings cancelled', details: {} })
+  const cancelled = () =>
+    new KitClientError({ code: 'cancelled', message: 'Search settings cancelled', details: {} })
   function assertCurrent() {
     if (options?.signal?.aborted || !session.isCurrent()) throw cancelled()
   }
@@ -51,12 +52,16 @@ export async function saveSearchSettings(
   assertCurrent()
   session.onConfigSaved(config)
   if (key?.value.trim()) {
-    settings = await step(() => port.saveKey(config.capability, config.provider, key.value, key.keyId, options))
+    settings = await step(() =>
+      port.saveKey(config.capability, config.provider, key.value, key.keyId, options),
+    )
     session.onSettings(settings)
     assertCurrent()
     session.onKeySaved()
   }
-  const checked = check ? await step(() => port.check(config.capability, config.provider, options)) : undefined
+  const checked = check
+    ? await step(() => port.check(config.capability, config.provider, options))
+    : undefined
   assertCurrent()
   return checked ? { settings, checked } : { settings }
 }

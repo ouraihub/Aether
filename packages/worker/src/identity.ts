@@ -1,5 +1,6 @@
 import { badRequest, KitFailure } from '@ouraihub/aether-core'
 import { immutableActor, isActor, ownerKey, type Actor } from './context.ts'
+import { retryCas } from './storage.ts'
 import type { DocumentStore, StoredDocument } from './storage.ts'
 
 export interface IdentityPort {
@@ -12,11 +13,14 @@ export function createIdentityPort(options: {
   readonly resolve: (request: Request) => Promise<Actor | null>
   readonly verifyFresh: (request: Request, actor: Actor) => Promise<boolean>
 }): IdentityPort {
-  if (!options.applicationId) throw new KitFailure('needs_config', 'Identity application is required')
+  if (!options.applicationId)
+    throw new KitFailure('needs_config', 'Identity application is required')
   return Object.freeze({
     async resolve(request: Request): Promise<Actor | null> {
       const actor = await options.resolve(request)
-      return isActor(actor) && actor.applicationId === options.applicationId ? immutableActor(actor) : null
+      return isActor(actor) && actor.applicationId === options.applicationId
+        ? immutableActor(actor)
+        : null
     },
     async verifyFresh(request: Request, actor: Actor): Promise<boolean> {
       if (!isActor(actor) || actor.applicationId !== options.applicationId) return false
@@ -61,10 +65,17 @@ function parseSession(value: unknown): SessionRecord | null {
     value.expiresAt <= value.lastSeenAt
   )
     return null
-  return { actor: value.actor, createdAt: value.createdAt, lastSeenAt: value.lastSeenAt, expiresAt: value.expiresAt }
+  return {
+    actor: value.actor,
+    createdAt: value.createdAt,
+    lastSeenAt: value.lastSeenAt,
+    expiresAt: value.expiresAt,
+  }
 }
 function opaqueToken(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
 }
 async function tokenKey(token: string): Promise<string | null> {
   if (!/^[a-f0-9]{64}$/u.test(token)) return null
@@ -106,8 +117,14 @@ export class OpaqueSessionStore {
     this.#absoluteMs = options.absoluteMs
     this.#now = options.now ?? Date.now
   }
-  async issue(actor: Actor): Promise<{ readonly token: string; readonly actor: Actor; readonly expiresAt: number }> {
-    if (!isActor(actor) || actor.kind !== 'user' || actor.applicationId !== this.#registry.applicationId)
+  async issue(
+    actor: Actor,
+  ): Promise<{ readonly token: string; readonly actor: Actor; readonly expiresAt: number }> {
+    if (
+      !isActor(actor) ||
+      actor.kind !== 'user' ||
+      actor.applicationId !== this.#registry.applicationId
+    )
       throw badRequest('actor', 'invalid_session_owner')
     const token = opaqueToken()
     const key = await tokenKey(token)
@@ -123,9 +140,11 @@ export class OpaqueSessionStore {
     })
     return { token, actor: sessionActor, expiresAt }
   }
-  async #load(
-    token: string,
-  ): Promise<{ readonly key: string; readonly document: StoredDocument; readonly session: SessionRecord } | null> {
+  async #load(token: string): Promise<{
+    readonly key: string
+    readonly document: StoredDocument
+    readonly session: SessionRecord
+  } | null> {
     const key = await tokenKey(token)
     if (key === null) return null
     const document = await this.#store.get(this.#registry, 'opaque_sessions', key)
@@ -146,10 +165,16 @@ export class OpaqueSessionStore {
     const found = await this.#load(token)
     if (!found) return null
     try {
-      await this.#store.compareAndSet(this.#registry, 'opaque_sessions', found.key, found.document.revision, {
-        ...found.session,
-        lastSeenAt: this.#now(),
-      })
+      await this.#store.compareAndSet(
+        this.#registry,
+        'opaque_sessions',
+        found.key,
+        found.document.revision,
+        {
+          ...found.session,
+          lastSeenAt: this.#now(),
+        },
+      )
       return immutableActor(found.session.actor)
     } catch (error) {
       if (error instanceof KitFailure && error.code === 'conflict') return null
@@ -160,17 +185,16 @@ export class OpaqueSessionStore {
     const key = await tokenKey(token)
     if (key === null) return
     // Retry only metadata CAS, never authentication or external side effects.
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const document = await this.#store.get(this.#registry, 'opaque_sessions', key)
-      if (!document) return
-      try {
-        await this.#store.remove(this.#registry, 'opaque_sessions', key, document.revision)
-        return
-      } catch (error) {
-        if (!(error instanceof KitFailure) || error.code !== 'conflict') throw error
-      }
-    }
-    throw new KitFailure('conflict', 'Session revocation conflicted')
+    await retryCas(
+      async (cas) => {
+        const document = await this.#store.get(this.#registry, 'opaque_sessions', key)
+        if (document)
+          await cas(() =>
+            this.#store.remove(this.#registry, 'opaque_sessions', key, document.revision),
+          )
+      },
+      () => new KitFailure('conflict', 'Session revocation conflicted'),
+    )
   }
   async rotate(
     token: string,
@@ -178,7 +202,12 @@ export class OpaqueSessionStore {
     const found = await this.#load(token)
     if (!found) return null
     try {
-      await this.#store.remove(this.#registry, 'opaque_sessions', found.key, found.document.revision)
+      await this.#store.remove(
+        this.#registry,
+        'opaque_sessions',
+        found.key,
+        found.document.revision,
+      )
     } catch (error) {
       if (error instanceof KitFailure && error.code === 'conflict') return null
       throw error

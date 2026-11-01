@@ -1,242 +1,40 @@
 import { KitFailure, badRequest, cancelled } from '../error.js'
 import { isRecord as record } from '../guard.js'
 import type { OutboundHttp } from '../ports.js'
-import { SseParser } from '../sse.js'
-import type { SseEvent } from '../sse.js'
+import {
+  abortFailure,
+  abortable,
+  budget,
+  encoder,
+  invalid,
+  MAX_MESSAGE_BYTES,
+  parseMcpCallResult,
+  normalize,
+  readReply,
+  reason,
+  RequestFailure,
+  RpcFailure,
+} from './protocol.js'
+import type {
+  McpCachedTool,
+  McpCallResult,
+  McpConfigStore,
+  McpServerConfig,
+  McpTool,
+} from './types.js'
 
-export type Approval = 'auto' | 'ask' | 'deny'
-export interface McpTool {
-  readonly server: string
-  readonly slug: string
-  readonly name: string
-  readonly prefixed: string
-  readonly description: string
-  readonly schema: Readonly<Record<string, unknown>>
-  readonly approval: Approval
-}
-export type McpCallResult =
-  | {
-      readonly kind: 'completed'
-      readonly content: readonly Record<string, unknown>[]
-      readonly structuredContent?: Record<string, unknown>
-      readonly isError: boolean
-    }
-  | { readonly kind: 'failed'; readonly code: string; readonly message: string }
-  | { readonly kind: 'unknown'; readonly reason: string }
-export interface McpCachedTool {
-  readonly name: string
-  readonly description: string
-  readonly schema: Readonly<Record<string, unknown>>
-  readonly readOnly: boolean
-  readonly approval: Approval
-  readonly fetchedAt: number
-}
-export interface McpServerConfig {
-  readonly id: string
-  readonly slug: string
-  readonly name: string
-  readonly url: string
-  readonly enabled: boolean
-  readonly trusted: boolean
-  readonly allowPrivate: boolean
-  readonly headers: Readonly<Record<string, string>>
-  readonly query: Readonly<Record<string, string>>
-  readonly tools: readonly McpCachedTool[]
-}
-export interface McpConfigStore {
-  list(): Promise<readonly McpServerConfig[]>
-  get(id: string): Promise<McpServerConfig | null>
-  replaceTools(id: string, tools: readonly McpCachedTool[]): Promise<void>
-}
+export type {
+  Approval,
+  McpCachedTool,
+  McpCallResult,
+  McpConfigStore,
+  McpServerConfig,
+  McpTool,
+} from './types.js'
+export { MAX_MESSAGE_BYTES, parseMcpCallResult } from './protocol.js'
 
-export const MAX_MESSAGE_BYTES = 2 * 1024 * 1024
 const MAX_SCHEMA_BYTES = 32 * 1024
 const CACHE_AGE_MS = 10 * 60 * 1000
-const encoder = new TextEncoder()
-const invalid = (): KitFailure => new KitFailure('upstream', 'Invalid MCP response', { reason: 'invalid_response' })
-const budget = (): KitFailure => new KitFailure('upstream', 'MCP message limit exceeded', { reason: 'budget_exceeded' })
-const abortFailure = (signal: AbortSignal): KitFailure =>
-  signal.reason instanceof KitFailure ? signal.reason : cancelled()
-
-function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
-  const { promise, resolve, reject } = Promise.withResolvers<T>()
-  const abort = () => {
-    signal.removeEventListener('abort', abort)
-    reject(abortFailure(signal))
-  }
-  if (signal.aborted) reject(abortFailure(signal))
-  else signal.addEventListener('abort', abort, { once: true })
-  operation.then(
-    (value) => {
-      signal.removeEventListener('abort', abort)
-      resolve(value)
-    },
-    (error) => {
-      signal.removeEventListener('abort', abort)
-      reject(error)
-    },
-  )
-  return promise
-}
-
-class RequestFailure extends Error {
-  readonly failure: KitFailure
-  readonly dispatched: boolean
-  readonly reason: string
-  readonly expired: boolean
-  constructor(failure: KitFailure, dispatched: boolean, reason: string, expired = false) {
-    super(failure.message)
-    this.failure = failure
-    this.dispatched = dispatched
-    this.reason = reason
-    this.expired = expired
-  }
-}
-class RpcFailure extends KitFailure {
-  readonly rpcCode: number
-  constructor(rpcCode: number) {
-    super('upstream', 'MCP server rejected the request', { reason: 'rpc_error' })
-    this.rpcCode = rpcCode
-  }
-}
-function normalize(error: unknown, signal: AbortSignal): KitFailure {
-  if (signal.aborted) return abortFailure(signal)
-  if (error instanceof RequestFailure) return error.failure
-  return error instanceof KitFailure ? error : new KitFailure('network', 'MCP connection failed')
-}
-function reason(error: KitFailure): string {
-  const detail = error.details?.reason
-  return typeof detail === 'string' && ['invalid_response', 'budget_exceeded'].includes(detail)
-    ? detail
-    : error.code === 'cancelled'
-      ? 'cancelled'
-      : error.code === 'timeout'
-        ? 'timeout'
-        : 'network'
-}
-
-function envelope(value: unknown, id: number): Record<string, unknown> {
-  if (!record(value) || value.jsonrpc !== '2.0' || value.id !== id || 'result' in value === 'error' in value)
-    throw invalid()
-  if ('error' in value) {
-    if (
-      !record(value.error) ||
-      !Number.isInteger(value.error.code) ||
-      typeof value.error.code !== 'number' ||
-      typeof value.error.message !== 'string'
-    )
-      throw invalid()
-    throw new RpcFailure(value.error.code)
-  }
-  if (!record(value.result)) throw invalid()
-  return value.result
-}
-
-/** Validates without flattening nontext content or interpreting extension fields. */
-export function parseMcpCallResult(value: unknown): McpCallResult {
-  if (
-    !record(value) ||
-    !Array.isArray(value.content) ||
-    ('isError' in value && typeof value.isError !== 'boolean') ||
-    ('structuredContent' in value && !record(value.structuredContent))
-  )
-    return { kind: 'unknown', reason: 'invalid_response' }
-  const content: Record<string, unknown>[] = []
-  for (const item of value.content) {
-    if (
-      !record(item) ||
-      typeof item.type !== 'string' ||
-      !item.type.trim() ||
-      (item.type === 'text' && typeof item.text !== 'string')
-    )
-      return { kind: 'unknown', reason: 'invalid_response' }
-    content.push(item)
-  }
-  return {
-    kind: 'completed',
-    content,
-    isError: value.isError === true,
-    ...(record(value.structuredContent) ? { structuredContent: value.structuredContent } : {}),
-  }
-}
-
-async function readReply(response: Response, id: number, signal: AbortSignal): Promise<Record<string, unknown>> {
-  const sse = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() === 'text/event-stream'
-  const contentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase()
-  if (!sse && contentType !== 'application/json') throw invalid()
-  if (!response.body) throw invalid()
-  const reader = response.body.getReader()
-  const parser = sse ? new SseParser(MAX_MESSAGE_BYTES, MAX_MESSAGE_BYTES) : null
-  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false })
-  let text = ''
-  let bytes = 0
-  const eventsReply = (events: readonly { data: string }[]): Record<string, unknown> | null => {
-    for (const event of events) {
-      if (encoder.encode(event.data).byteLength > MAX_MESSAGE_BYTES) throw budget()
-      let value: unknown
-      try {
-        value = JSON.parse(event.data)
-      } catch {
-        throw invalid()
-      }
-      if (!record(value) || value.id !== id) continue
-      return envelope(value, id)
-    }
-    return null
-  }
-  try {
-    for (;;) {
-      const chunk = await abortable(reader.read(), signal)
-      if (chunk.done) break
-      if (parser) {
-        let events: SseEvent[]
-        try {
-          events = parser.feed(chunk.value)
-        } catch (error) {
-          if (error instanceof KitFailure && error.details?.reason === 'sse_limit') throw budget()
-          throw invalid()
-        }
-        const result = eventsReply(events)
-        if (result) return result
-      } else {
-        bytes += chunk.value.byteLength
-        if (bytes > MAX_MESSAGE_BYTES) throw budget()
-        try {
-          text += decoder.decode(chunk.value, { stream: true })
-        } catch {
-          throw invalid()
-        }
-      }
-    }
-    if (parser) {
-      let events: SseEvent[]
-      try {
-        events = parser.finish()
-      } catch (error) {
-        if (error instanceof KitFailure && error.details?.reason === 'sse_limit') throw budget()
-        throw invalid()
-      }
-      const result = eventsReply(events)
-      if (result) return result
-      throw invalid()
-    }
-    try {
-      text += decoder.decode()
-    } catch {
-      throw invalid()
-    }
-    let value: unknown
-    try {
-      value = JSON.parse(text)
-    } catch {
-      throw invalid()
-    }
-    return envelope(value, id)
-  } finally {
-    void reader.cancel().catch(() => {})
-    reader.releaseLock()
-  }
-}
 
 class HttpConnection {
   private sessionId: string | null = null
@@ -270,7 +68,10 @@ class HttpConnection {
 
   private async handshake(signal: AbortSignal): Promise<void> {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(new KitFailure('timeout', 'MCP initialization timed out')), 10_000)
+    const timer = setTimeout(
+      () => controller.abort(new KitFailure('timeout', 'MCP initialization timed out')),
+      10_000,
+    )
     const combined = AbortSignal.any([signal, controller.signal])
     try {
       const result = await this.request(
@@ -314,7 +115,11 @@ class HttpConnection {
     const old = new Map(this.config.tools.map((tool) => [tool.name, tool.approval]))
     let cursor: string | undefined
     for (let page = 0; page < 10; page++) {
-      const result = await this.request('tools/list', cursor === undefined ? {} : { cursor }, signal)
+      const result = await this.request(
+        'tools/list',
+        cursor === undefined ? {} : { cursor },
+        signal,
+      )
       if (!Array.isArray(result.tools)) throw invalid()
       for (const tool of result.tools) {
         if (
@@ -332,7 +137,10 @@ class HttpConnection {
         if (encoder.encode(JSON.stringify(tool.inputSchema)).byteLength > MAX_SCHEMA_BYTES) continue
         tools.push({
           name: tool.name,
-          description: typeof tool.description === 'string' ? [...tool.description].slice(0, 1024).join('') : '',
+          description:
+            typeof tool.description === 'string'
+              ? [...tool.description].slice(0, 1024).join('')
+              : '',
           schema: tool.inputSchema,
           readOnly: record(tool.annotations) && tool.annotations.readOnlyHint === true,
           approval: old.get(tool.name) ?? 'ask',
@@ -340,14 +148,23 @@ class HttpConnection {
         })
       }
       if (!('nextCursor' in result)) return tools
-      if (typeof result.nextCursor !== 'string' || !result.nextCursor || cursors.has(result.nextCursor)) throw invalid()
+      if (
+        typeof result.nextCursor !== 'string' ||
+        !result.nextCursor ||
+        cursors.has(result.nextCursor)
+      )
+        throw invalid()
       cursors.add(result.nextCursor)
       cursor = result.nextCursor
     }
     throw budget()
   }
 
-  async call(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<McpCallResult> {
+  async call(
+    name: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<McpCallResult> {
     try {
       await this.initialize(signal)
     } catch (error) {
@@ -357,7 +174,8 @@ class HttpConnection {
     try {
       return parseMcpCallResult(await this.request('tools/call', { name, arguments: args }, signal))
     } catch (error) {
-      if (error instanceof RpcFailure) return { kind: 'failed', code: String(error.rpcCode), message: error.message }
+      if (error instanceof RpcFailure)
+        return { kind: 'failed', code: String(error.rpcCode), message: error.message }
       if (error instanceof RequestFailure && error.dispatched) {
         if (error.expired) this.reset()
         return { kind: 'unknown', reason: error.reason }
@@ -374,7 +192,10 @@ class HttpConnection {
     notification = false,
   ): Promise<Record<string, unknown>> {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(new KitFailure('timeout', 'MCP request timed out')), 60_000)
+    const timer = setTimeout(
+      () => controller.abort(new KitFailure('timeout', 'MCP request timed out')),
+      60_000,
+    )
     const combined = AbortSignal.any([signal, controller.signal])
     let dispatched = false
     let expired = false
@@ -414,7 +235,10 @@ class HttpConnection {
             (a === 203 && b === 0 && c === 113)
         } else
           restricted =
-            host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || !host.includes('.')
+            host === 'localhost' ||
+            host.endsWith('.localhost') ||
+            host.endsWith('.local') ||
+            !host.includes('.')
         if (restricted) throw badRequest('url', 'blocked_address')
       }
       for (const [key, value] of Object.entries(this.config.query)) url.searchParams.set(key, value)
@@ -440,7 +264,13 @@ class HttpConnection {
       if (combined.aborted) throw abortFailure(combined)
       dispatched = true
       const response = await abortable(
-        this.outbound.fetch(url.toString(), { method: 'POST', headers, body, signal: combined, redirect: 'error' }),
+        this.outbound.fetch(url.toString(), {
+          method: 'POST',
+          headers,
+          body,
+          signal: combined,
+          redirect: 'error',
+        }),
         combined,
       )
       if (!response.ok) {
@@ -502,7 +332,11 @@ export class McpSession {
   tools(): readonly McpTool[] {
     return this.catalogue
   }
-  async call(prefixed: string, args: Record<string, unknown>, signal: AbortSignal): Promise<McpCallResult> {
+  async call(
+    prefixed: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<McpCallResult> {
     const combined = AbortSignal.any([signal, this.shutdownSignal])
     if (combined.aborted) return { kind: 'failed', code: 'cancelled', message: 'Cancelled' }
     const target = this.calls.get(prefixed)
@@ -556,7 +390,9 @@ export class McpRuntime {
 
   private background(id: string): void {
     if (this.closing.signal.aborted || this.refreshing.has(id)) return
-    const task = this.track(this.backgroundTail.catch(() => {}).then(() => this.refresh(id, this.closing.signal)))
+    const task = this.track(
+      this.backgroundTail.catch(() => {}).then(() => this.refresh(id, this.closing.signal)),
+    )
     this.backgroundTail = task
     this.refreshing.set(id, task)
     void task.then(
@@ -566,7 +402,8 @@ export class McpRuntime {
   }
 
   session(signal: AbortSignal): Promise<McpSession> {
-    if (signal.aborted || this.closing.signal.aborted) return Promise.resolve(new McpSession([], this.closing.signal))
+    if (signal.aborted || this.closing.signal.aborted)
+      return Promise.resolve(new McpSession([], this.closing.signal))
     const combined = AbortSignal.any([signal, this.closing.signal])
     return this.track(this.prepare(combined))
   }
@@ -585,7 +422,8 @@ export class McpRuntime {
       const connection = new HttpConnection(this.outbound, config)
       if (config.tools.length) {
         servers.push({ config, connection })
-        if (config.tools.some((tool) => Date.now() - tool.fetchedAt > CACHE_AGE_MS)) this.background(config.id)
+        if (config.tools.some((tool) => Date.now() - tool.fetchedAt > CACHE_AGE_MS))
+          this.background(config.id)
       } else {
         try {
           const tools = await connection.discover(signal)

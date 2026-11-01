@@ -5,3 +5,5 @@ packages/contracts/src/generated/
 packages/contracts/src/validators.js
 packages/contracts/src/validation.ts
 packages/contracts/src/index.ts
+# Golden run traces, rewritten by `AETHER_WRITE_TRACES=1` and compared as parsed JSON.
+packages/core/tests/traces.json

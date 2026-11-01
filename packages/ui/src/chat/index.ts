@@ -1,2 +1,6 @@
-// ChatPanel (docs/16 §4.2); it renders ToolCallItem, ApprovalCard and SkillPicker itself.
 export { default as ChatPanel } from './ChatPanel.svelte'
+export { default as ChatSurface } from './ChatSurface.svelte'
+export { default as ChatComposer } from './ChatComposer.svelte'
+export { default as ChatMessage } from './ChatMessage.svelte'
+export { default as ReasoningControl } from './ReasoningControl.svelte'
+export { default as UsageControl } from './UsageControl.svelte'

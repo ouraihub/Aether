@@ -24,7 +24,11 @@ export interface SearchPort {
   revealNeedsPassword?: boolean
   settings(capability: SearchCap, options?: CallOptions): Promise<SearchSettingsDto>
   save(input: SearchSave, options?: CallOptions): Promise<SearchSettingsDto>
-  setDefault(capability: SearchCap, provider: string, options?: CallOptions): Promise<SearchSettingsDto>
+  setDefault(
+    capability: SearchCap,
+    provider: string,
+    options?: CallOptions,
+  ): Promise<SearchSettingsDto>
   savePreferences(input: SearchPreferences, options?: CallOptions): Promise<SearchPreferences>
   saveKey(
     capability: SearchCap,
@@ -33,7 +37,12 @@ export interface SearchPort {
     keyId?: string,
     options?: CallOptions,
   ): Promise<SearchSettingsDto>
-  removeKey(capability: SearchCap, provider: string, keyId: string, options?: CallOptions): Promise<SearchSettingsDto>
+  removeKey(
+    capability: SearchCap,
+    provider: string,
+    keyId: string,
+    options?: CallOptions,
+  ): Promise<SearchSettingsDto>
   reveal(
     capability: SearchCap,
     provider: string,

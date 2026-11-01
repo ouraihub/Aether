@@ -6,8 +6,16 @@ use crate::{
     policy::{check_blacklist, cutoff, process_hits},
     vendor,
 };
+use aether_testkit::{Exhausted, Gate, Reply, Server};
 use serde_json::json;
+use std::time::Duration;
 use zeroize::Zeroizing;
+
+/// A request past the script fails loudly instead of hanging.
+fn unexpected() -> Exhausted {
+    Exhausted::Reply(Reply::status(500, "unexpected request"))
+}
+
 #[test]
 fn each_provider_preserves_its_result_content_and_rejects_bad_shape() {
     let cases = [
@@ -193,33 +201,11 @@ fn scoped_keys_are_ciphertext_masked_bounded_and_survive_restart() {
 }
 #[tokio::test]
 async fn real_local_http_search_honors_basic_password_and_result_limit() {
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
-    };
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let server = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let mut bytes = vec![0; 8192];
-        let n = stream.read(&mut bytes).await.unwrap();
-        let request = String::from_utf8_lossy(&bytes[..n]).to_string();
-        let body = "{\"results\":[{\"title\":\"A\",\"url\":\"https://example.com\",\"content\":\"body\"},{\"title\":\"B\",\"url\":\"https://other.com\",\"content\":\"other\"}]}";
-        stream
-            .write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                )
-                .as_bytes(),
-            )
-            .await
-            .unwrap();
-        request
-    });
+    let body = "{\"results\":[{\"title\":\"A\",\"url\":\"https://example.com\",\"content\":\"body\"},{\"title\":\"B\",\"url\":\"https://other.com\",\"content\":\"other\"}]}";
+    let mut server = Server::script(vec![Reply::json(body)], unexpected()).await;
     let config = ResolvedConfig {
         provider: "searxng".into(),
-        base_url: format!("http://127.0.0.1:{port}"),
+        base_url: server.url(),
         api_keys: vec![Zeroizing::new("password".into())],
         basic_auth_username: Some("user".into()),
         preferences: SearchPreferences {
@@ -231,9 +217,13 @@ async fn real_local_http_search_honors_basic_password_and_result_limit() {
     let result = crate::search::search(config, "hello ?/").await.unwrap();
     assert_eq!(result.hits.len(), 1);
     assert_eq!(result.hits[0].snippet, "body");
-    let request = server.await.unwrap().to_lowercase();
-    assert!(request.contains("authorization: basic dxnlcjpwyxnzd29yza=="));
-    assert!(request.starts_with("get /search?"));
+    let request = server.request().await;
+    assert_eq!(
+        request.header("authorization"),
+        Some("Basic dXNlcjpwYXNzd29yZA==")
+    );
+    assert_eq!(request.method, "GET");
+    assert!(request.target.starts_with("/search?"));
 }
 
 #[test]
@@ -307,35 +297,26 @@ fn preferences_reject_invalid_rules_and_filter_before_unicode_cutoff() {
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn real_keys_retry_only_explicit_status_and_rotate_next_start() {
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
-    };
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        let mut requests = Vec::new();
-        for status in [401, 200, 200, 500, 429, 403] {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut bytes = vec![0; 8192];
-            let n = stream.read(&mut bytes).await.unwrap();
-            requests.push(String::from_utf8_lossy(&bytes[..n]).to_lowercase());
-            let body = if status == 200 {
-                "{\"results\":[{\"title\":\"A\",\"url\":\"https://example.com\",\"text\":\"body\"}]}"
-            } else {
-                "rejected"
-            };
-            stream.write_all(format!("HTTP/1.1 {status} Status\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
-        }
-        requests
-    });
+    let hits =
+        "{\"results\":[{\"title\":\"A\",\"url\":\"https://example.com\",\"text\":\"body\"}]}";
+    let server = Server::script(
+        [401, 200, 200, 500, 429, 403]
+            .into_iter()
+            .map(|status| match status {
+                200 => Reply::json(hits),
+                _ => Reply::status(status, "rejected"),
+            })
+            .collect(),
+        unexpected(),
+    )
+    .await;
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(&dir.path().join("search.db"), AddressPolicy::default()).unwrap();
     store
         .save(SearchSave {
             capability: SearchCap::Search,
             provider: "exa".into(),
-            base_url: Some(format!("http://{addr}")),
+            base_url: Some(server.url()),
             basic_auth_username: None,
         })
         .unwrap();
@@ -359,7 +340,8 @@ async fn real_keys_retry_only_explicit_status_and_rotate_next_start() {
         store.search("query").await.unwrap_err().details().status(),
         Some(403)
     );
-    let requests = server.await.unwrap();
+    let requests = server.seen();
+    assert_eq!(requests.len(), 6);
     for (request, key) in requests.iter().zip([
         "first-key",
         "second-key",
@@ -368,46 +350,33 @@ async fn real_keys_retry_only_explicit_status_and_rotate_next_start() {
         "second-key",
         "first-key",
     ]) {
-        assert!(request.contains(&format!("x-api-key: {key}")));
+        assert_eq!(request.header("x-api-key"), Some(key));
     }
 }
 
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn fetch_retries_keys_but_network_and_cancel_do_not() {
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
-        time::{Duration, timeout},
-    };
+    use tokio::{io::AsyncReadExt, net::TcpListener, time::timeout};
+    let body = "{\"data\":{\"content\":\"page body\"}}";
+    let mut keyed = Server::script(
+        vec![
+            Reply::status(403, body),
+            Reply::json(body),
+            // Hang up without a byte: a network failure must not move on to the next key.
+            Reply::close(),
+        ],
+        unexpected(),
+    )
+    .await;
+    // Cancellation is observed as the client closing its socket, so this last upstream stays
+    // bespoke: it reads the request, then waits for EOF and checks no next key is sent.
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let (no_retry_tx, no_retry_rx) = tokio::sync::oneshot::channel();
     let (sent_tx, sent_rx) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
-        for (status, key) in [(403, "one-key"), (200, "two-key")] {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut bytes = [0; 8192];
-            let n = stream.read(&mut bytes).await.unwrap();
-            assert!(
-                String::from_utf8_lossy(&bytes[..n])
-                    .to_lowercase()
-                    .contains(&format!("authorization: bearer {key}"))
-            );
-            let body = "{\"data\":{\"content\":\"page body\"}}";
-            stream.write_all(format!("HTTP/1.1 {status} Status\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
-        }
         let (mut stream, _) = listener.accept().await.unwrap();
         let mut bytes = [0; 8192];
-        assert!(stream.read(&mut bytes).await.unwrap() > 0);
-        drop(stream);
-        assert!(
-            timeout(Duration::from_millis(150), listener.accept())
-                .await
-                .is_err()
-        );
-        no_retry_tx.send(()).unwrap();
-        let (mut stream, _) = listener.accept().await.unwrap();
         assert!(stream.read(&mut bytes).await.unwrap() > 0);
         sent_tx.send(()).unwrap();
         // Wait for cancellation to close the request, then ensure no next key was sent.
@@ -424,7 +393,7 @@ async fn fetch_retries_keys_but_network_and_cancel_do_not() {
         .save(SearchSave {
             capability: SearchCap::Fetch,
             provider: "jina".into(),
-            base_url: Some(format!("http://{addr}")),
+            base_url: Some(keyed.url()),
             basic_auth_username: None,
         })
         .unwrap();
@@ -438,11 +407,26 @@ async fn fetch_retries_keys_but_network_and_cancel_do_not() {
         store.fetch("https://example.com").await.unwrap().content,
         "page body"
     );
+    for key in ["one-key", "two-key"] {
+        assert_eq!(
+            keyed.request().await.header("authorization"),
+            Some(format!("Bearer {key}").as_str())
+        );
+    }
     assert_eq!(
         store.fetch("https://example.com").await.unwrap_err().code(),
         KitErrorCode::Network
     );
-    no_retry_rx.await.unwrap();
+    keyed.request().await;
+    keyed.no_request(Duration::from_millis(150)).await;
+    store
+        .save(SearchSave {
+            capability: SearchCap::Fetch,
+            provider: "jina".into(),
+            base_url: Some(format!("http://{addr}")),
+            basic_auth_username: None,
+        })
+        .unwrap();
     // Cancel only once the request reached the server: a wall-clock budget also covers the
     // keyring read, which on a cold Linux Secret Service can outlast it before any byte is sent.
     tokio::select! {
@@ -501,24 +485,13 @@ fn rejected_preferences_preserve_policy_and_unreadable_keys_never_leak() {
 
 #[tokio::test]
 async fn fetch_blocks_blacklisted_redirect_before_request_and_cuts_unicode_pages() {
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
-        time::{Duration, timeout},
-    };
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let mut bytes = [0; 8192];
-        assert!(stream.read(&mut bytes).await.unwrap() > 0);
-        stream.write_all(format!("HTTP/1.1 302 Found\r\nLocation: http://{addr}/blocked\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
-        assert!(
-            timeout(Duration::from_millis(150), listener.accept())
-                .await
-                .is_err()
-        );
-    });
+    // The redirect points back at this server, whose address is only known once it is bound.
+    let mut server = Server::handler(|request| {
+        let host = request.header("host").unwrap_or_default();
+        Reply::http(302, &[("location", &format!("http://{host}/blocked"))], "")
+    })
+    .await;
+    let addr = format!("127.0.0.1:{}", server.port());
     let mut prefs = SearchPreferences {
         blacklist: vec![format!("http://{addr}/blocked")],
         ..SearchPreferences::default()
@@ -537,7 +510,8 @@ async fn fetch_blocks_blacklisted_redirect_before_request_and_cuts_unicode_pages
     .await
     .unwrap_err();
     assert_eq!(error.details().reason(), Some("blacklisted"));
-    server.await.unwrap();
+    assert_eq!(server.request().await.target, "/start");
+    server.no_request(Duration::from_millis(150)).await;
     prefs.blacklist = vec!["EXAMPLE.COM.".into()];
     assert!(check_blacklist("https://a.example.com./page", &prefs).is_err());
     assert!(check_blacklist("https://notexample.com/page", &prefs).is_ok());
@@ -678,50 +652,19 @@ fn failed_key_write_preserves_previous_ciphertext_and_rolls_back_new_key() {
 
 #[tokio::test]
 async fn check_uses_selected_provider_and_canonical_inputs_without_holding_store_lock() {
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
-    };
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (sent, received) = tokio::sync::oneshot::channel();
-    let (release, released) = tokio::sync::oneshot::channel();
-    let server = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let mut bytes = [0; 8192];
-        let size = stream.read(&mut bytes).await.unwrap();
-        assert!(
-            String::from_utf8_lossy(&bytes[..size])
-                .starts_with("GET /search?q=web+search&format=json&language=auto ")
-        );
-        sent.send(()).unwrap();
-        released.await.unwrap();
-        let body = "{\"results\":[]}";
-        stream
-            .write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                )
-                .as_bytes(),
-            )
-            .await
-            .unwrap();
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let size = stream.read(&mut bytes).await.unwrap();
-        assert!(String::from_utf8_lossy(&bytes[..size]).starts_with("GET /https://example.com "));
-        let body = "{\"data\":{\"content\":\"readable\"}}";
-        stream
-            .write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                )
-                .as_bytes(),
-            )
-            .await
-            .unwrap();
-    });
+    let body = "{\"results\":[]}";
+    let release = Gate::new();
+    let mut server = Server::script(
+        vec![
+            Reply::close().then_wait(&release).then_raw(format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )),
+            Reply::json("{\"data\":{\"content\":\"readable\"}}"),
+        ],
+        unexpected(),
+    )
+    .await;
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(&dir.path().join("search.db"), AddressPolicy::default()).unwrap();
     for (cap, provider) in [(SearchCap::Search, "searxng"), (SearchCap::Fetch, "jina")] {
@@ -729,7 +672,7 @@ async fn check_uses_selected_provider_and_canonical_inputs_without_holding_store
             .save(SearchSave {
                 capability: cap,
                 provider: provider.into(),
-                base_url: Some(format!("http://{addr}")),
+                base_url: Some(server.url()),
                 basic_auth_username: None,
             })
             .unwrap();
@@ -738,7 +681,10 @@ async fn check_uses_selected_provider_and_canonical_inputs_without_holding_store
     tokio::pin!(check);
     tokio::select! {
         _ = &mut check => panic!("check finished before fixture response"),
-        _ = received => {}
+        request = server.request() => assert_eq!(
+            (request.method.as_str(), request.target.as_str()),
+            ("GET", "/search?q=web+search&format=json&language=auto")
+        ),
     }
     assert!(store.db.try_lock().is_ok());
     store
@@ -747,7 +693,7 @@ async fn check_uses_selected_provider_and_canonical_inputs_without_holding_store
             ..SearchPreferences::default()
         })
         .unwrap();
-    release.send(()).unwrap();
+    release.open();
     let error = check.await.unwrap_err();
     assert_eq!(error.code(), KitErrorCode::Upstream);
     assert_eq!(error.message(), "provider returned no results");
@@ -755,9 +701,14 @@ async fn check_uses_selected_provider_and_canonical_inputs_without_holding_store
         store.check(SearchCap::Fetch, "jina").await.unwrap().count,
         1
     );
+    let fetched = server.request().await;
+    assert_eq!(
+        (fetched.method.as_str(), fetched.target.as_str()),
+        ("GET", "/https://example.com")
+    );
     assert_eq!(
         store.settings(SearchCap::Search).unwrap().default_provider,
         "exa-mcp"
     );
-    server.await.unwrap();
+    server.no_request(Duration::from_millis(150)).await;
 }

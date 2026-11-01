@@ -50,7 +50,9 @@
       <Field.Description>{t('logs.levelHint')}</Field.Description>
     </Field.Field>
     {#if status && !status.available}
-      <Alert variant="destructive"><AlertDescription>{t('logs.unavailable')}</AlertDescription></Alert>
+      <Alert variant="destructive"
+        ><AlertDescription>{t('logs.unavailable')}</AlertDescription></Alert
+      >
     {/if}
   </Field.Group>
 {/if}

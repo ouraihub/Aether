@@ -1,7 +1,12 @@
 import type { SkillFileKind } from '@ouraihub/aether-contracts'
 import { badRequest, KitFailure } from '../error.js'
 import { sha256 } from './content.js'
-import { checkSecrets, parseSkillMarkdown, parseSkillSource, type ParsedSkill } from './validation.js'
+import {
+  checkSecrets,
+  parseSkillMarkdown,
+  parseSkillSource,
+  type ParsedSkill,
+} from './validation.js'
 
 export interface PackageFile {
   readonly path: string
@@ -40,7 +45,13 @@ function normalize(path: string): string {
 }
 function kind(path: string): SkillFileKind | null {
   const top = path.split('/')[0]
-  return top === 'scripts' ? 'script' : top === 'references' ? 'reference' : top === 'assets' ? 'asset' : null
+  return top === 'scripts'
+    ? 'script'
+    : top === 'references'
+      ? 'reference'
+      : top === 'assets'
+        ? 'asset'
+        : null
 }
 function checkPath(path: string): void {
   if (!path.split('/').every((part) => /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/u.test(part)))
@@ -82,7 +93,8 @@ function entries(bytes: Uint8Array): Entry[] {
   const result: Entry[] = []
   const paths = new Set<string>()
   for (let index = 0; index < count; index++) {
-    if (offset + 46 > centralEnd || view.getUint32(offset, true) !== 0x02014b50) throw badRequest('zip', 'invalid')
+    if (offset + 46 > centralEnd || view.getUint32(offset, true) !== 0x02014b50)
+      throw badRequest('zip', 'invalid')
     const flags = view.getUint16(offset + 8, true)
     if ((flags & 1) !== 0 || (flags & 64) !== 0) throw badRequest('zip', 'encrypted')
     const mode = view.getUint32(offset + 38, true) >>> 16
@@ -91,7 +103,8 @@ function entries(bytes: Uint8Array): Entry[] {
     const extraLength = view.getUint16(offset + 30, true)
     const commentLength = view.getUint16(offset + 32, true)
     const next = offset + 46 + nameLength + extraLength + commentLength
-    if (next > centralEnd || view.getUint16(offset + 34, true) !== 0) throw badRequest('zip', 'invalid')
+    if (next > centralEnd || view.getUint16(offset + 34, true) !== 0)
+      throw badRequest('zip', 'invalid')
     const rawPath = decode(bytes.subarray(offset + 46, offset + 46 + nameLength), 'zip')
     const path = normalize(rawPath)
     if (paths.has(path)) throw badRequest('zip', 'duplicate_path')
@@ -182,7 +195,10 @@ export async function readSkillSource(value: unknown): Promise<SkillPackage> {
     const fileEntries = allEntries.filter((entry) => !entry.directory)
     const first = fileEntries[0]?.path
     const prefix = first?.includes('/') ? first.slice(0, first.indexOf('/') + 1) : null
-    const strip = prefix !== null && fileEntries.every((entry) => entry.path.startsWith(prefix)) ? prefix.length : 0
+    const strip =
+      prefix !== null && fileEntries.every((entry) => entry.path.startsWith(prefix))
+        ? prefix.length
+        : 0
     const files: PackageFile[] = []
     const unsupported: string[] = []
     let raw: string | undefined
@@ -207,7 +223,8 @@ export async function readSkillSource(value: unknown): Promise<SkillPackage> {
       const limit = Math.min(ownLimit, TOTAL - total)
       const field = limit < ownLimit ? 'total' : path
       const content = await inflate(bytes, entry, limit, field)
-      if (content.length !== entry.size || crc32(content) !== entry.crc) throw badRequest('zip', 'invalid')
+      if (content.length !== entry.size || crc32(content) !== entry.crc)
+        throw badRequest('zip', 'invalid')
       total += content.length
       let value: string | undefined
       if (fileKind === 'asset') {
@@ -223,7 +240,12 @@ export async function readSkillSource(value: unknown): Promise<SkillPackage> {
         if (license !== null) throw badRequest(path, 'duplicate')
         license = value ?? null
       } else if (fileKind !== null)
-        files.push({ path, kind: fileKind, bytes: Array.from(content), sha256: await sha256(content) })
+        files.push({
+          path,
+          kind: fileKind,
+          bytes: Array.from(content),
+          sha256: await sha256(content),
+        })
     }
     if (unsupported.length) throw badRequest(unsupported.sort().join(', '), 'unsupported_files')
     if (raw === undefined) throw badRequest('SKILL.md', 'missing')

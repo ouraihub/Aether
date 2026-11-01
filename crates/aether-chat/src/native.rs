@@ -72,7 +72,8 @@ impl ModelGateway {
             }
         };
         let mut parser = SseParser::new();
-        let mut decoder = Decoder::new(request.protocol);
+        let mut decoder = Decoder::new(request.protocol)
+            .with_identity(request.endpoint_id, Some(request.model_id));
         while let Some(bytes) = chunk {
             for event in parser.feed(&bytes) {
                 on(decoder.event(&event.data, usage))?;

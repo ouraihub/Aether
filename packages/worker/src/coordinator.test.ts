@@ -2,11 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { isContract, type RunRequest, type RunSnapshot } from '@ouraihub/aether-contracts'
 import { KitFailure } from '@ouraihub/aether-core'
-import type { DurableObjectState, DurableObjectStorage } from './cloudflare.js'
+import { MemoryState, MemoryStorage } from './testing/fakes.js'
 import type { Actor } from './context.js'
 import type { AcceptedHandle } from './conversations/index.js'
 import type { PreparedExecution, WorkerRuntime } from './runtime.js'
-import { createRunCoordinator } from './coordinator.js'
+import { createRunCoordinator, type CoordinatorOptions } from './coordinator.js'
 import { createAetherWorkerApp } from './app.js'
 
 type Runtime = Pick<WorkerRuntime, 'prepare' | 'execute' | 'abandon' | 'recover'>
@@ -24,7 +24,13 @@ const actor: Actor = {
   kind: 'user',
   scopes: [],
 }
-const input: RunRequest = { purpose: 'chat', input: 'private prompt', skills: [], regenerate: false, language: 'en' }
+const input: RunRequest = {
+  purpose: 'chat',
+  input: 'private prompt',
+  skills: [],
+  regenerate: false,
+  language: 'en',
+}
 const handle: AcceptedHandle = {
   runId: 'run-1',
   conversationId: 'conversation-1',
@@ -41,47 +47,6 @@ const snapshot = (status: RunSnapshot['status']): RunSnapshot => ({
   cancelRequested: status === 'cancelled',
 })
 
-class Storage implements DurableObjectStorage {
-  readonly records = new Map<string, unknown>()
-  readonly writes: unknown[] = []
-  alarm: number | null = null
-  async get<T = unknown>(key: string): Promise<T | undefined> {
-    return structuredClone(this.records.get(key)) as T | undefined
-  }
-  async put<T>(key: string, value: T): Promise<void> {
-    this.records.set(key, structuredClone(value))
-    this.writes.push(structuredClone(value))
-  }
-  async delete(key: string): Promise<boolean> {
-    return this.records.delete(key)
-  }
-  async setAlarm(value: number | Date): Promise<void> {
-    this.alarm = Number(value)
-  }
-  async getAlarm(): Promise<number | null> {
-    return this.alarm
-  }
-  async deleteAlarm(): Promise<void> {
-    this.alarm = null
-  }
-}
-class State implements DurableObjectState {
-  readonly storage: Storage
-  readonly tasks = new Set<Promise<unknown>>()
-  constructor(storage = new Storage()) {
-    this.storage = storage
-  }
-  blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
-    return callback()
-  }
-  waitUntil(promise: Promise<unknown>): void {
-    this.tasks.add(promise)
-    void promise.finally(() => this.tasks.delete(promise)).catch(() => undefined)
-  }
-  async drain(): Promise<void> {
-    while (this.tasks.size) await Promise.all([...this.tasks])
-  }
-}
 function internal(path: string, current = actor, body?: unknown, signal?: AbortSignal): Request {
   const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(current))))
   return new Request(`https://coordinator${path}`, {
@@ -91,8 +56,12 @@ function internal(path: string, current = actor, body?: unknown, signal?: AbortS
     ...(signal ? { signal } : {}),
   })
 }
-function fixture(overrides: Partial<Runtime> = {}, storage?: Storage) {
-  const state = new State(storage)
+function fixture(
+  overrides: Partial<Runtime> = {},
+  storage?: MemoryStorage,
+  options: CoordinatorOptions = {},
+) {
+  const state = new MemoryState(storage)
   const runtime: Runtime = {
     async prepare(_id, _request, _context, onPlan) {
       await onPlan(handle)
@@ -109,7 +78,7 @@ function fixture(overrides: Partial<Runtime> = {}, storage?: Storage) {
     async recover() {},
     ...overrides,
   }
-  const Coordinator = createRunCoordinator(() => runtime)
+  const Coordinator = createRunCoordinator(() => runtime, options)
   const coordinator = new Coordinator(state, undefined)
   const accept = (current = actor, signal?: AbortSignal) =>
     coordinator.fetch(
@@ -151,7 +120,10 @@ test('accept persists creating and planned handle before reservation; only the f
   assert.deepEqual(accepts.map((response) => response.status).sort(), [202, 409])
   assert.equal(starts, 0)
   assert.equal((await state.storage.get<StoredRun>('run'))?.phase, 'accepted')
-  const streams = await Promise.all([coordinator.fetch(internal('/events')), coordinator.fetch(internal('/events'))])
+  const streams = await Promise.all([
+    coordinator.fetch(internal('/events')),
+    coordinator.fetch(internal('/events')),
+  ])
   assert.deepEqual(streams.map((response) => response.status).sort(), [200, 409])
   assert.equal(starts, 1)
   execution.resolve(snapshot('completed'))
@@ -179,39 +151,52 @@ test('application tenant subject and session are all exact owner boundaries; for
     assert.equal((await coordinator.fetch(internal('/snapshot', foreign))).status, 404)
     assert.equal((await coordinator.fetch(internal('/events', foreign))).status, 404)
     assert.equal(
-      (await coordinator.fetch(internal('/approval', foreign, { callId: 'call', decision: 'allow' }))).status,
+      (
+        await coordinator.fetch(
+          internal('/approval', foreign, { callId: 'call', decision: 'allow' }),
+        )
+      ).status,
       404,
     )
-    assert.deepEqual(await (await coordinator.fetch(internal('/cancel', foreign, {}))).json(), { ok: true })
+    assert.deepEqual(await (await coordinator.fetch(internal('/cancel', foreign, {}))).json(), {
+      ok: true,
+    })
   }
   const accepted = await state.storage.get<StoredRun>('run')
   assert.ok(accepted)
   assert.equal(accepted?.phase, 'accepted')
   assert.equal(accepted.snapshot.cancelRequested, false)
-  assert.deepEqual(await (await coordinator.fetch(internal('/cancel', actor, {}))).json(), { ok: true })
+  assert.deepEqual(await (await coordinator.fetch(internal('/cancel', actor, {}))).json(), {
+    ok: true,
+  })
   await state.drain()
 })
 
-test('accepted alarm cancels without executing; terminal subscription contains only End and replay is rejected', async (context) => {
-  context.mock.timers.enable({ apis: ['Date'], now: 1000 })
+test('accepted alarm cancels without executing; terminal subscription contains only End and replay is rejected', async () => {
   let starts = 0,
-    abandons = 0
-  const { coordinator, accept, state } = fixture({
-    async execute() {
-      starts++
-      return snapshot('completed')
+    abandons = 0,
+    time = 1000
+  const { coordinator, accept, state } = fixture(
+    {
+      async execute() {
+        starts++
+        return snapshot('completed')
+      },
+      async abandon() {
+        abandons++
+        return snapshot('cancelled')
+      },
     },
-    async abandon() {
-      abandons++
-      return snapshot('cancelled')
-    },
-  })
+    undefined,
+    // The 30 s subscription lease is read from the injected clock, not the global Date.
+    { now: () => time },
+  )
   await accept()
   assert.equal(state.storage.alarm, 31000)
-  context.mock.timers.setTime(30999)
+  time = 30999
   await coordinator.alarm()
   assert.equal(abandons, 0)
-  context.mock.timers.setTime(31000)
+  time = 31000
   await coordinator.alarm()
   assert.equal(starts, 0)
   assert.equal(abandons, 1)
@@ -235,7 +220,12 @@ test('approval is durable before delivery and a decision before approver.wait is
   const decision = Promise.withResolvers<boolean>()
   const { coordinator, state, accept } = fixture({
     async execute(_prepared, signal, emit, approver) {
-      emit({ kind: 'approval_required', callId: 'call-1', name: 'write', argsPreview: 'private args preview' })
+      emit({
+        kind: 'approval_required',
+        callId: 'call-1',
+        name: 'write',
+        argsPreview: 'private args preview',
+      })
       await beforeWait.promise
       const allowed = await approver.wait(
         handle.runId,
@@ -243,7 +233,12 @@ test('approval is durable before delivery and a decision before approver.wait is
         signal,
       )
       decision.resolve(allowed)
-      emit({ kind: 'tool_result', callId: 'call-1', outcome: allowed ? 'ok' : 'denied', summary: 'done' })
+      emit({
+        kind: 'tool_result',
+        callId: 'call-1',
+        outcome: allowed ? 'ok' : 'denied',
+        summary: 'done',
+      })
       return snapshot('completed')
     },
   })
@@ -257,10 +252,13 @@ test('approval is durable before delivery and a decision before approver.wait is
   assert.ok(pending)
   assert.equal(pending?.callId, 'call-1')
   assert.equal(typeof pending.revision, 'number')
-  const approval = await coordinator.fetch(internal('/approval', actor, { callId: 'call-1', decision: 'allow' }))
+  const approval = await coordinator.fetch(
+    internal('/approval', actor, { callId: 'call-1', decision: 'allow' }),
+  )
   assert.equal(approval.status, 200)
   assert.equal(
-    (await coordinator.fetch(internal('/approval', actor, { callId: 'call-1', decision: 'deny' }))).status,
+    (await coordinator.fetch(internal('/approval', actor, { callId: 'call-1', decision: 'deny' })))
+      .status,
     409,
   )
   beforeWait.resolve()
@@ -329,7 +327,7 @@ test('request abort cancels active execution while the POST request signal no lo
 
 for (const phase of ['creating', 'accepted', 'running'] as const) {
   test(`restart recovers the planned reservation for ${phase} without replay`, async () => {
-    const storage = new Storage()
+    const storage = new MemoryStorage()
     await storage.put('run', {
       phase,
       actor,
@@ -367,7 +365,9 @@ for (const phase of ['creating', 'accepted', 'running'] as const) {
     assert.equal(typeof recovered.error.details.errorId, 'string')
     assert.equal(recoveries, 1)
     assert.equal(starts, 0)
-    assert.ok((await (await coordinator.fetch(internal('/events'))).text()).includes('"status":"failed"'))
+    assert.ok(
+      (await (await coordinator.fetch(internal('/events'))).text()).includes('"status":"failed"'),
+    )
     const record = await storage.get<StoredRun>('run')
     assert.ok(record)
     assert.equal(record?.pending, null)
@@ -378,7 +378,7 @@ for (const phase of ['creating', 'accepted', 'running'] as const) {
 
 test('creating uncommitted planned handle may be absent, but committed accepted recovery errors are not ignored', async () => {
   for (const phase of ['creating', 'accepted'] as const) {
-    const storage = new Storage()
+    const storage = new MemoryStorage()
     await storage.put('run', {
       phase,
       actor,
@@ -453,7 +453,12 @@ test('HTTP transport cancellation explicitly cancels the run when RPC body cance
   const stopped = Promise.withResolvers<void>()
   const { coordinator, state, accept } = fixture({
     async execute(_prepared, signal, emit) {
-      emit({ kind: 'approval_required', callId: 'transport-call', name: 'write', argsPreview: '{}' })
+      emit({
+        kind: 'approval_required',
+        callId: 'transport-call',
+        name: 'write',
+        argsPreview: '{}',
+      })
       if (signal.aborted) stopped.resolve()
       else signal.addEventListener('abort', () => stopped.resolve(), { once: true })
       await stopped.promise
@@ -490,7 +495,10 @@ test('HTTP transport cancellation explicitly cancels the run when RPC body cance
             if (path === '/cancel') {
               explicitCancels++
               assert.equal(request.signal.aborted, false)
-              assert.equal(request.headers.get('x-aether-actor'), internal('/snapshot').headers.get('x-aether-actor'))
+              assert.equal(
+                request.headers.get('x-aether-actor'),
+                internal('/snapshot').headers.get('x-aether-actor'),
+              )
             }
             const reply = await coordinator.fetch(request)
             if (path !== '/events' || reply.status !== 200 || !reply.body) return reply

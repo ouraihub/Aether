@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import Ajv from 'ajv'
 import standaloneCode from 'ajv/dist/standalone/index.js'
 import ts from 'typescript'
+import { relativeJsImports } from './module-specifiers.mjs'
 
 const directory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const root = resolve(directory, '../..')
@@ -13,8 +14,19 @@ const generated = join(directory, 'src/generated')
 const manifest = JSON.parse(readFileSync(join(root, 'contracts/manifest.json'), 'utf8'))
 const declarations = new Map()
 const names = []
-for (const file of [...readdirSync(generated).filter((file) => file.endsWith('.ts')).map((file) => join(generated, file)), join(directory, 'src/search.ts')]) {
-  const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)
+for (const file of [
+  ...readdirSync(generated)
+    .filter((file) => file.endsWith('.ts'))
+    .map((file) => join(generated, file)),
+  join(directory, 'src/search.ts'),
+]) {
+  const text = readFileSync(file, 'utf8')
+  const normalized = relativeJsImports(text)
+  if (normalized !== text) {
+    if (process.argv.includes('--check')) throw new Error(`${file} has extensionless imports; run contracts generate`)
+    writeFileSync(file, normalized)
+  }
+  const source = ts.createSourceFile(file, normalized, ts.ScriptTarget.Latest, true)
   for (const node of source.statements) {
     if (ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node)) {
       declarations.set(node.name.text, node)
@@ -24,11 +36,16 @@ for (const file of [...readdirSync(generated).filter((file) => file.endsWith('.t
 }
 function schema(node) {
   switch (node.kind) {
-    case ts.SyntaxKind.StringKeyword: return { type: 'string' }
-    case ts.SyntaxKind.NumberKeyword: return { type: 'number' }
-    case ts.SyntaxKind.BooleanKeyword: return { type: 'boolean' }
-    case ts.SyntaxKind.UnknownKeyword: return {}
-    case ts.SyntaxKind.NullKeyword: return { type: 'null' }
+    case ts.SyntaxKind.StringKeyword:
+      return { type: 'string' }
+    case ts.SyntaxKind.NumberKeyword:
+      return { type: 'number' }
+    case ts.SyntaxKind.BooleanKeyword:
+      return { type: 'boolean' }
+    case ts.SyntaxKind.UnknownKeyword:
+      return {}
+    case ts.SyntaxKind.NullKeyword:
+      return { type: 'null' }
   }
   if (ts.isLiteralTypeNode(node)) {
     const literal = node.literal
@@ -52,7 +69,8 @@ function schema(node) {
     const properties = {}
     const required = []
     for (const member of node.members) {
-      if (!ts.isPropertySignature(member) || !member.type || !member.name) throw new Error(`Unsupported DTO member ${member.getText()}`)
+      if (!ts.isPropertySignature(member) || !member.type || !member.name)
+        throw new Error(`Unsupported DTO member ${member.getText()}`)
       const name = ts.isIdentifier(member.name) || ts.isStringLiteral(member.name) ? member.name.text : undefined
       if (!name) throw new Error('Unsupported DTO property name')
       properties[name] = schema(member.type)
@@ -63,7 +81,9 @@ function schema(node) {
   if (ts.isParenthesizedTypeNode(node)) return schema(node.type)
   throw new Error(`Unsupported DTO syntax: ${node.getText()}`)
 }
-const definitions = Object.fromEntries([...declarations].map(([name, node]) => [name, schema(ts.isTypeAliasDeclaration(node) ? node.type : node)]))
+const definitions = Object.fromEntries(
+  [...declarations].map(([name, node]) => [name, schema(ts.isTypeAliasDeclaration(node) ? node.type : node)]),
+)
 const ajv = new Ajv({ strict: true, allErrors: true, code: { source: true, esm: true } })
 ajv.addSchema({ $id: 'aether:bindings', definitions })
 const normative = new Map()
@@ -75,7 +95,9 @@ for (const file of manifest.schemas) {
 const exports = {}
 for (const name of names.sort()) {
   const contract = manifest.contracts[name]
-  const ref = contract ? `${normative.get(contract.schema).$id}#/definitions/${contract.definition}` : `aether:bindings#/definitions/${name}`
+  const ref = contract
+    ? `${normative.get(contract.schema).$id}#/definitions/${contract.definition}`
+    : `aether:bindings#/definitions/${name}`
   const id = `aether:validator:${name}`
   ajv.addSchema({ $id: id, $ref: ref })
   exports[`validate${name}`] = id
@@ -87,12 +109,25 @@ compiled = compiled.replace(/require\("(ajv\/dist\/runtime\/[^" ]+)"\)\.default/
   return imports.get(path)
 })
 const require = createRequire(import.meta.url)
-compiled = [...imports].map(([path, name]) => `const ${name} = ${require(path).default.toString()};`).join('\n') + '\n' + compiled + '\n'
-const typeImports = readdirSync(generated).filter((file) => file.endsWith('.ts')).sort().map((file) => `export type * from './generated/${file.slice(0, -3)}'`)
+compiled =
+  [...imports].map(([path, name]) => `const ${name} = ${require(path).default.toString()};`).join('\n') +
+  '\n' +
+  compiled +
+  '\n'
+const typeImports = readdirSync(generated)
+  .filter((file) => file.endsWith('.ts'))
+  .sort()
+  .map((file) => `export type * from './generated/${file.slice(0, -3)}'`)
 const index = `${typeImports.join('\n')}\nexport type * from './search'\nexport * from './validation'\n`
 const validation = `// Generated by scripts/generate.mjs; normative run/error/conversation schemas take precedence.\nimport type { ErrorObject, ValidateFunction } from 'ajv'\n${names.map((name) => `import type { ${name} } from '${name.startsWith('Search') && name !== 'SearchHit' ? './search' : `./generated/${name}`}'`).join('\n')}\nimport * as compiled from './validators.js'\n\nexport interface ContractMap {\n${names.map((name) => `  ${name}: ${name}`).join('\n')}\n}\nexport type ContractName = keyof ContractMap\nexport type ContractValidator<T> = { (value: unknown): value is T; errors?: ErrorObject[] | null }\nconst validators: { [N in ContractName]: ContractValidator<ContractMap[N]> } = {\n${names.map((name) => `  ${name}: compiled.validate${name}`).join(',\n')}\n}\nexport function isContract<N extends ContractName>(name: N, value: unknown): value is ContractMap[N] {\n  return validators[name](value)\n}\nexport function contractErrors(name: ContractName): readonly ErrorObject[] {\n  return validators[name].errors ?? []\n}\n${names.map((name) => `export const validate${name}: ContractValidator<${name}> = validators.${name}`).join('\n')}\n`
 const declarationsText = `import type { ValidateFunction } from 'ajv'\n${names.map((name) => `import type { ${name} } from '${name.startsWith('Search') && name !== 'SearchHit' ? './search' : `./generated/${name}`}'`).join('\n')}\n${names.map((name) => `export const validate${name}: ValidateFunction<${name}>`).join('\n')}\n`
-for (const [file, text] of [['src/validators.js', compiled], ['src/validators.d.ts', declarationsText], ['src/index.ts', index], ['src/validation.ts', validation.replace('ErrorObject, ValidateFunction', 'ErrorObject')]]) {
+for (const [file, sourceText] of [
+  ['src/validators.js', compiled],
+  ['src/validators.d.ts', declarationsText],
+  ['src/index.ts', index],
+  ['src/validation.ts', validation.replace('ErrorObject, ValidateFunction', 'ErrorObject')],
+]) {
+  const text = relativeJsImports(sourceText)
   const path = join(directory, file)
   if (process.argv.includes('--check')) {
     if (readFileSync(path, 'utf8') !== text) throw new Error(`${file} is stale; run contracts generate`)

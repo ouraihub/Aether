@@ -18,7 +18,8 @@ function pathScope(path) {
   )
     return 'automation'
   const parts = path.split('/')
-  if (parts.some((part) => !part || part === '.' || part === '..' || ruleName.test(part))) return 'full'
+  if (parts.some((part) => !part || part === '.' || part === '..' || ruleName.test(part)))
+    return 'full'
   if (['README.md', 'CHANGELOG.md', 'LICENSE'].includes(path)) return 'docs'
   if (path.startsWith('docs/') && path.endsWith('.md')) return 'docs'
   if (path.startsWith('packages/ui/src/') && /\.(?:ts|svelte|css)$/.test(path)) return 'frontend'
@@ -37,14 +38,23 @@ export function classifyPaths(paths) {
 }
 
 function detectScope() {
-  const fallback = { scope: 'full', counts: null, reason: 'Event or checkout could not be verified.' }
+  const fallback = {
+    scope: 'full',
+    counts: null,
+    reason: 'Event or checkout could not be verified.',
+  }
   try {
     const eventName = process.env.GITHUB_EVENT_NAME
     if (eventName !== 'push' && eventName !== 'pull_request') return fallback
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
     const base = eventName === 'push' ? event?.before : event?.pull_request?.base?.sha
     const head = eventName === 'push' ? event?.after : event?.pull_request?.head?.sha
-    if (typeof base !== 'string' || typeof head !== 'string' || !shaPattern.test(base) || !shaPattern.test(head))
+    if (
+      typeof base !== 'string' ||
+      typeof head !== 'string' ||
+      !shaPattern.test(base) ||
+      !shaPattern.test(head)
+    )
       return fallback
 
     const git = (args) =>
@@ -94,7 +104,9 @@ function detectScope() {
     return {
       scope: classifyPaths(paths),
       counts,
-      reason: paths.length ? 'Classified all changed paths.' : 'No changed paths; full checks are required.',
+      reason: paths.length
+        ? 'Classified all changed paths.'
+        : 'No changed paths; full checks are required.',
     }
   } catch {
     return fallback

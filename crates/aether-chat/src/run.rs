@@ -1,20 +1,20 @@
 //! One run over the protocol layer: streaming, timeouts, cancellation, single `end` (docs/12 §3, §7).
+//!
+//! The decisions live in [`Machine`]; this file performs its actions (model requests, host
+//! authorization, approval waits, tool execution) and owns the run-level output: usage,
+//! cost and the single `end`.
 
-use std::collections::HashMap;
-use std::mem;
 use std::time::Duration;
 
+use crate::machine::{Action, Machine};
 use crate::native::ModelGateway;
 use aether_support::net::AddressPolicy;
-use aether_support::{KitError, KitErrorCode};
+use aether_support::{ContextUsage, KitError, KitErrorCode};
 use tokio_util::sync::CancellationToken;
 
 use crate::protocol::{Decoded, Request, Round};
-use crate::tools::{self, Approver, AuthorizeContext, Settled, TRUNCATED_NOTE, ToolExecutor};
-use crate::types::{
-    Approval, EndStatus, Message, RunEvent, RunInput, RunSummary, ToolCall, ToolSource,
-    ToolSourceKind, ToolSpec, Usage,
-};
+use crate::tools::{Approver, ToolExecutor};
+use crate::types::{EndStatus, Message, RunEvent, RunInput, RunSummary, ToolSpec, Usage};
 use crate::validate;
 
 const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(120);
@@ -52,8 +52,17 @@ impl RunEngine {
         on: impl FnMut(RunEvent) + Send,
     ) -> RunSummary {
         let mut emitter = Emitter { on, ended: false };
-        let mut turn = Turn::default();
-        let result = match validate::prepare(&mut input) {
+        let mut meter = Meter {
+            context: Some(ContextUsage::for_request(
+                Default::default(),
+                None,
+                input.connection.context_window,
+                input.connection.endpoint_id.clone(),
+                input.connection.model_id.clone(),
+            )),
+            ..Meter::default()
+        };
+        let (result, messages) = match validate::prepare(&mut input) {
             Ok(system) => {
                 let run = Ctx {
                     input: &input,
@@ -62,20 +71,19 @@ impl RunEngine {
                     approver,
                     cancel,
                 };
-                self.rounds(&run, &mut emitter, &mut turn).await
+                self.drive(&run, &mut emitter, &mut meter).await
             }
-            Err(error) => Err(error),
+            Err(error) => (Err(error), Vec::new()),
         };
-        turn.flush();
-        let cost = aether_support::cost(input.connection.pricing.as_ref(), &turn.rounds);
+        let cost = aether_support::cost(input.connection.pricing.as_ref(), &meter.rounds);
         let (status, error, exhausted) = match result {
             Ok(exhausted) => {
                 emitter.emit(RunEvent::Usage {
-                    input_tokens: turn.usage.input_tokens,
-                    output_tokens: turn.usage.output_tokens,
-                    cache_read_tokens: turn.usage.cache_read_tokens,
-                    cache_write_tokens: turn.usage.cache_write_tokens,
-                    reasoning_tokens: turn.usage.reasoning_tokens,
+                    input_tokens: meter.usage.input_tokens,
+                    output_tokens: meter.usage.output_tokens,
+                    cache_read_tokens: meter.usage.cache_read_tokens,
+                    cache_write_tokens: meter.usage.cache_write_tokens,
+                    reasoning_tokens: meter.usage.reasoning_tokens,
                     cost,
                 });
                 (EndStatus::Completed, None, exhausted)
@@ -88,6 +96,22 @@ impl RunEngine {
                 (EndStatus::Failed, Some(error), false)
             }
         };
+        if status != EndStatus::Completed {
+            meter.context = Some(ContextUsage::for_request(
+                Default::default(),
+                None,
+                input.connection.context_window,
+                input.connection.endpoint_id.clone(),
+                input.connection.model_id.clone(),
+            ));
+        }
+        if meter.started
+            && let Some(context) = &meter.context
+        {
+            emitter.emit(RunEvent::Context {
+                usage: context.clone(),
+            });
+        }
         emitter.ended = true;
         (emitter.on)(RunEvent::End {
             status,
@@ -96,198 +120,124 @@ impl RunEngine {
         });
         RunSummary {
             status,
-            messages: turn.messages,
-            usage: turn.usage,
+            messages,
+            usage: meter.usage,
             cost,
-            context_usage: None,
+            context_usage: meter.context,
             exhausted,
         }
     }
 
-    /// The loop of docs/12 §5; `Ok(true)` when the round limit stopped it.
-    async fn rounds<F: FnMut(RunEvent)>(
+    /// Performs the machine's actions until it is done (docs/12 §5); `Ok(true)` when the
+    /// round limit stopped the loop. Returns the turn's messages either way.
+    async fn drive<F: FnMut(RunEvent)>(
         &self,
         run: &Ctx<'_>,
         emitter: &mut Emitter<F>,
-        turn: &mut Turn,
-    ) -> Result<bool, KitError> {
-        // Fed back again for a repeated call id instead of executing twice (docs/12 §5).
-        let mut settled: HashMap<String, (String, serde_json::Value, String)> = HashMap::new();
-        let boundary = validate::boundary_id()?;
-        let mut catalogue = run.input.tools.as_slice();
-        for round in 1..=run.input.budget.max_rounds {
-            // No new request after a cancel (docs/12 §5 step 7).
-            if run.cancel.is_cancelled() {
-                return Err(KitError::cancelled());
-            }
-            emitter.emit(RunEvent::RoundStart { round });
-            let mut result = self.stream(run, catalogue, emitter, turn).await;
-            if result.as_ref().is_err_and(rejects_tools)
-                && !catalogue.is_empty()
-                && run.input.connection.supports_tools.is_none()
-                && turn.text.is_empty()
-            {
-                tracing::warn!(run_id = %run.input.run_id, "chat.run.tools_rejected_retry");
-                catalogue = &[];
-                result = self.stream(run, catalogue, emitter, turn).await;
-            }
-            let Round {
-                tool_calls,
-                truncated,
-            } = result?;
-            if tool_calls.is_empty() {
-                turn.flush();
-                return Ok(false);
-            }
-            if truncated {
-                // Arguments may be cut off: execute none of them (docs/12 §8 trap 1).
-                turn.flush();
-                turn.messages.push(Message::User(TRUNCATED_NOTE.to_owned()));
-                continue;
-            }
-            turn.messages.push(Message::Assistant {
-                text: mem::take(&mut turn.text),
-                tool_calls: tool_calls.clone(),
-                reasoning: Vec::new(),
-            });
-            for call in &tool_calls {
-                if run.cancel.is_cancelled() {
-                    return Err(KitError::cancelled());
-                }
-                let text = if let Some((name, args, text)) = settled.get(&call.id) {
-                    if name != &call.name || args != &call.args {
-                        return Err(KitError::new(
-                            KitErrorCode::Conflict,
-                            "tool call id reused with different arguments",
+        meter: &mut Meter,
+    ) -> (Result<bool, KitError>, Vec<Message>) {
+        let boundary = match validate::boundary_id() {
+            Ok(boundary) => boundary,
+            Err(error) => return (Err(error), Vec::new()),
+        };
+        let mut machine = Machine::new(run.input, boundary, run.cancel);
+        // The round being streamed; the machine takes it into the turn when the round ends.
+        let mut text = String::new();
+        let mut emit = |event| emitter.emit(event);
+        let mut action = machine.start(&mut emit);
+        let result = loop {
+            action = match action {
+                Action::Model => {
+                    let result = self
+                        .stream(
+                            run,
+                            machine.catalogue(),
+                            machine.messages(),
+                            &mut emit,
+                            &mut text,
+                            meter,
                         )
-                        .with_reason("tool_call_conflict"));
-                    }
-                    text.clone()
-                } else {
-                    let text = Self::call(run, catalogue, call, &boundary, emitter).await?;
-                    settled.insert(
-                        call.id.clone(),
-                        (call.name.clone(), call.args.clone(), text.clone()),
-                    );
-                    text
-                };
-                turn.messages.push(Message::Tool {
-                    call_id: call.id.clone(),
-                    text,
-                });
-            }
-            if run.cancel.is_cancelled() {
-                return Err(KitError::cancelled());
-            }
-        }
-        Ok(true)
-    }
-
-    /// One authorized, possibly approved call; returns the text fed back to the model.
-    async fn call<F: FnMut(RunEvent)>(
-        run: &Ctx<'_>,
-        catalogue: &[ToolSpec],
-        call: &ToolCall,
-        boundary: &str,
-        emitter: &mut Emitter<F>,
-    ) -> Result<String, KitError> {
-        let Some(spec) = catalogue.iter().find(|spec| spec.name == call.name) else {
-            return Ok(tools::unknown_tool(call));
-        };
-        let (source, server) = match &spec.source {
-            ToolSource::Host => (ToolSourceKind::Host, None),
-            ToolSource::Mcp { server } => (ToolSourceKind::Mcp, Some(server.clone())),
-        };
-        emitter.emit(RunEvent::ToolCall {
-            call_id: call.id.clone(),
-            name: call.name.clone(),
-            source,
-            server,
-        });
-        let ctx = AuthorizeContext {
-            mode: run.input.permission_mode,
-            purpose: &run.input.purpose,
-            run_id: &run.input.run_id,
-            effect: spec.effect,
-            source: &spec.source,
-            proposed: tools::proposed(run.input.permission_mode, spec),
-        };
-        // A catalogue `Deny` is final: no mode and no host answer turns it into a run.
-        let decision = match spec.approval {
-            Approval::Deny => Approval::Deny,
-            Approval::Auto | Approval::Ask => run.tools.authorize(call, &ctx),
-        };
-        let allowed = match decision {
-            Approval::Auto => true,
-            Approval::Deny => false,
-            Approval::Ask => {
-                let wait = run.approver.wait(&run.input.run_id, call, run.cancel);
-                emitter.emit(RunEvent::ApprovalRequired {
-                    call_id: call.id.clone(),
-                    name: call.name.clone(),
-                    args_preview: tools::args_preview(call),
-                });
-                // Also stops waiting on its own, should an approver ignore `cancel`.
-                tokio::select! {
-                    () = run.cancel.cancelled() => return Err(KitError::cancelled()),
-                    allow = wait => allow,
+                        .await;
+                    machine.model_done(result, &mut text, &mut emit)
                 }
-            }
+                Action::Authorize(pending) => {
+                    let ctx = machine.authorize_context(&pending);
+                    let decision = run.tools.authorize(&pending.call, &ctx);
+                    machine.authorized(pending, decision, &mut emit)
+                }
+                Action::Approve(pending, event) => {
+                    let wait = run
+                        .approver
+                        .wait(&run.input.run_id, &pending.call, run.cancel);
+                    emit(event);
+                    // Also stops waiting on its own, should an approver ignore `cancel`. Biased:
+                    // an approver answering `false` because of the same cancel is a cancel.
+                    let allow = tokio::select! {
+                        biased;
+                        () = run.cancel.cancelled() => None,
+                        allow = wait => Some(allow),
+                    };
+                    machine.approved(pending, allow, &mut emit)
+                }
+                Action::Execute(pending) => {
+                    let execution = run.tools.execute(&pending.call, run.cancel).await;
+                    machine.executed(pending, execution, &mut emit)
+                }
+                Action::Done(result) => break result,
+            };
         };
-        let settled = if allowed {
-            if run.cancel.is_cancelled() {
-                return Err(KitError::cancelled());
-            }
-            // An in-flight tool is awaited even after a cancel; it reports `unknown` itself.
-            let execution = run.tools.execute(call, run.cancel).await;
-            Settled::from_execution(
-                execution,
-                spec,
-                run.input.budget.tool_output_chars,
-                boundary,
-            )
-        } else {
-            Settled::denied()
-        };
-        emitter.emit(RunEvent::ToolResult {
-            call_id: call.id.clone(),
-            outcome: settled.outcome,
-            summary: settled.summary,
-            payload: settled.payload,
-        });
-        Ok(settled.text)
+        // Partial text of a failed or cancelled round stays in the turn.
+        machine.flush(&mut text);
+        (result, machine.into_messages())
     }
 
     /// One model request, interrupted at once by `cancel`.
-    async fn stream<F: FnMut(RunEvent)>(
-        &self,
-        run: &Ctx<'_>,
-        tools: &[ToolSpec],
-        emitter: &mut Emitter<F>,
-        turn: &mut Turn,
-    ) -> Result<Round, KitError> {
-        let mut usage = Usage::default();
-        let result = tokio::select! {
-            () = run.cancel.cancelled() => Err(KitError::cancelled()),
-            result = self.round(run, tools, &turn.messages, emitter, &mut turn.text, &mut usage) => result,
-        };
-        turn.usage.add(usage);
-        // A request refused before streaming bills nothing; a streamed round without usage
-        // makes the cost unknown.
-        if result.is_ok() || usage != Usage::default() {
-            turn.rounds.push(usage.into());
-        }
-        result
-    }
-
-    async fn round<F: FnMut(RunEvent)>(
+    async fn stream(
         &self,
         run: &Ctx<'_>,
         tools: &[ToolSpec],
         messages: &[Message],
-        emitter: &mut Emitter<F>,
+        emit: &mut impl FnMut(RunEvent),
         text: &mut String,
-        usage: &mut Usage,
+        meter: &mut Meter,
+    ) -> Result<Round, KitError> {
+        meter.started = true;
+        let mut usage = Usage::default();
+        let mut estimated = None;
+        let result = tokio::select! {
+            biased;
+            () = run.cancel.cancelled() => Err(KitError::cancelled()),
+            result = self.round(run, tools, messages, emit, text, (&mut usage, &mut estimated)) => result,
+        };
+        meter.usage.add(usage);
+        // A request refused before streaming bills nothing; a streamed round without usage
+        // makes the cost unknown.
+        if result.is_ok() || usage != Usage::default() {
+            meter.rounds.push(usage.into());
+            meter.context = Some(ContextUsage::for_request(
+                usage.into(),
+                estimated,
+                run.input.connection.context_window,
+                run.input.connection.endpoint_id.clone(),
+                run.input.connection.model_id.clone(),
+            ));
+            if let Some(context) = &meter.context {
+                emit(RunEvent::Context {
+                    usage: context.clone(),
+                });
+            }
+        }
+        result
+    }
+
+    async fn round(
+        &self,
+        run: &Ctx<'_>,
+        tools: &[ToolSpec],
+        messages: &[Message],
+        emit: &mut impl FnMut(RunEvent),
+        text: &mut String,
+        accounting: (&mut Usage, &mut Option<u32>),
     ) -> Result<Round, KitError> {
         let input = run.input;
         let connection = &input.connection;
@@ -308,15 +258,17 @@ impl RunEngine {
             native_web_search: input.native_web_search,
             reasoning_effort: input.reasoning_effort,
         };
+        let encoded = request.encode();
+        *accounting.1 = Some(estimate_request(&encoded.body));
         let known: Vec<&str> = connection.api_keys.iter().map(|key| key.as_str()).collect();
         self.gateway
             .stream(
                 &connection.base_url,
-                request.encode(),
+                encoded,
                 &known,
                 (self.first_byte, self.idle),
-                usage,
-                |decoded| apply(decoded, emitter, text, &known),
+                accounting.0,
+                |decoded| apply(decoded, emit, text, &known),
             )
             .await
     }
@@ -331,44 +283,80 @@ struct Ctx<'a> {
     cancel: &'a CancellationToken,
 }
 
-/// This run's output so far; `text` is the round being streamed.
+/// Usage over the run's requests.
 #[derive(Default)]
-struct Turn {
-    messages: Vec<Message>,
-    text: String,
+struct Meter {
     usage: Usage,
     /// Usage of every billed upstream request, for per-round pricing tiers.
     rounds: Vec<aether_support::TokenUsage>,
+    context: Option<ContextUsage>,
+    started: bool,
 }
 
-impl Turn {
-    /// Keeps streamed text (also partial text of a failed or cancelled round).
-    fn flush(&mut self) {
-        if !self.text.is_empty() {
-            self.messages.push(Message::Assistant {
-                text: mem::take(&mut self.text),
-                tool_calls: Vec::new(),
-                reasoning: Vec::new(),
-            });
+fn estimate_request(value: &serde_json::Value) -> u32 {
+    fn string_chars(text: &str) -> usize {
+        2 + text
+            .chars()
+            .map(|ch| match ch {
+                '"' | '\\' | '\n' | '\r' | '\t' | '\u{08}' | '\u{0c}' => 2,
+                '\u{00}'..='\u{1f}' => 6,
+                _ => 1,
+            })
+            .sum::<usize>()
+    }
+    fn chars(value: &serde_json::Value) -> usize {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut count = 2;
+                let mut first = true;
+                for (key, value) in map {
+                    if matches!(key.as_str(), "images" | "image_url" | "data" | "source") {
+                        continue;
+                    }
+                    count += usize::from(!first) + string_chars(key) + 1 + chars(value);
+                    first = false;
+                }
+                count
+            }
+            serde_json::Value::Array(items) => {
+                2 + items.len().saturating_sub(1) + items.iter().map(chars).sum::<usize>()
+            }
+            serde_json::Value::String(text) => string_chars(text),
+            serde_json::Value::Number(number) => number.to_string().len(),
+            serde_json::Value::Bool(value) => {
+                if *value {
+                    4
+                } else {
+                    5
+                }
+            }
+            serde_json::Value::Null => 4,
         }
     }
+    u32::try_from(chars(value).div_ceil(3)).unwrap_or(u32::MAX)
 }
 
-/// A 400 that names tools: the upstream does not take them (docs/12 §5).
-fn rejects_tools(error: &KitError) -> bool {
-    error.details().status() == Some(400) && error.message().to_ascii_lowercase().contains("tool")
-}
-
-fn apply<F: FnMut(RunEvent)>(
+fn apply(
     decoded: Decoded,
-    emitter: &mut Emitter<F>,
+    emit: &mut impl FnMut(RunEvent),
     text: &mut String,
     known: &[&str],
 ) -> Result<(), KitError> {
     match decoded {
         Decoded::Text(delta) => {
             text.push_str(&delta);
-            emitter.emit(RunEvent::TextDelta { text: delta });
+            emit(RunEvent::TextDelta { text: delta });
+            Ok(())
+        }
+        Decoded::Reasoning {
+            reasoning,
+            text: delta,
+        } => {
+            emit(RunEvent::ReasoningDelta { text: reasoning });
+            if let Some(delta) = delta {
+                text.push_str(&delta);
+                emit(RunEvent::TextDelta { text: delta });
+            }
             Ok(())
         }
         // Arrives after a 200, so there is no HTTP status to classify by.

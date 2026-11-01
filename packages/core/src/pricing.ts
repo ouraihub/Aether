@@ -6,7 +6,13 @@ export const emptyUsage = (): TokenUsage => ({
   cacheWriteTokens: null,
   reasoningTokens: null,
 })
-const USAGE_KEYS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const
+const USAGE_KEYS = [
+  'inputTokens',
+  'outputTokens',
+  'cacheReadTokens',
+  'cacheWriteTokens',
+  'reasoningTokens',
+] as const
 export function addUsage(total: TokenUsage, next: TokenUsage): void {
   for (const key of USAGE_KEYS) {
     const left = total[key],
@@ -20,7 +26,9 @@ export function cost(pricing: ModelPricing | null, rounds: readonly TokenUsage[]
   for (const round of rounds) {
     const inputTokens = round.inputTokens
     if (inputTokens === null || round.outputTokens === null) return null
-    const tier = pricing.tiers.findLast((candidate) => candidate.minInputTokens <= inputTokens) ?? pricing.tiers[0]
+    const tier =
+      pricing.tiers.findLast((candidate) => candidate.minInputTokens <= inputTokens) ??
+      pricing.tiers[0]
     if (!tier) return null
     const read = round.cacheReadTokens ?? 0,
       write = round.cacheWriteTokens ?? 0

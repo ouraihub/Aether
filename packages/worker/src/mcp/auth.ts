@@ -2,7 +2,18 @@ import { KitFailure, badRequest } from '@ouraihub/aether-core/error'
 import type { Actor } from '../context.js'
 import type { StoredDocument } from '../storage.js'
 import type { ApiKeyRecord, GrantRecord, McpServiceOptions, McpSettings } from './types.js'
-import { equal, forbidden, hash, notFound, object, random, strings, text, unique, validActor } from './common.js'
+import {
+  equal,
+  forbidden,
+  hash,
+  notFound,
+  object,
+  random,
+  strings,
+  text,
+  unique,
+  validActor,
+} from './common.js'
 
 interface KeyState {
   record: ApiKeyRecord
@@ -106,11 +117,14 @@ export class McpAuth {
       forbidden()
   }
   requested(value: unknown, actor?: Actor): string[] {
-    if (!strings(value) || value.length === 0 || value.length > 100) throw badRequest('scopes', 'invalid')
+    if (!strings(value) || value.length === 0 || value.length > 100)
+      throw badRequest('scopes', 'invalid')
     const scopes = unique(value)
     if (
       scopes.some(
-        (scope) => !this.options.scopes.some((known) => known.id === scope) || (actor && !actor.scopes.includes(scope)),
+        (scope) =>
+          !this.options.scopes.some((known) => known.id === scope) ||
+          (actor && !actor.scopes.includes(scope)),
       )
     )
       forbidden()
@@ -119,17 +133,30 @@ export class McpAuth {
   async settings(owner: Actor): Promise<McpSettings> {
     const doc = await this.options.store.get(owner, 'mcp-settings', 'settings')
     if (!doc) return { enabled: false, enabledScopes: [] }
-    if (!object(doc.value) || typeof doc.value.enabled !== 'boolean' || !strings(doc.value.enabledScopes))
+    if (
+      !object(doc.value) ||
+      typeof doc.value.enabled !== 'boolean' ||
+      !strings(doc.value.enabledScopes)
+    )
       throw new KitFailure('internal', 'Invalid MCP settings')
     return { enabled: doc.value.enabled, enabledScopes: doc.value.enabledScopes }
   }
   async saveSettings(actor: Actor, value: Record<string, unknown>): Promise<McpSettings> {
     this.actor(actor)
-    if (typeof value.enabled !== 'boolean' || !strings(value.enabledScopes)) throw badRequest('settings', 'invalid')
-    const enabledScopes = value.enabledScopes.length ? this.requested(value.enabledScopes, actor) : []
+    if (typeof value.enabled !== 'boolean' || !strings(value.enabledScopes))
+      throw badRequest('settings', 'invalid')
+    const enabledScopes = value.enabledScopes.length
+      ? this.requested(value.enabledScopes, actor)
+      : []
     const current = await this.options.store.get(actor, 'mcp-settings', 'settings')
     const settings = { enabled: value.enabled, enabledScopes }
-    await this.options.store.compareAndSet(actor, 'mcp-settings', 'settings', current?.revision ?? null, settings)
+    await this.options.store.compareAndSet(
+      actor,
+      'mcp-settings',
+      'settings',
+      current?.revision ?? null,
+      settings,
+    )
     return settings
   }
   async keys(actor: Actor): Promise<ApiKeyRecord[]> {
@@ -144,7 +171,8 @@ export class McpAuth {
       result.push(...page.map((doc) => readKey(doc).record))
       if (page.length < 200) return result
       const next = page[page.length - 1]?.key
-      if (!next || (after !== undefined && next <= after)) throw new KitFailure('internal', 'Invalid key pagination')
+      if (!next || (after !== undefined && next <= after))
+        throw new KitFailure('internal', 'Invalid key pagination')
       after = next
     }
   }
@@ -160,7 +188,8 @@ export class McpAuth {
       result.push(...page.map((doc) => readGrant(doc).record))
       if (page.length < 200) return result
       const next = page[page.length - 1]?.key
-      if (!next || (after !== undefined && next <= after)) throw new KitFailure('internal', 'Invalid grant pagination')
+      if (!next || (after !== undefined && next <= after))
+        throw new KitFailure('internal', 'Invalid grant pagination')
       after = next
     }
   }
@@ -175,7 +204,10 @@ export class McpAuth {
     if (!(await this.options.authorizeConsent(actor, scopes, request))) forbidden()
     const now = this.now()
     const expiresAt = input.expiresAt === undefined ? now + 90 * 86400000 : input.expiresAt
-    if (expiresAt !== null && (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= now))
+    if (
+      expiresAt !== null &&
+      (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= now)
+    )
       throw badRequest('expiresAt', 'invalid')
     const id = crypto.randomUUID()
     const token = `aether_key_${random()}`
@@ -249,7 +281,9 @@ export class McpAuth {
     const settings = await this.settings(owner)
     if (!settings.enabled) return null
     const effective = scopes.filter(
-      (scope) => settings.enabledScopes.includes(scope) && this.options.scopes.some((known) => known.id === scope),
+      (scope) =>
+        settings.enabledScopes.includes(scope) &&
+        this.options.scopes.some((known) => known.id === scope),
     )
     return {
       actor: { ...owner, kind: 'mcp_client', sessionId: null, scopes: effective },
@@ -302,7 +336,10 @@ export class McpAuth {
     const document = await this.options.store.get(owner, 'mcp-grants', grantId)
     if (!document) throw new KitFailure('unauthorized', 'Invalid grant')
     const state = readGrant(document)
-    if (!this.activeGrant(state, owner) || (clientId !== undefined && state.record.clientId !== clientId))
+    if (
+      !this.activeGrant(state, owner) ||
+      (clientId !== undefined && state.record.clientId !== clientId)
+    )
       throw new KitFailure('unauthorized', 'Invalid grant')
     if (
       refresh !== undefined &&
@@ -319,13 +356,24 @@ export class McpAuth {
       generation: state.generation + 1,
     }
     await this.options.store.compareAndSet(owner, 'mcp-grants', grantId, document.revision, updated)
-    await this.index(await hash(accessToken), { owner, id: grantId, kind: 'access', expiresAt: now + 3600000 })
-    await this.options.store.compareAndSet(this.system, 'mcp-refresh-index', await hash(refreshToken), null, {
+    await this.index(await hash(accessToken), {
       owner,
-      grantId,
-      clientId: state.record.clientId,
-      audience: `${this.options.origin}/mcp`,
+      id: grantId,
+      kind: 'access',
+      expiresAt: now + 3600000,
     })
+    await this.options.store.compareAndSet(
+      this.system,
+      'mcp-refresh-index',
+      await hash(refreshToken),
+      null,
+      {
+        owner,
+        grantId,
+        clientId: state.record.clientId,
+        audience: `${this.options.origin}/mcp`,
+      },
+    )
     return {
       access_token: accessToken,
       token_type: 'Bearer',

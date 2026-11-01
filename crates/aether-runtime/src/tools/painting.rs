@@ -2,8 +2,8 @@
 
 use crate::conversations::{ConversationService, ConversationStore, Turn};
 use aether_chat::{Approval, ToolCall, ToolEffect, ToolExecution, ToolSource, ToolSpec};
-use aether_images::{ImagePart, ImageRequest, ImageSize, MAX_EDIT_IMAGES};
-use aether_support::{Connection, KitError, KitErrorCode, net::AddressPolicy};
+use aether_images::{ImageLimits, ImagePart, ImageRequest, ImageSize, ImageStage, MAX_EDIT_IMAGES};
+use aether_support::{Connection, KitError, net::AddressPolicy};
 use serde_json::{Value, json};
 use std::sync::{
     Arc,
@@ -105,14 +105,15 @@ impl Painting {
     }
 
     pub(crate) fn spec(&self) -> ToolSpec {
-        let origins = if self.connection.can_vision {
-            self.choices
-                .iter()
-                .map(ImageChoice::origin)
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
+        let origins =
+            if aether_images::image_capabilities(&self.connection, &ImageLimits::default()).edit {
+                self.choices
+                    .iter()
+                    .map(ImageChoice::origin)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
         generate_image_spec(&origins)
     }
 
@@ -139,7 +140,8 @@ impl Painting {
             self.history.clone(),
             call.args.clone(),
         );
-        let can_edit = self.connection.can_vision;
+        let can_edit =
+            aether_images::image_capabilities(&self.connection, &ImageLimits::default()).edit;
         let prepared = tokio::task::spawn_blocking(move || {
             let prompt = args["prompt"]
                 .as_str()
@@ -158,6 +160,7 @@ impl Painting {
                 prompt,
                 size,
                 images: resolve_images(&choices, history.as_ref(), can_edit, &args)?,
+                ..ImageRequest::default()
             })
         })
         .await;
@@ -169,25 +172,33 @@ impl Painting {
         if cancel.is_cancelled() {
             return execution_error(&KitError::cancelled());
         }
-        let image =
-            match aether_images::generate(&self.connection, &self.policy, &request, cancel).await {
-                Ok(image) => image,
-                Err(error)
-                    if matches!(
-                        error.code(),
-                        KitErrorCode::Cancelled | KitErrorCode::Timeout | KitErrorCode::Network
-                    ) =>
-                {
-                    return ToolExecution::Unknown {
-                        reason: format!(
-                            "Image generation was dispatched; its outcome is unknown: {}",
-                            error.message()
-                        ),
-                    };
-                }
-                Err(error) => return execution_error(&error),
-            };
-        let payload = json!({"images": [{"mime": image.mime, "url": format!("data:{};base64,{}", image.mime, image.data)}]});
+        let generation = match aether_images::generate(
+            &self.connection,
+            &self.policy,
+            &request,
+            &ImageLimits::default(),
+            cancel,
+        )
+        .await
+        {
+            Ok(generation) => generation,
+            Err(failure) if failure.stage == ImageStage::Unknown => {
+                return ToolExecution::Unknown {
+                    reason: format!(
+                        "Image generation was dispatched; its outcome is unknown: {}. Do not automatically generate again.",
+                        failure.error.message()
+                    ),
+                };
+            }
+            Err(failure) => return execution_error(&failure.into_kit_error()),
+        };
+        let image = generation.image;
+        let payload = json!({
+            "images": [{"mime": image.mime, "url": format!("data:{};base64,{}", image.mime, image.data)}],
+            "revisedPrompt": generation.revised_prompt,
+            "usage": generation.usage,
+            "totalTokens": generation.total_tokens,
+        });
         if let Some((store, turn_id)) = &self.store {
             let (store, turn_id) = (Arc::clone(store), turn_id.clone());
             let saved = tokio::task::spawn_blocking(move || {

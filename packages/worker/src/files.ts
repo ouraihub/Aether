@@ -9,7 +9,11 @@ export interface StoredFile {
   readonly data: Uint8Array
 }
 export interface FileStore {
-  put(actor: Actor, id: string, file: { readonly mime: string; readonly data: Uint8Array }): Promise<StoredFile>
+  put(
+    actor: Actor,
+    id: string,
+    file: { readonly mime: string; readonly data: Uint8Array },
+  ): Promise<StoredFile>
   get(actor: Actor, id: string): Promise<StoredFile | null>
   remove(actor: Actor, id: string): Promise<void>
   /** An authenticated application route, never an R2 public/presigned secret URL. */
@@ -55,18 +59,26 @@ export class R2FileStore implements FileStore {
   readonly #bucket: R2Bucket
   readonly #maxBytes: number
   constructor(bucket: R2Bucket, options: { readonly maxBytes: number }) {
-    if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes <= 0) throw badRequest('fileLimit', 'invalid')
+    if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes <= 0)
+      throw badRequest('fileLimit', 'invalid')
     this.#bucket = bucket
     this.#maxBytes = options.maxBytes
   }
   async #key(actor: Actor, id: string): Promise<string> {
     fileId(id)
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ownerKey(actor)))
-    const ownerHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+    const ownerHash = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, '0'),
+    ).join('')
     return `aether/files/v1/${ownerHash}/${id}`
   }
-  async put(actor: Actor, id: string, file: { readonly mime: string; readonly data: Uint8Array }): Promise<StoredFile> {
-    if (!MIME_TYPES[file.mime] || !matchesMime(file.data, file.mime)) throw badRequest('mime', 'unsupported')
+  async put(
+    actor: Actor,
+    id: string,
+    file: { readonly mime: string; readonly data: Uint8Array },
+  ): Promise<StoredFile> {
+    if (!MIME_TYPES[file.mime] || !matchesMime(file.data, file.mime))
+      throw badRequest('mime', 'unsupported')
     if (file.data.byteLength === 0 || file.data.byteLength > this.#maxBytes)
       throw badRequest('file', 'too_large', this.#maxBytes)
     const key = await this.#key(actor, id)

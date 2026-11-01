@@ -5,8 +5,9 @@
 
 use super::*;
 use aether_support::KitErrorCode;
+use aether_testkit::{Exhausted, Reply, Server};
 use serde_json::{Value, json};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
@@ -34,6 +35,8 @@ async fn end(rx: &mut mpsc::UnboundedReceiver<crate::RunEvent>) -> crate::EndSta
     .await
     .unwrap()
 }
+/// Reads one request and returns its JSON body. Only for the bespoke upstream that observes
+/// its connection being closed by the client.
 async fn request(socket: &mut TcpStream) -> Value {
     let mut bytes = Vec::new();
     let mut chunk = [0; 4096];
@@ -62,13 +65,13 @@ async fn request(socket: &mut TcpStream) -> Value {
     }
     serde_json::from_slice(&bytes[offset..offset + length]).unwrap()
 }
-async fn reply(socket: &mut TcpStream) {
+/// The streamed `First answer` reply, framed by `content-length`.
+fn reply() -> Reply {
     let body = "data: {\"choices\":[{\"delta\":{\"content\":\"First answer\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
-    let response = format!(
+    Reply::raw(format!(
         "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()
-    );
-    socket.write_all(response.as_bytes()).await.unwrap();
+    ))
 }
 fn setup(root: &std::path::Path, url: &str) -> (Arc<ProviderStore>, ModelRef) {
     let providers = Arc::new(ProviderStore::open(root).unwrap());
@@ -96,11 +99,9 @@ fn skills(root: &std::path::Path) -> Arc<SkillStore> {
 #[tokio::test]
 async fn two_turns_preserve_context_and_preparation_excludes_evaluations() {
     let root = tempfile::tempdir().unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let (providers, model) = setup(
-        root.path(),
-        &format!("http://{}", listener.local_addr().unwrap()),
-    );
+    // Two answered turns; a third connection would be closed unanswered.
+    let upstream = Server::script(vec![reply(), reply()], Exhausted::Reply(Reply::close())).await;
+    let (providers, model) = setup(root.path(), &upstream.url());
     let skills = skills(root.path());
     let body = skills
         .snapshot(&[creator_ref(&skills).unwrap()])
@@ -112,15 +113,6 @@ async fn two_turns_preserve_context_and_preparation_excludes_evaluations() {
     let owner = RunOwner::new();
     let session_id = service.create(&owner).unwrap();
     let path = service.session(&owner, &session_id).unwrap().root.clone();
-    let upstream = tokio::spawn(async move {
-        let mut requests = Vec::new();
-        for _ in 0..2 {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            requests.push(request(&mut socket).await);
-            reply(&mut socket).await;
-        }
-        requests
-    });
     let (sink, mut rx) = events();
     let first = service
         .send(
@@ -146,7 +138,12 @@ async fn two_turns_preserve_context_and_preparation_excludes_evaluations() {
         .unwrap();
     assert_eq!(end(&mut rx).await, crate::EndStatus::Completed);
     assert_eq!(first.conversation_id, second.conversation_id);
-    let requests = upstream.await.unwrap();
+    let requests: Vec<Value> = upstream
+        .seen()
+        .iter()
+        .map(|request| serde_json::from_slice(&request.body).unwrap())
+        .collect();
+    assert_eq!(requests.len(), 2);
     let system = requests[0]["messages"][0]["content"].as_str().unwrap();
     assert!(
         system.contains(&body),
@@ -200,6 +197,8 @@ async fn two_turns_preserve_context_and_preparation_excludes_evaluations() {
 #[tokio::test]
 async fn active_runs_are_isolated_and_close_cancels_then_removes_the_workspace() {
     let root = tempfile::tempdir().unwrap();
+    // Bespoke transport on purpose: the upstream finishes only when the client closes the
+    // connection, which proves close cancels the in-flight request rather than abandoning it.
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let (providers, model) = setup(
         root.path(),

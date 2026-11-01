@@ -1,0 +1,12 @@
+[package]
+name = "aether-testkit"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "Test-only scripted HTTP upstream over real loopback TCP (dev-dependency only)."
+
+[dependencies]
+tokio = { workspace = true, features = ["net", "io-util"] }
+
+[lints]
+workspace = true

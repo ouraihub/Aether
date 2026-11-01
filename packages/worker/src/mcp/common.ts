@@ -9,7 +9,8 @@ export function strings(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item: unknown) => typeof item === 'string')
 }
 export function text(value: unknown, field: string, max = 1024): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > max) throw badRequest(field, 'invalid')
+  if (typeof value !== 'string' || !value.trim() || value.length > max)
+    throw badRequest(field, 'invalid')
   return value
 }
 export function unique(values: readonly string[]): string[] {
@@ -24,7 +25,9 @@ export function base64url(bytes: Uint8Array): string {
   return btoa(value).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')
 }
 export async function hash(value: string): Promise<string> {
-  return base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))))
+  return base64url(
+    new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))),
+  )
 }
 export function equal(a: string, b: string): boolean {
   let difference = a.length ^ b.length
@@ -33,7 +36,8 @@ export function equal(a: string, b: string): boolean {
   return difference === 0
 }
 export async function body(request: Request, max = 65536): Promise<string> {
-  if (Number(request.headers.get('Content-Length')) > max) throw badRequest('body', 'too_large', max)
+  if (Number(request.headers.get('Content-Length')) > max)
+    throw badRequest('body', 'too_large', max)
   if (!request.body) return ''
   const reader = request.body.getReader()
   const chunks: Uint8Array[] = []

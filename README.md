@@ -54,7 +54,7 @@ pnpm run ci
 
 合并到 `main` 必须通过确定性 `CI gate`，分支须包含最新 `main`，管理员也受约束。普通文档仅运行策略／提交检查；工作流、根 `AGENTS.md` 和 CI 调度／门禁脚本进入自动化检查（工作流语法、分类／门禁行为、提交规则），不因配置变化编译产品；纯 `packages/ui/src` 手写 TS/Svelte/CSS 运行前端 lint、格式、类型、测试、示例构建及 i18n；Rust、依赖、生成 DTO、产品构建脚本和未知路径运行 Windows 完整检查。混合改动取最高风险，无法确定范围完整执行；最终门禁要求所有适用任务真实成功，不把意外 skipped 算通过。自动化检查不能证明新编译命令有效；修改工具链或实际编译参数时须另行手动运行受影响平台的完整检查。
 
-本地 `pnpm run ci` 默认完整执行；显式 `node scripts/ci.mjs --scope docs|automation|frontend` 与远端轻检查复用相同步骤。日常 `CI` 手动触发运行 Windows 完整检查。同 PR 新提交取消旧运行；不实现历史凭据复用，不新增 `actions: read`。AI review 保留辅助意见，但不作为必需检查或自动合并裁判；维护者或获授权助手须处理实质问题后通过正常 PR 合并，不使用管理员绕过。历史失败记录保留，验收看最新提交适用检查。
+本地 `pnpm run ci` 默认完整执行；显式 `node scripts/ci.mjs --scope docs|automation|frontend` 与远端轻检查复用相同步骤。日常 `CI` 手动触发运行 Windows 完整检查。同 PR 新提交取消旧运行；不实现历史凭据复用，不新增 `actions: read`。2026-11-01 经用户批准，重构期间暂停 AI review：远端 workflow 已禁用，移除 `.github/workflows/ai-review.yml`，不修改必需的 `CI gate`。重构验收完成后从 Git 历史恢复该文件并执行 `gh workflow enable ai-review.yml -R ouraihub/Aether`；恢复后仍仅作辅助意见，不启用自动合并。维护者或获授权助手须处理实质问题后通过正常 PR 合并，不使用管理员绕过；历史失败记录保留，验收看最新提交适用检查。
 
 完整检查还包含纯support/chat/images、独立conversations和插件单feature编译门禁，以及`node scripts/contracts-check.mjs`：AJV共享样本、TypeScript绑定赋值和真实Rust序列化共同校验。Native宿主使用`aether-runtime`运行/会话服务，Tauri插件只做IPC/生命周期适配；外仓升级前阅读[破坏性迁移与验收](docs/24-详细设计-职责分层与实现契约.md)。
 

@@ -83,7 +83,12 @@ function parseProvider(value: unknown): ProviderRecord {
       : { basicAuthUsername: string(data.basicAuthUsername, 'basicAuthUsername') }),
   }
 }
-function scope(actor: Actor, capability: SearchCap, provider: string, keyId: string): CredentialScope {
+function scope(
+  actor: Actor,
+  capability: SearchCap,
+  provider: string,
+  keyId: string,
+): CredentialScope {
   return {
     applicationId: actor.applicationId,
     tenantId: actor.tenantId,
@@ -114,7 +119,11 @@ export class SearchService {
     provider: string,
   ): Promise<{ document: StoredDocument | null; value: ProviderRecord }> {
     providerFor(capability, provider)
-    const document = await this.options.documents.get(actor, 'search.providers', partition(capability, provider))
+    const document = await this.options.documents.get(
+      actor,
+      'search.providers',
+      partition(capability, provider),
+    )
     return { document, value: document ? parseProvider(document.value) : { keys: [] } }
   }
   async preferences(actor: Actor): Promise<SearchPreferences> {
@@ -141,11 +150,20 @@ export class SearchService {
     providerFor(capability, provider)
     return provider
   }
-  private async open(actor: Actor, capability: SearchCap, provider: string, key: KeyRecord): Promise<string> {
-    const bytes = await this.options.credentials.open(scope(actor, capability, provider, key.id), key.sealed)
+  private async open(
+    actor: Actor,
+    capability: SearchCap,
+    provider: string,
+    key: KeyRecord,
+  ): Promise<string> {
+    const bytes = await this.options.credentials.open(
+      scope(actor, capability, provider, key.id),
+      key.sealed,
+    )
     try {
       const value = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-      if (!value.trim() || value.length > 4096) throw new KitFailure('needs_config', 'Search credential unavailable')
+      if (!value.trim() || value.length > 4096)
+        throw new KitFailure('needs_config', 'Search credential unavailable')
       return value
     } finally {
       bytes.fill(0)
@@ -180,7 +198,8 @@ export class SearchService {
         ...(value.baseUrl ? { baseUrl: value.baseUrl } : {}),
         ...(value.basicAuthUsername ? { basicAuthUsername: value.basicAuthUsername } : {}),
         keys,
-        ready: (config.keyMode !== 'required' || readable > 0) && (!value.keys.length || readable > 0),
+        ready:
+          (config.keyMode !== 'required' || readable > 0) && (!value.keys.length || readable > 0),
       })
     }
     return {
@@ -200,13 +219,15 @@ export class SearchService {
       const baseUrl = string(data.baseUrl, 'baseUrl').trim()
       if (new TextEncoder().encode(string(data.baseUrl, 'baseUrl')).length > 8192)
         throw badRequest('baseUrl', 'too_long', 8192)
-      if (provider !== 'fetch' && baseUrl) await this.options.checkTarget(validateTarget(baseUrl), signal)
+      if (provider !== 'fetch' && baseUrl)
+        await this.options.checkTarget(validateTarget(baseUrl), signal)
       delete value.baseUrl
       if (provider !== 'fetch' && baseUrl) value.baseUrl = baseUrl
     }
     if (data.basicAuthUsername !== undefined) {
       const username = string(data.basicAuthUsername, 'basicAuthUsername').trim()
-      if (new TextEncoder().encode(username).length > 200) throw badRequest('basicAuthUsername', 'too_long', 200)
+      if (new TextEncoder().encode(username).length > 200)
+        throw badRequest('basicAuthUsername', 'too_long', 200)
       if (!spec.basicAuth && username) throw badRequest('basicAuthUsername', 'unsupported')
       delete value.basicAuthUsername
       if (spec.basicAuth && username) value.basicAuthUsername = username
@@ -220,12 +241,22 @@ export class SearchService {
     )
     return this.settings(actor, capability)
   }
-  async setDefault(actor: Actor, capability: SearchCap, provider: string): Promise<SearchSettingsDto> {
+  async setDefault(
+    actor: Actor,
+    capability: SearchCap,
+    provider: string,
+  ): Promise<SearchSettingsDto> {
     providerFor(capability, provider)
     const old = await this.options.documents.get(actor, 'search.defaults', capability)
-    await this.options.documents.compareAndSet(actor, 'search.defaults', capability, old?.revision ?? null, {
-      provider,
-    })
+    await this.options.documents.compareAndSet(
+      actor,
+      'search.defaults',
+      capability,
+      old?.revision ?? null,
+      {
+        provider,
+      },
+    )
     return this.settings(actor, capability)
   }
   async saveKey(
@@ -241,7 +272,8 @@ export class SearchService {
     if (!plaintext || plaintext.length > 4096) throw badRequest('value', 'invalid', 4096)
     const { document, value } = await this.stored(actor, capability, provider)
     const existing = keyId === undefined ? undefined : value.keys.find((key) => key.id === keyId)
-    if (keyId !== undefined && !existing) throw new KitFailure('not_found', 'Search key not found', { field: 'key' })
+    if (keyId !== undefined && !existing)
+      throw new KitFailure('not_found', 'Search key not found', { field: 'key' })
     if (!existing && value.keys.length >= 16) throw badRequest('keys', 'too_many', 16)
     const id = keyId ?? crypto.randomUUID()
     const bytes = new TextEncoder().encode(plaintext)
@@ -262,7 +294,12 @@ export class SearchService {
     )
     return this.settings(actor, capability)
   }
-  async removeKey(actor: Actor, capability: SearchCap, provider: string, keyId: string): Promise<SearchSettingsDto> {
+  async removeKey(
+    actor: Actor,
+    capability: SearchCap,
+    provider: string,
+    keyId: string,
+  ): Promise<SearchSettingsDto> {
     const { document, value } = await this.stored(actor, capability, provider)
     if (!value.keys.some((key) => key.id === keyId))
       throw new KitFailure('not_found', 'Search key not found', { field: 'key' })
@@ -298,7 +335,10 @@ export class SearchService {
     const { document, value } = await this.stored(actor, capability, provider)
     if (!document) return
     for (const key of value.keys)
-      key.sealed = await this.options.credentials.rotate(scope(actor, capability, provider, key.id), key.sealed)
+      key.sealed = await this.options.credentials.rotate(
+        scope(actor, capability, provider, key.id),
+        key.sealed,
+      )
     await this.options.documents.compareAndSet(
       actor,
       'search.providers',
@@ -307,7 +347,11 @@ export class SearchService {
       value,
     )
   }
-  async resolve(actor: Actor, capability: SearchCap, explicitProvider?: string): Promise<ResolvedSearchConfig> {
+  async resolve(
+    actor: Actor,
+    capability: SearchCap,
+    explicitProvider?: string,
+  ): Promise<ResolvedSearchConfig> {
     const provider = explicitProvider ?? (await this.selected(actor, capability))
     const { config } = providerFor(capability, provider)
     const { value } = await this.stored(actor, capability, provider)
@@ -339,12 +383,29 @@ export class SearchService {
   }
   async fetch(actor: Actor, rawUrl: string, signal?: AbortSignal): Promise<SearchPage> {
     const url = validateTarget(rawUrl)
-    return fetchPage(await this.resolve(actor, 'fetch'), url, this.options.outbound, this.options.checkTarget, signal)
+    return fetchPage(
+      await this.resolve(actor, 'fetch'),
+      url,
+      this.options.outbound,
+      this.options.checkTarget,
+      signal,
+    )
   }
-  async check(actor: Actor, capability: SearchCap, provider: string, signal?: AbortSignal): Promise<{ count: number }> {
+  async check(
+    actor: Actor,
+    capability: SearchCap,
+    provider: string,
+    signal?: AbortSignal,
+  ): Promise<{ count: number }> {
     const snapshot = await this.resolve(actor, capability, provider)
     if (capability === 'fetch') {
-      await fetchPage(snapshot, 'https://example.com', this.options.outbound, this.options.checkTarget, signal)
+      await fetchPage(
+        snapshot,
+        'https://example.com',
+        this.options.outbound,
+        this.options.checkTarget,
+        signal,
+      )
       return { count: 1 }
     }
     const result = await searchQuery(snapshot, 'web search', this.options.outbound, signal)
@@ -374,7 +435,8 @@ export class SearchService {
       search: 'POST',
       fetch: 'POST',
     }
-    if (!methods[route] || request.method !== methods[route]) throw badRequest('route', 'unsupported')
+    if (!methods[route] || request.method !== methods[route])
+      throw badRequest('route', 'unsupported')
     if (url.search) throw badRequest('query', 'unsupported')
     let raw: unknown
     try {
@@ -403,8 +465,10 @@ export class SearchService {
     const data = input(raw, names)
     const capability = cap(data.capability)
     const provider = string(data.provider, 'provider')
-    if (route === 'default') return Response.json(await this.setDefault(actor, capability, provider))
-    if (route === 'check') return Response.json(await this.check(actor, capability, provider, signal))
+    if (route === 'default')
+      return Response.json(await this.setDefault(actor, capability, provider))
+    if (route === 'check')
+      return Response.json(await this.check(actor, capability, provider, signal))
     if (route === 'keys/reveal')
       return Response.json(
         await this.reveal(
@@ -417,7 +481,9 @@ export class SearchService {
         ),
       )
     if (request.method === 'DELETE')
-      return Response.json(await this.removeKey(actor, capability, provider, string(data.keyId, 'keyId')))
+      return Response.json(
+        await this.removeKey(actor, capability, provider, string(data.keyId, 'keyId')),
+      )
     return Response.json(
       await this.saveKey(
         actor,

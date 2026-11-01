@@ -15,6 +15,8 @@ tokio.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+aether-testkit.workspace = true
+tokio = { workspace = true, features = ["net", "io-util"] }
 tempfile.workspace = true
 
 [lints]

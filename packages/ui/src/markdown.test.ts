@@ -45,9 +45,11 @@ const text = '<script>not executable</script>'
 [safe](https://example.com)`)
     const body = document.createElement('div')
     body.innerHTML = html
-    for (const tag of ['h1', 'ul', 'blockquote', 'pre', 'table']) expect(body.querySelector(tag)).not.toBeNull()
+    for (const tag of ['h1', 'ul', 'blockquote', 'pre', 'table'])
+      expect(body.querySelector(tag)).not.toBeNull()
     expect(body.querySelector('script, iframe, [onload], [onerror]')).toBeNull()
     expect(body.querySelector('pre code')?.textContent).toContain('<script>not executable</script>')
-    for (const link of body.querySelectorAll('a[href]')) expect(link.getAttribute('href')).toMatch(/^https:\/\//)
+    for (const link of body.querySelectorAll('a[href]'))
+      expect(link.getAttribute('href')).toMatch(/^https:\/\//)
   })
 })

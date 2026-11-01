@@ -54,19 +54,33 @@ class FakeStore implements DocumentStore {
     await hook?.()
     const composite = this.key(owner, collection, key),
       prior = this.rows.get(composite)
-    if ((prior?.revision ?? null) !== expectedRevision) throw new KitFailure('conflict', 'Revision conflict')
+    if ((prior?.revision ?? null) !== expectedRevision)
+      throw new KitFailure('conflict', 'Revision conflict')
     const row = { key, revision: (prior?.revision ?? 0) + 1, value: structuredClone(value) }
     this.rows.set(composite, row)
     return structuredClone(row)
   }
-  async remove(owner: Actor, collection: string, key: string, expectedRevision: number): Promise<void> {
+  async remove(
+    owner: Actor,
+    collection: string,
+    key: string,
+    expectedRevision: number,
+  ): Promise<void> {
     const composite = this.key(owner, collection, key)
-    if (this.rows.get(composite)?.revision !== expectedRevision) throw new KitFailure('conflict', 'Revision conflict')
+    if (this.rows.get(composite)?.revision !== expectedRevision)
+      throw new KitFailure('conflict', 'Revision conflict')
     this.rows.delete(composite)
   }
 }
 function request(overrides: Partial<RunRequest> = {}): RunRequest {
-  return { purpose: 'chat', skills: [], input: 'question', regenerate: false, language: 'en', ...overrides }
+  return {
+    purpose: 'chat',
+    skills: [],
+    input: 'question',
+    regenerate: false,
+    language: 'en',
+    ...overrides,
+  }
 }
 function execution(prepared: PreparedAction, runId: string): RunInput {
   return {
@@ -129,13 +143,26 @@ function summary(text = 'answer'): RunSummary {
     exhausted: false,
   }
 }
-function setup(): { service: ConversationService; store: FakeStore; advance: (time: number) => void } {
+function setup(): {
+  service: ConversationService
+  store: FakeStore
+  advance: (time: number) => void
+  sleeps: number[]
+} {
   const store = new FakeStore()
+  const sleeps: number[] = []
   let now = 1000,
     id = 0
   return {
     store,
-    service: new ConversationService({ store, now: () => now, newId: () => `copy-${++id}` }),
+    sleeps,
+    service: new ConversationService({
+      store,
+      now: () => now,
+      newId: () => `copy-${++id}`,
+      // Record the backoff schedule instead of waiting on a real timer.
+      retry: { sleep: async (ms) => void sleeps.push(ms), random: () => 0.5 },
+    }),
     advance: (time) => {
       now = time
     },
@@ -186,7 +213,9 @@ test('actor isolation, final usage/cost projection, and native reasoning privacy
     service.get(handle.conversationId, { ...actor, subjectId: 'other' }),
     (error: unknown) => error instanceof KitFailure && error.code === 'not_found',
   )
-  await assert.rejects(service.get(handle.conversationId, { ...actor, applicationId: 'another-app' }))
+  await assert.rejects(
+    service.get(handle.conversationId, { ...actor, applicationId: 'another-app' }),
+  )
   await assert.rejects(service.finish(handle, summary('overwrite'), actor), reason('turn_finished'))
 })
 
@@ -196,7 +225,11 @@ test('retry retains candidate identity, original images and creation TTL; transl
   const first = await complete(service, 'first', request({ images: [image] }), 'visible reply')
   advance(9000)
   const prepared = await service.resolve(
-    request({ conversationId: first.conversationId, retryTurnId: first.turnId, input: 'ignored client input' }),
+    request({
+      conversationId: first.conversationId,
+      retryTurnId: first.turnId,
+      input: 'ignored client input',
+    }),
     actor,
   )
   assert.equal(prepared.input, 'question')
@@ -212,7 +245,11 @@ test('retry retains candidate identity, original images and creation TTL; transl
   assert.equal(document.turns[1]?.questionId, 'first')
   assert.equal(document.summary.selectedTurnId, 'first')
   const translate = await service.resolve(
-    request({ conversationId: first.conversationId, translateTurnId: 'retry', targetLanguage: ' French ' }),
+    request({
+      conversationId: first.conversationId,
+      translateTurnId: 'retry',
+      targetLanguage: ' French ',
+    }),
     actor,
   )
   assert.ok(translate.input.includes('into French.'))
@@ -233,7 +270,11 @@ test('retry retains candidate identity, original images and creation TTL; transl
 
 test('reservation rejects source edit and image expiry after preparation without partial updates', async () => {
   const { service, store } = setup(),
-    first = await complete(service, 'first', request({ images: [{ mime: 'image/png', data: 'AQ==' }] }))
+    first = await complete(
+      service,
+      'first',
+      request({ images: [{ mime: 'image/png', data: 'AQ==' }] }),
+    )
   const prepared = await service.resolve(
     request({ conversationId: first.conversationId, retryTurnId: first.turnId }),
     actor,
@@ -246,7 +287,11 @@ test('reservation rejects source edit and image expiry after preparation without
   )
   assert.deepEqual([...store.rows.values()], before)
   const translation = await service.resolve(
-    request({ conversationId: first.conversationId, translateTurnId: first.turnId, targetLanguage: 'de' }),
+    request({
+      conversationId: first.conversationId,
+      translateTurnId: first.turnId,
+      targetLanguage: 'de',
+    }),
     actor,
   )
   await service.editTurn(first.conversationId, first.turnId, 'edited', 'answer', actor)
@@ -284,21 +329,78 @@ test('CAS retries unrelated rename but enforces implicit selected head and singl
   await service.reserve(explicit, execution(explicit, 'explicit'), 'explicit', actor)
 })
 
+test('rename and image purge retry a concurrent write instead of failing; backoff doubles', async () => {
+  const { service, store, sleeps } = setup(),
+    first = await complete(service, 'first')
+  // Another writer commits between rename's read and its CAS.
+  store.beforeCas = async () => {
+    await service.rename(first.conversationId, 'other', actor)
+  }
+  const renamed = await service.rename(first.conversationId, 'mine', actor)
+  assert.equal(renamed.title, 'mine')
+  assert.equal((await service.get(first.conversationId, actor)).summary.title, 'mine')
+  assert.deepEqual(sleeps, [5])
+
+  const images = request({ images: [{ mime: 'image/png', data: 'iVBORw0KGgo=' }] })
+  await complete(service, 'with-image', images)
+  store.beforeCas = async () => {
+    await service.rename('with-image-conversation', 'renamed meanwhile', actor)
+  }
+  assert.equal(await service.purgeImages(1001, actor), 1)
+  const purged = await service.get('with-image-conversation', actor)
+  assert.equal(purged.summary.title, 'renamed meanwhile')
+  assert.equal(purged.turns[0]?.images[0]?.url, null)
+})
+
+test('only revision conflicts are retried; persistent contention ends as conversation_contended', async () => {
+  const { service, store, sleeps } = setup(),
+    first = await complete(service, 'first')
+  // A semantic conflict (the turn already finished) is not retried.
+  await assert.rejects(service.finish(first, summary('again'), actor), reason('turn_finished'))
+  assert.deepEqual(sleeps, [])
+  // A writer that wins every race exhausts the bounded schedule.
+  const cas = store.compareAndSet.bind(store)
+  store.compareAndSet = async () => {
+    throw new KitFailure('conflict', 'Revision conflict')
+  }
+  await assert.rejects(
+    service.rename(first.conversationId, 'never', actor),
+    reason('conversation_contended'),
+  )
+  assert.deepEqual(sleeps, [5, 10, 20, 40, 80, 160, 320])
+  store.compareAndSet = cas
+})
+
 test('edit CAS leaf restrictions, removal reparents and fixes supersedes, fork copies path and images', async () => {
   const { service } = setup(),
     first = await complete(service, 'first')
-  await complete(service, 'retry', request({ conversationId: first.conversationId, retryTurnId: 'first' }))
-  await complete(service, 'child', request({ conversationId: first.conversationId, replyToId: 'first' }))
+  await complete(
+    service,
+    'retry',
+    request({ conversationId: first.conversationId, retryTurnId: 'first' }),
+  )
+  await complete(
+    service,
+    'child',
+    request({ conversationId: first.conversationId, replyToId: 'first' }),
+  )
   await complete(
     service,
     'translation',
-    request({ conversationId: first.conversationId, translateTurnId: 'first', targetLanguage: 'fr' }),
+    request({
+      conversationId: first.conversationId,
+      translateTurnId: 'first',
+      targetLanguage: 'fr',
+    }),
   )
   await assert.rejects(
     service.editTurn(first.conversationId, 'first', 'text', 'answer', actor),
     reason('turn_has_dependents'),
   )
-  await assert.rejects(service.editTurn(first.conversationId, 'child', 'text', 'wrong', actor), reason('text_changed'))
+  await assert.rejects(
+    service.editTurn(first.conversationId, 'child', 'text', 'wrong', actor),
+    reason('text_changed'),
+  )
   await service.selectTurn(first.conversationId, 'first', actor)
   const removed = await service.removeTurn(first.conversationId, 'first', actor)
   assert.deepEqual(
@@ -328,7 +430,11 @@ test('generated image append persists; recover only touches matching running pla
     (error: unknown) => error instanceof KitFailure && error.code === 'not_found',
   )
   const reserved = await service.reserve(prepared, execution(prepared, 'run'), 'run', actor)
-  const refs = await service.addGenerated(reserved.handle, [{ mime: 'image/png', data: 'AQ==' }], actor)
+  const refs = await service.addGenerated(
+    reserved.handle,
+    [{ mime: 'image/png', data: 'AQ==' }],
+    actor,
+  )
   assert.ok(refs[0]?.url?.endsWith('/generated/0'))
   await assert.rejects(service.recover({ ...plan, runId: 'wrong' }, actor))
   const recovered = await service.recover(plan, actor)
@@ -340,36 +446,55 @@ test('generated image append persists; recover only touches matching running pla
 
 test('HTTP validates fields and controlled image routes remain owner scoped', async () => {
   const { service } = setup(),
-    first = await complete(service, 'first', request({ images: [{ mime: 'image/png', data: 'AQ==' }] }))
+    first = await complete(
+      service,
+      'first',
+      request({ images: [{ mime: 'image/png', data: 'AQ==' }] }),
+    )
   const context = { actor, signal: new AbortController().signal, requestId: 'test', now: 1000 }
-  const bad = new Request(`https://worker.example/api/v1/conversations/${first.conversationId}/rename`, {
-    method: 'POST',
-    body: JSON.stringify({ title: 'name', owner: 'other' }),
-  })
+  const bad = new Request(
+    `https://worker.example/api/v1/conversations/${first.conversationId}/rename`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ title: 'name', owner: 'other' }),
+    },
+  )
   await assert.rejects(
     service.handle(bad, context),
     (error: unknown) => error instanceof KitFailure && error.code === 'bad_request',
   )
   const response = await service.handle(
-    new Request(`https://worker.example/api/v1/conversations/${first.conversationId}/turns/first/images/input/0`),
+    new Request(
+      `https://worker.example/api/v1/conversations/${first.conversationId}/turns/first/images/input/0`,
+    ),
     context,
   )
   assert.ok(response)
   assert.equal(response.headers.get('cache-control'), 'private, no-store')
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), new Uint8Array([1]))
-  assert.equal(await service.handle(new Request('https://worker.example/api/v1/providers'), context), null)
+  assert.equal(
+    await service.handle(new Request('https://worker.example/api/v1/providers'), context),
+    null,
+  )
 })
 
 test('malformed unknown stored document fails closed and actions reject invalid combinations', async () => {
   const { service, store } = setup()
-  await store.compareAndSet(actor, COLLECTION, 'broken', null, { version: 1, summary: { id: 'broken' }, turns: [] })
+  await store.compareAndSet(actor, COLLECTION, 'broken', null, {
+    version: 1,
+    summary: { id: 'broken' },
+    turns: [],
+  })
   await assert.rejects(
     service.get('broken', actor),
     (error: unknown) => error instanceof KitFailure && error.code === 'incompatible_db',
   )
   const first = await complete(service, 'first')
   await assert.rejects(
-    service.resolve(request({ conversationId: first.conversationId, retryTurnId: 'first', regenerate: true }), actor),
+    service.resolve(
+      request({ conversationId: first.conversationId, retryTurnId: 'first', regenerate: true }),
+      actor,
+    ),
   )
   await assert.rejects(
     service.resolve(
@@ -385,7 +510,11 @@ test('malformed unknown stored document fails closed and actions reject invalid 
 
 test('scope listing and TTL sweep traverse more than one page', async () => {
   const { service, store } = setup(),
-    first = await complete(service, 'seed', request({ images: [{ mime: 'image/png', data: 'AQ==' }] }))
+    first = await complete(
+      service,
+      'seed',
+      request({ images: [{ mime: 'image/png', data: 'AQ==' }] }),
+    )
   const source = await store.get(actor, COLLECTION, first.conversationId)
   assert.ok(source)
   for (let index = 0; index < 205; index++) {
@@ -413,7 +542,10 @@ test('regenerate may presearch while explicit retry and translation cannot', asy
   )
   assert.equal(regenerate.effectiveRequest.input, 'question')
   await assert.rejects(
-    service.resolve(request({ conversationId: first.conversationId, retryTurnId: 'first', webSearch: true }), actor),
+    service.resolve(
+      request({ conversationId: first.conversationId, retryTurnId: 'first', webSearch: true }),
+      actor,
+    ),
   )
   await assert.rejects(
     service.resolve(
@@ -430,7 +562,10 @@ test('regenerate may presearch while explicit retry and translation cannot', asy
 
 test('fork copies input and generated metadata including expired rows without extending TTL', async () => {
   const { service, store, advance } = setup(),
-    prepared = await service.resolve(request({ images: [{ mime: 'image/png', data: 'AQ==' }] }), actor)
+    prepared = await service.resolve(
+      request({ images: [{ mime: 'image/png', data: 'AQ==' }] }),
+      actor,
+    )
   const reserved = await service.reserve(prepared, execution(prepared, 'first'), 'first', actor)
   await service.addGenerated(reserved.handle, [{ mime: 'image/png', data: 'Ag==' }], actor)
   await service.finish(reserved.handle, summary(), actor)
