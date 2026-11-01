@@ -3,11 +3,19 @@ import { buildClaudePosixCommand, buildMcpJsonConfig } from './config'
 
 describe('MCP configuration generation', () => {
   it('preserves the existing JSON structure and encodes dynamic keys and values', () => {
-    const input = { serverName: '__proto__"\n', url: 'https://example.com/"\\\n', token: 'a"\\\n$`;' }
+    const input = {
+      serverName: '__proto__"\n',
+      url: 'https://example.com/"\\\n',
+      token: 'a"\\\n$`;',
+    }
     const text = buildMcpJsonConfig(input)
     expect(JSON.parse(text)).toEqual({
       mcpServers: {
-        [input.serverName]: { type: 'http', url: input.url, headers: { Authorization: `Bearer ${input.token}` } },
+        [input.serverName]: {
+          type: 'http',
+          url: input.url,
+          headers: { Authorization: `Bearer ${input.token}` },
+        },
       },
     })
     expect(text).toBe(JSON.stringify(JSON.parse(text), null, 2))
@@ -15,7 +23,11 @@ describe('MCP configuration generation', () => {
 
   it('quotes every dynamic POSIX argument including the entire authorization header', () => {
     expect(
-      buildClaudePosixCommand({ serverName: 'aether', url: 'http://127.0.0.1:3849/mcp', token: 'example-token' }),
+      buildClaudePosixCommand({
+        serverName: 'aether',
+        url: 'http://127.0.0.1:3849/mcp',
+        token: 'example-token',
+      }),
     ).toBe(
       "claude mcp add --transport http 'aether' 'http://127.0.0.1:3849/mcp' --header 'Authorization: Bearer example-token'",
     )

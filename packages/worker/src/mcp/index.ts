@@ -26,7 +26,11 @@ function rpc(id: unknown, result: unknown, error = false): Response {
     ...(error ? { error: result } : { result }),
   }
   if (encoder.encode(JSON.stringify(message)).byteLength > MAX_RESULT_BYTES)
-    return json({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'Result budget exceeded' } })
+    return json({
+      jsonrpc: '2.0',
+      id: message.id,
+      error: { code: -32603, message: 'Result budget exceeded' },
+    })
   return json(message)
 }
 function rpcError(id: unknown, code: number, message: string): Response {
@@ -79,7 +83,8 @@ export class McpService {
       !url.pathname.startsWith('/.well-known/oauth-')
     )
       return null
-    if (url.origin !== this.options.origin || url.protocol !== 'https:') return json({ error: 'invalid_request' }, 400)
+    if (url.origin !== this.options.origin || url.protocol !== 'https:')
+      return json({ error: 'invalid_request' }, 400)
     if (url.pathname === '/mcp') return this.mcp(request)
     return this.oauth.handle(request)
   }
@@ -99,12 +104,18 @@ export class McpService {
           !value.enabledScopes.every((scope: unknown) => typeof scope === 'string')
         )
           throw badRequest('enabledScopes', 'invalid')
-        const requested = value.enabledScopes.length ? this.auth.requested(value.enabledScopes, context.actor) : []
+        const requested = value.enabledScopes.length
+          ? this.auth.requested(value.enabledScopes, context.actor)
+          : []
         if (!(await this.options.authorizeConsent(context.actor, requested, request))) forbidden()
-        return json({ ...(await this.auth.saveSettings(context.actor, value)), scopes: this.options.scopes })
+        return json({
+          ...(await this.auth.saveSettings(context.actor, value)),
+          scopes: this.options.scopes,
+        })
       }
     }
-    if (path === '/api/v1/mcp/grants' && request.method === 'GET') return json(await this.auth.grants(context.actor))
+    if (path === '/api/v1/mcp/grants' && request.method === 'GET')
+      return json(await this.auth.grants(context.actor))
     if (path === '/api/v1/mcp/api-keys') {
       if (request.method === 'GET') return json(await this.auth.keys(context.actor))
       if (request.method === 'POST')
@@ -114,26 +125,40 @@ export class McpService {
     if (revoke && request.method === 'POST') {
       const id = revoke[2]
       if (!id) throw badRequest('id', 'invalid')
-      await this.auth.revoke(context.actor, revoke[1] === 'grants' ? 'grant' : 'key', decodeURIComponent(id))
+      await this.auth.revoke(
+        context.actor,
+        revoke[1] === 'grants' ? 'grant' : 'key',
+        decodeURIComponent(id),
+      )
       return json({ ok: true })
     }
     return json({ code: 'not_found', message: 'Route not found' }, 404)
   }
   private async mcp(request: Request): Promise<Response> {
     const origin = request.headers.get('Origin')
-    if (origin !== null && ![this.options.origin, ...(this.options.mcpOrigins ?? [])].includes(origin))
+    if (
+      origin !== null &&
+      ![this.options.origin, ...(this.options.mcpOrigins ?? [])].includes(origin)
+    )
       return json({ error: 'forbidden' }, 403)
-    if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'POST' } })
+    if (request.method !== 'POST')
+      return new Response(null, { status: 405, headers: { Allow: 'POST' } })
     const bearer = /^Bearer[\t ]+([^\s,]+)$/iu.exec(request.headers.get('Authorization') ?? '')?.[1]
     const authentication = bearer ? await this.auth.authenticate(bearer) : null
     if (!authentication)
       return json({ error: 'unauthorized' }, 401, {
         'WWW-Authenticate': `Bearer resource_metadata="${this.options.origin}/.well-known/oauth-protected-resource"`,
       })
-    if (this.options.scopes.some((scope) => scope.id === 'mcp:access') && !authentication.scopes.includes('mcp:access'))
+    if (
+      this.options.scopes.some((scope) => scope.id === 'mcp:access') &&
+      !authentication.scopes.includes('mcp:access')
+    )
       return json({ error: 'forbidden' }, 403)
     const maxBytes =
-      this.options.tools.reduce((max, tool) => Math.max(max, tool.maxRequestBytes ?? 65536), 65536) + 8192
+      this.options.tools.reduce(
+        (max, tool) => Math.max(max, tool.maxRequestBytes ?? 65536),
+        65536,
+      ) + 8192
     let message: unknown
     try {
       message = JSON.parse(await body(request, maxBytes))
@@ -146,17 +171,26 @@ export class McpService {
       !object(message) ||
       message.jsonrpc !== '2.0' ||
       typeof message.method !== 'string' ||
-      ('id' in message && typeof message.id !== 'string' && typeof message.id !== 'number' && message.id !== null)
+      ('id' in message &&
+        typeof message.id !== 'string' &&
+        typeof message.id !== 'number' &&
+        message.id !== null)
     )
       return rpcError(null, -32600, 'Invalid request')
     if (!('id' in message)) {
-      if (message.method === 'notifications/initialized' || message.method === 'notifications/cancelled')
+      if (
+        message.method === 'notifications/initialized' ||
+        message.method === 'notifications/cancelled'
+      )
         return new Response(null, { status: 202 })
       return rpcError(null, -32600, 'Invalid request')
     }
     const id = message.id
     if (message.method === 'initialize') {
-      if (!object(message.params) || !['2024-11-05', '2025-03-26'].includes(String(message.params.protocolVersion)))
+      if (
+        !object(message.params) ||
+        !['2024-11-05', '2025-03-26'].includes(String(message.params.protocolVersion))
+      )
         return rpcError(id, -32602, 'Unsupported protocol version')
       return rpc(id, {
         protocolVersion: message.params.protocolVersion,
@@ -208,18 +242,31 @@ export class McpService {
       if (signal.aborted || !(await this.options.authorizeTool(auth.actor, tool, args, signal)))
         return rpcError(id, -32001, 'Forbidden')
       if (signal.aborted) return rpcError(id, -32603, 'Cancelled')
-      const result = await tool.handler(args, { actor: auth.actor, tokenId: auth.tokenId, scopes: auth.scopes, signal })
+      const result = await tool.handler(args, {
+        actor: auth.actor,
+        tokenId: auth.tokenId,
+        scopes: auth.scopes,
+        signal,
+      })
       if (result === undefined) throw new KitFailure('internal', 'Invalid tool result')
       const payload = object(result)
-        ? { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result, isError: false }
+        ? {
+            content: [{ type: 'text', text: JSON.stringify(result) }],
+            structuredContent: result,
+            isError: false,
+          }
         : {
-            content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }],
+            content: [
+              { type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) },
+            ],
             isError: false,
           }
       const serialized = JSON.stringify({ jsonrpc: '2.0', id, result: payload })
       if (encoder.encode(serialized).byteLength > MAX_RESULT_BYTES)
         return rpcError(id, -32603, 'Result budget exceeded')
-      return new Response(serialized, { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+      return new Response(serialized, {
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      })
     } catch (error) {
       const safe = safeError(error)
       const code =

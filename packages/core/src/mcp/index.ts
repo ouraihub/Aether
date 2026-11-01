@@ -53,8 +53,10 @@ export const MAX_MESSAGE_BYTES = 2 * 1024 * 1024
 const MAX_SCHEMA_BYTES = 32 * 1024
 const CACHE_AGE_MS = 10 * 60 * 1000
 const encoder = new TextEncoder()
-const invalid = (): KitFailure => new KitFailure('upstream', 'Invalid MCP response', { reason: 'invalid_response' })
-const budget = (): KitFailure => new KitFailure('upstream', 'MCP message limit exceeded', { reason: 'budget_exceeded' })
+const invalid = (): KitFailure =>
+  new KitFailure('upstream', 'Invalid MCP response', { reason: 'invalid_response' })
+const budget = (): KitFailure =>
+  new KitFailure('upstream', 'MCP message limit exceeded', { reason: 'budget_exceeded' })
 const abortFailure = (signal: AbortSignal): KitFailure =>
   signal.reason instanceof KitFailure ? signal.reason : cancelled()
 
@@ -116,7 +118,12 @@ function reason(error: KitFailure): string {
 }
 
 function envelope(value: unknown, id: number): Record<string, unknown> {
-  if (!record(value) || value.jsonrpc !== '2.0' || value.id !== id || 'result' in value === 'error' in value)
+  if (
+    !record(value) ||
+    value.jsonrpc !== '2.0' ||
+    value.id !== id ||
+    'result' in value === 'error' in value
+  )
     throw invalid()
   if ('error' in value) {
     if (
@@ -160,8 +167,14 @@ export function parseMcpCallResult(value: unknown): McpCallResult {
   }
 }
 
-async function readReply(response: Response, id: number, signal: AbortSignal): Promise<Record<string, unknown>> {
-  const sse = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() === 'text/event-stream'
+async function readReply(
+  response: Response,
+  id: number,
+  signal: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const sse =
+    response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ===
+    'text/event-stream'
   const contentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase()
   if (!sse && contentType !== 'application/json') throw invalid()
   if (!response.body) throw invalid()
@@ -270,7 +283,10 @@ class HttpConnection {
 
   private async handshake(signal: AbortSignal): Promise<void> {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(new KitFailure('timeout', 'MCP initialization timed out')), 10_000)
+    const timer = setTimeout(
+      () => controller.abort(new KitFailure('timeout', 'MCP initialization timed out')),
+      10_000,
+    )
     const combined = AbortSignal.any([signal, controller.signal])
     try {
       const result = await this.request(
@@ -314,7 +330,11 @@ class HttpConnection {
     const old = new Map(this.config.tools.map((tool) => [tool.name, tool.approval]))
     let cursor: string | undefined
     for (let page = 0; page < 10; page++) {
-      const result = await this.request('tools/list', cursor === undefined ? {} : { cursor }, signal)
+      const result = await this.request(
+        'tools/list',
+        cursor === undefined ? {} : { cursor },
+        signal,
+      )
       if (!Array.isArray(result.tools)) throw invalid()
       for (const tool of result.tools) {
         if (
@@ -332,7 +352,10 @@ class HttpConnection {
         if (encoder.encode(JSON.stringify(tool.inputSchema)).byteLength > MAX_SCHEMA_BYTES) continue
         tools.push({
           name: tool.name,
-          description: typeof tool.description === 'string' ? [...tool.description].slice(0, 1024).join('') : '',
+          description:
+            typeof tool.description === 'string'
+              ? [...tool.description].slice(0, 1024).join('')
+              : '',
           schema: tool.inputSchema,
           readOnly: record(tool.annotations) && tool.annotations.readOnlyHint === true,
           approval: old.get(tool.name) ?? 'ask',
@@ -340,14 +363,23 @@ class HttpConnection {
         })
       }
       if (!('nextCursor' in result)) return tools
-      if (typeof result.nextCursor !== 'string' || !result.nextCursor || cursors.has(result.nextCursor)) throw invalid()
+      if (
+        typeof result.nextCursor !== 'string' ||
+        !result.nextCursor ||
+        cursors.has(result.nextCursor)
+      )
+        throw invalid()
       cursors.add(result.nextCursor)
       cursor = result.nextCursor
     }
     throw budget()
   }
 
-  async call(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<McpCallResult> {
+  async call(
+    name: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<McpCallResult> {
     try {
       await this.initialize(signal)
     } catch (error) {
@@ -357,7 +389,8 @@ class HttpConnection {
     try {
       return parseMcpCallResult(await this.request('tools/call', { name, arguments: args }, signal))
     } catch (error) {
-      if (error instanceof RpcFailure) return { kind: 'failed', code: String(error.rpcCode), message: error.message }
+      if (error instanceof RpcFailure)
+        return { kind: 'failed', code: String(error.rpcCode), message: error.message }
       if (error instanceof RequestFailure && error.dispatched) {
         if (error.expired) this.reset()
         return { kind: 'unknown', reason: error.reason }
@@ -374,7 +407,10 @@ class HttpConnection {
     notification = false,
   ): Promise<Record<string, unknown>> {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(new KitFailure('timeout', 'MCP request timed out')), 60_000)
+    const timer = setTimeout(
+      () => controller.abort(new KitFailure('timeout', 'MCP request timed out')),
+      60_000,
+    )
     const combined = AbortSignal.any([signal, controller.signal])
     let dispatched = false
     let expired = false
@@ -414,7 +450,10 @@ class HttpConnection {
             (a === 203 && b === 0 && c === 113)
         } else
           restricted =
-            host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || !host.includes('.')
+            host === 'localhost' ||
+            host.endsWith('.localhost') ||
+            host.endsWith('.local') ||
+            !host.includes('.')
         if (restricted) throw badRequest('url', 'blocked_address')
       }
       for (const [key, value] of Object.entries(this.config.query)) url.searchParams.set(key, value)
@@ -440,7 +479,13 @@ class HttpConnection {
       if (combined.aborted) throw abortFailure(combined)
       dispatched = true
       const response = await abortable(
-        this.outbound.fetch(url.toString(), { method: 'POST', headers, body, signal: combined, redirect: 'error' }),
+        this.outbound.fetch(url.toString(), {
+          method: 'POST',
+          headers,
+          body,
+          signal: combined,
+          redirect: 'error',
+        }),
         combined,
       )
       if (!response.ok) {
@@ -502,7 +547,11 @@ export class McpSession {
   tools(): readonly McpTool[] {
     return this.catalogue
   }
-  async call(prefixed: string, args: Record<string, unknown>, signal: AbortSignal): Promise<McpCallResult> {
+  async call(
+    prefixed: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<McpCallResult> {
     const combined = AbortSignal.any([signal, this.shutdownSignal])
     if (combined.aborted) return { kind: 'failed', code: 'cancelled', message: 'Cancelled' }
     const target = this.calls.get(prefixed)
@@ -556,7 +605,9 @@ export class McpRuntime {
 
   private background(id: string): void {
     if (this.closing.signal.aborted || this.refreshing.has(id)) return
-    const task = this.track(this.backgroundTail.catch(() => {}).then(() => this.refresh(id, this.closing.signal)))
+    const task = this.track(
+      this.backgroundTail.catch(() => {}).then(() => this.refresh(id, this.closing.signal)),
+    )
     this.backgroundTail = task
     this.refreshing.set(id, task)
     void task.then(
@@ -566,7 +617,8 @@ export class McpRuntime {
   }
 
   session(signal: AbortSignal): Promise<McpSession> {
-    if (signal.aborted || this.closing.signal.aborted) return Promise.resolve(new McpSession([], this.closing.signal))
+    if (signal.aborted || this.closing.signal.aborted)
+      return Promise.resolve(new McpSession([], this.closing.signal))
     const combined = AbortSignal.any([signal, this.closing.signal])
     return this.track(this.prepare(combined))
   }
@@ -585,7 +637,8 @@ export class McpRuntime {
       const connection = new HttpConnection(this.outbound, config)
       if (config.tools.length) {
         servers.push({ config, connection })
-        if (config.tools.some((tool) => Date.now() - tool.fetchedAt > CACHE_AGE_MS)) this.background(config.id)
+        if (config.tools.some((tool) => Date.now() - tool.fetchedAt > CACHE_AGE_MS))
+          this.background(config.id)
       } else {
         try {
           const tools = await connection.discover(signal)

@@ -1,4 +1,10 @@
-import { KitClientError, type CallOptions, type ProbeResult, type Provider, type ProvidersPort } from '../ports'
+import {
+  KitClientError,
+  type CallOptions,
+  type ProbeResult,
+  type Provider,
+  type ProvidersPort,
+} from '../ports'
 import { adopt, probeTarget, savable, toSave, type ProviderDraft } from './draft'
 
 export interface ProviderProbeBatch {
@@ -12,14 +18,24 @@ export interface ProviderEditSession {
 }
 
 const cancelled = () =>
-  new KitClientError({ code: 'cancelled', message: 'Provider editing session cancelled', details: {} })
+  new KitClientError({
+    code: 'cancelled',
+    message: 'Provider editing session cancelled',
+    details: {},
+  })
 const identityError = () =>
-  new KitClientError({ code: 'internal', message: 'Saved provider identity is missing or ambiguous', details: {} })
+  new KitClientError({
+    code: 'internal',
+    message: 'Saved provider identity is missing or ambiguous',
+    details: {},
+  })
 // Copy plain DTO data without losing invalid numeric edits or retaining Svelte proxies.
 function snapshot<T>(value: T): T {
   if (Array.isArray(value)) return value.map((item) => snapshot(item)) as T
   if (value !== null && typeof value === 'object')
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, snapshot(item)])) as T
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, snapshot(item)]),
+    ) as T
   return value
 }
 export function createProviderEditSession(
@@ -111,15 +127,23 @@ export function createProviderEditSession(
     const run = async (): Promise<ProviderProbeBatch> => {
       await commit()
       ensureCurrent()
-      const endpoint = snapshot(state.readDraft().endpoints.find((item) => item.slug === slug) ?? null)
+      const endpoint = snapshot(
+        state.readDraft().endpoints.find((item) => item.slug === slug) ?? null,
+      )
       if (!endpoint)
-        throw new KitClientError({ code: 'not_found', message: 'Provider endpoint no longer exists', details: {} })
+        throw new KitClientError({
+          code: 'not_found',
+          message: 'Provider endpoint no longer exists',
+          details: {},
+        })
       const enabled = endpoint.saved?.keys.filter((key) => key.enabled) ?? []
       const keyIds = enabled.length >= 2 ? enabled.map((key) => key.id) : [null]
       const batch: ProviderProbeBatch = { results: [], usable: null }
       for (const keyId of keyIds) {
         ensureCurrent()
-        const result = await port.probe(probeTarget(endpoint, keyId ?? undefined), { signal: controller.signal })
+        const result = await port.probe(probeTarget(endpoint, keyId ?? undefined), {
+          signal: controller.signal,
+        })
         ensureCurrent()
         batch.results.push({ keyId, result })
         if (result.error === null) batch.usable ??= result

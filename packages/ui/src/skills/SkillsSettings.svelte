@@ -92,12 +92,16 @@
               <span class="flex min-w-0 items-center gap-2">
                 <span class="truncate font-mono text-sm">{skill.name}</span>
                 {#if skill.hasScripts}
-                  <span class="shrink-0 rounded border px-1.5 text-xs">{t('skills.has_scripts')}</span>
+                  <span class="shrink-0 rounded border px-1.5 text-xs"
+                    >{t('skills.has_scripts')}</span
+                  >
                 {/if}
               </span>
               <span class="text-muted-foreground truncate text-xs">
                 {skill.version ?? t('skills.unversioned')} · {t(`skills.origin.${skill.origin}`)} ·
-                {t('skills.revision', { revision: skill.revision })} · {t('skills.chars', { count: skill.bodyChars })}
+                {t('skills.revision', { revision: skill.revision })} · {t('skills.chars', {
+                  count: skill.bodyChars,
+                })}
                 {#if skill.fileCount > 0}· {t('skills.file_count', { count: skill.fileCount })}{/if}
               </span>
             </div>
@@ -126,8 +130,11 @@
               <Button size="sm" variant="outline" disabled={busy} onclick={() => edit(skill.id)}
                 >{t('skills.edit')}</Button
               >
-              <Button size="sm" variant="destructive" disabled={busy} onclick={() => void remove(skill)}
-                >{t('skills.delete')}</Button
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={busy}
+                onclick={() => void remove(skill)}>{t('skills.delete')}</Button
               >
             {/if}
           </li>

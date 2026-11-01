@@ -27,19 +27,31 @@ const model: Model = {
   pricing: null,
 }
 test('prepare enforces headers, reasoning and endpoint overrides without rotating explicit keys', () => {
-  const connection = prepare({ endpoint: { ...endpoint, imageBaseUrl: 'https://images.example/' }, model })
+  const connection = prepare({
+    endpoint: { ...endpoint, imageBaseUrl: 'https://images.example/' },
+    model,
+  })
   assert.equal(connection.baseUrl, 'https://provider.example/v1')
   assert.equal(connection.imageBaseUrl, 'https://images.example/v1')
   assert.deepEqual(connection.keys, endpoint.keys)
   assert.throws(() => validateHeaders({ Authorization: 'secret' }), /reserved/)
   assert.throws(() => validateHeaders({ ' X-Team': 'a', 'x-team': 'b' }), /invalid/)
-  assert.throws(() => prepare({ endpoint, model: { ...model, nativeWebSearch: true } }), /unsupported_protocol/)
-  assert.throws(() => prepare({ endpoint, model: { ...model, maxOutput: 128000 } }), /exceeds_context/)
+  assert.throws(
+    () => prepare({ endpoint, model: { ...model, nativeWebSearch: true } }),
+    /unsupported_protocol/,
+  )
+  assert.throws(
+    () => prepare({ endpoint, model: { ...model, maxOutput: 128000 } }),
+    /exceeds_context/,
+  )
   assert.throws(
     () =>
       prepare({
         endpoint,
-        model: { ...model, reasoning: { dialect: 'anthropic-budget', efforts: ['high'], budgetTokens: 2048 } },
+        model: {
+          ...model,
+          reasoning: { dialect: 'anthropic-budget', efforts: ['high'], budgetTokens: 2048 },
+        },
       }),
     /protocol_mismatch/,
   )
@@ -52,7 +64,10 @@ test('model inference preserves unknowns and official reasoning dialects', () =>
     inferReasoning('claude-opus-4.6', 'anthropic-messages', 'https://api.example', 4096)?.dialect,
     'anthropic-adaptive',
   )
-  assert.equal(inferReasoning('qwen3-max', 'openai-chat', 'https://dashscope.aliyuncs.com', 4096)?.dialect, 'qwen')
+  assert.equal(
+    inferReasoning('qwen3-max', 'openai-chat', 'https://dashscope.aliyuncs.com', 4096)?.dialect,
+    'qwen',
+  )
   assert.equal(inferReasoning('qwen3-max', 'openai-chat', 'https://relay.example', 4096), null)
 })
 test('probe fixes key order, auth and header precedence and narrows upstream models', async () => {

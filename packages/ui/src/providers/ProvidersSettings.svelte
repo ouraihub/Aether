@@ -87,22 +87,30 @@
     pricing: true,
   }
   /** A rejected model setting: the backend names field + reason; the model is `entity` or found by the local rules. */
-  function modelError(error: unknown, sent: ProviderDraft): { model: string | null; message: string } | null {
+  function modelError(
+    error: unknown,
+    sent: ProviderDraft,
+  ): { model: string | null; message: string } | null {
     if (!isKitClientError(error) || error.code !== 'bad_request') return null
     const { field, reason, entity } = error.details
     if (!field || !reason || !Object.hasOwn(MODEL_FIELDS, field)) return null
-    const models = sent.endpoints.flatMap((e) => e.models.map((model) => ({ model, protocol: e.protocol })))
+    const models = sent.endpoints.flatMap((e) =>
+      e.models.map((model) => ({ model, protocol: e.protocol })),
+    )
     const found =
       models.find(({ model }) => model.id === entity) ??
       models.find(({ model, protocol }) =>
-        validateModel(model, protocol).some((item) => item.field === field && item.reason === reason),
+        validateModel(model, protocol).some(
+          (item) => item.field === field && item.reason === reason,
+        ),
       )
     const model = found ? (found.model.name ?? found.model.id) : null
     return { model, message: t(`providers.error.${field}.${reason}`) }
   }
   function status(p: Provider): string | null {
     if (!p.enabled) return null
-    return p.endpoints.length === 0 || p.endpoints.some((e) => !e.keys.some((k) => k.enabled && k.readable))
+    return p.endpoints.length === 0 ||
+      p.endpoints.some((e) => !e.keys.some((k) => k.enabled && k.readable))
       ? 'bg-warning'
       : 'bg-success'
   }
@@ -151,7 +159,13 @@
   }
   async function select(p: Provider) {
     if (p.id === draft?.id) return
-    if (failed && !(await notify.confirm({ title: t('providers.discard_title'), body: t('providers.discard_body') })))
+    if (
+      failed &&
+      !(await notify.confirm({
+        title: t('providers.discard_title'),
+        body: t('providers.discard_body'),
+      }))
+    )
       return
     load(toDraft(p))
   }
@@ -166,11 +180,14 @@
           name: preset.name,
           presetId: preset.id,
           enabled: false,
-          endpoints: [{ slug: 'ep-1', baseUrl: preset.baseUrl, protocol: preset.protocol, models: [] }],
+          endpoints: [
+            { slug: 'ep-1', baseUrl: preset.baseUrl, protocol: preset.protocol, models: [] },
+          ],
         })
       }
       const target = settingsTarget.value
-      const owner = target && providers.find((p) => p.endpoints.some((e) => e.id === target.endpointId))
+      const owner =
+        target && providers.find((p) => p.endpoints.some((e) => e.id === target.endpointId))
       if (!owner) settingsTarget.value = null
       load(owner ? toDraft(owner) : providers[0] ? toDraft(providers[0]) : null)
       // EndpointPanel opens the target model's dialog when it mounts (and clears the target).
@@ -184,7 +201,8 @@
     }
   }
   const keyUrl = $derived(
-    presets.find((preset) => preset.id === providers.find((p) => p.id === draft?.id)?.presetId)?.apiKeyUrl,
+    presets.find((preset) => preset.id === providers.find((p) => p.id === draft?.id)?.presetId)
+      ?.apiKeyUrl,
   )
   $effect(() => {
     if (port) void refresh()
@@ -359,7 +377,9 @@
           : { slug, value: { state: 'error', message: errorText(error) } }
     }
   }
-  const probed = $derived(probe ? (draft?.endpoints.find((e) => e.slug === probe?.slug) ?? null) : null)
+  const probed = $derived(
+    probe ? (draft?.endpoints.find((e) => e.slug === probe?.slug) ?? null) : null,
+  )
 </script>
 
 {#if port}
@@ -378,7 +398,11 @@
             autocomplete="off"
           />
         </div>
-        <Select.Root type="single" value={filter} onValueChange={(value) => (filter = value as typeof filter)}>
+        <Select.Root
+          type="single"
+          value={filter}
+          onValueChange={(value) => (filter = value as typeof filter)}
+        >
           <Select.Trigger
             class={cn('shrink-0 px-2 [&>svg:last-child]:hidden', filter !== 'all' && 'bg-accent')}
             aria-label={t('providers.filter')}
@@ -388,7 +412,10 @@
           </Select.Trigger>
           <Select.Content>
             <Select.Group>
-              {#each FILTERS as f (f)}<Select.Item value={f} label={t(`providers.filter_${f}`)} />{/each}
+              {#each FILTERS as f (f)}<Select.Item
+                  value={f}
+                  label={t(`providers.filter_${f}`)}
+                />{/each}
             </Select.Group>
           </Select.Content>
         </Select.Root>
@@ -417,12 +444,20 @@
                 class="bg-primary/10 text-primary flex size-6 shrink-0 items-center justify-center rounded-md text-kit-xs font-semibold"
                 >{p.name.slice(0, 1).toUpperCase()}</span
               >
-              <span class={cn('min-w-0 flex-1 truncate', !p.enabled && 'text-muted-foreground')}>{p.name}</span>
-              {#if dot}<span class={cn('size-1.5 shrink-0 rounded-full', dot)}></span><span class="sr-only"
-                  >{t(dot === 'bg-success' ? 'providers.filter_enabled' : 'providers.needs_setup')}</span
+              <span class={cn('min-w-0 flex-1 truncate', !p.enabled && 'text-muted-foreground')}
+                >{p.name}</span
+              >
+              {#if dot}<span class={cn('size-1.5 shrink-0 rounded-full', dot)}></span><span
+                  class="sr-only"
+                  >{t(
+                    dot === 'bg-success' ? 'providers.filter_enabled' : 'providers.needs_setup',
+                  )}</span
                 >{/if}
             </button>
-            <DropdownMenu.Root open={menuFor === p.id} onOpenChange={(open) => (menuFor = open ? p.id : null)}>
+            <DropdownMenu.Root
+              open={menuFor === p.id}
+              onOpenChange={(open) => (menuFor = open ? p.id : null)}
+            >
               <DropdownMenu.Trigger>
                 {#snippet child({ props })}<button
                     {...props}
@@ -432,7 +467,8 @@
                       menuFor === p.id && 'opacity-100',
                     )}
                     aria-label={t('providers.row_menu', { name: p.name })}
-                    title={t('providers.row_menu', { name: p.name })}><EllipsisIcon class="size-4" /></button
+                    title={t('providers.row_menu', { name: p.name })}
+                    ><EllipsisIcon class="size-4" /></button
                   >{/snippet}
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="start" class="min-w-36">
@@ -442,17 +478,23 @@
                 <DropdownMenu.Item onSelect={() => void rowAction(p, 'notes')}
                   ><UserPenIcon />{t('providers.notes')}</DropdownMenu.Item
                 >
-                {#if !p.presetId}<DropdownMenu.Item variant="destructive" onSelect={() => void rowAction(p, 'delete')}
+                {#if !p.presetId}<DropdownMenu.Item
+                    variant="destructive"
+                    onSelect={() => void rowAction(p, 'delete')}
                     ><Trash2Icon />{t('providers.remove')}</DropdownMenu.Item
                   >{/if}
               </DropdownMenu.Content>
             </DropdownMenu.Root>
           </li>
         {:else}
-          <li class="text-muted-foreground px-2 py-4 text-center text-kit-sm">{t('providers.no_matches')}</li>
+          <li class="text-muted-foreground px-2 py-4 text-center text-kit-sm">
+            {t('providers.no_matches')}
+          </li>
         {/each}
       </ul>
-      <Button variant="outline" class="mt-2" onclick={() => (addOpen = true)}><PlusIcon />{t('providers.add')}</Button>
+      <Button variant="outline" class="mt-2" onclick={() => (addOpen = true)}
+        ><PlusIcon />{t('providers.add')}</Button
+      >
     </nav>
 
     <section class="flex min-w-0 flex-1 flex-col gap-5">
@@ -483,7 +525,10 @@
           <p role="alert" class="text-destructive flex items-center gap-2 text-kit-sm">
             {invalid
               ? invalid.model
-                ? t('providers.save_model_invalid', { model: invalid.model, error: invalid.message })
+                ? t('providers.save_model_invalid', {
+                    model: invalid.model,
+                    error: invalid.message,
+                  })
                 : invalid.message
               : t('providers.save_failed')}
             <Button variant="link" size="sm" class="h-auto p-0" onclick={() => void commit()}
@@ -493,15 +538,24 @@
         {/if}
         {#if draft.endpoints.length > 1}
           <Field.Field orientation="horizontal" class="gap-2">
-            <Field.Label for="kit-provider-endpoint" class="shrink-0">{t('providers.endpoints')}</Field.Label>
-            <Select.Root type="single" value={String(active)} onValueChange={(value) => (active = Number(value))}>
+            <Field.Label for="kit-provider-endpoint" class="shrink-0"
+              >{t('providers.endpoints')}</Field.Label
+            >
+            <Select.Root
+              type="single"
+              value={String(active)}
+              onValueChange={(value) => (active = Number(value))}
+            >
               <Select.Trigger id="kit-provider-endpoint" class="min-w-0 flex-1">
                 <span class="truncate">{endpoint?.baseUrl || t('providers.endpoint_new')}</span>
               </Select.Trigger>
               <Select.Content>
                 <Select.Group>
                   {#each draft.endpoints as e, index (e.slug)}
-                    <Select.Item value={String(index)} label={e.baseUrl || t('providers.endpoint_new')} />
+                    <Select.Item
+                      value={String(index)}
+                      label={e.baseUrl || t('providers.endpoint_new')}
+                    />
                   {/each}
                 </Select.Group>
               </Select.Content>
@@ -570,7 +624,9 @@
           <Input id="kit-provider-new" maxlength={80} bind:value={newName} />
         </Field.Field>
         <Dialog.Footer>
-          <Button type="button" variant="outline" onclick={() => (addOpen = false)}>{t('common.cancel')}</Button>
+          <Button type="button" variant="outline" onclick={() => (addOpen = false)}
+            >{t('common.cancel')}</Button
+          >
           <Button type="submit" disabled={!newName.trim()}>{t('common.confirm')}</Button>
         </Dialog.Footer>
       </form>
@@ -622,7 +678,9 @@
           bind:value={editNotes}
         />
         <Dialog.Footer>
-          <Button type="button" variant="outline" onclick={() => (notesOpen = false)}>{t('common.cancel')}</Button>
+          <Button type="button" variant="outline" onclick={() => (notesOpen = false)}
+            >{t('common.cancel')}</Button
+          >
           <Button type="submit">{t('providers.save')}</Button>
         </Dialog.Footer>
       </form>

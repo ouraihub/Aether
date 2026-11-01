@@ -53,7 +53,10 @@ function redirectAllowed(value: string): boolean {
   }
 }
 function redirect(target: string): Response {
-  return new Response(null, { status: 302, headers: { Location: target, 'Cache-Control': 'no-store' } })
+  return new Response(null, {
+    status: 302,
+    headers: { Location: target, 'Cache-Control': 'no-store' },
+  })
 }
 
 export class McpOAuth {
@@ -86,15 +89,22 @@ export class McpOAuth {
         token_endpoint_auth_methods_supported: ['none'],
         scopes_supported: this.options.scopes.map((scope) => scope.id),
       })
-    if (url.pathname === '/oauth/register' && request.method === 'POST') return this.register(request)
-    if (url.pathname === '/oauth/authorize' && (request.method === 'GET' || request.method === 'POST'))
+    if (url.pathname === '/oauth/register' && request.method === 'POST')
+      return this.register(request)
+    if (
+      url.pathname === '/oauth/authorize' &&
+      (request.method === 'GET' || request.method === 'POST')
+    )
       return this.authorize(request)
     if (url.pathname === '/oauth/token' && request.method === 'POST') {
       try {
         return await this.token(request)
       } catch (error) {
         if (!(error instanceof KitFailure)) throw error
-        return json({ error: error.code === 'bad_request' ? 'invalid_request' : 'invalid_grant' }, 400)
+        return json(
+          { error: error.code === 'bad_request' ? 'invalid_request' : 'invalid_grant' },
+          400,
+        )
       }
     }
     if (url.pathname.startsWith('/oauth/') || url.pathname.startsWith('/.well-known/oauth-'))
@@ -110,7 +120,10 @@ export class McpOAuth {
       input.redirect_uris.some((uri) => uri.length > 2048 || !redirectAllowed(uri))
     )
       throw badRequest('redirect_uris', 'invalid')
-    if (input.token_endpoint_auth_method !== undefined && input.token_endpoint_auth_method !== 'none')
+    if (
+      input.token_endpoint_auth_method !== undefined &&
+      input.token_endpoint_auth_method !== 'none'
+    )
       throw badRequest('token_endpoint_auth_method', 'unsupported')
     if (
       input.grant_types !== undefined &&
@@ -123,7 +136,10 @@ export class McpOAuth {
       (!strings(input.response_types) || input.response_types.some((type) => type !== 'code'))
     )
       throw badRequest('response_types', 'unsupported')
-    if (input.client_name !== undefined && (typeof input.client_name !== 'string' || input.client_name.length > 128))
+    if (
+      input.client_name !== undefined &&
+      (typeof input.client_name !== 'string' || input.client_name.length > 128)
+    )
       throw badRequest('client_name', 'invalid')
     const record: OAuthClient = {
       id: crypto.randomUUID(),
@@ -157,18 +173,31 @@ export class McpOAuth {
       'resource',
     ])
       if (query.getAll(key).length > 1) throw badRequest(key, 'duplicate')
-    const record = await this.options.store.get(this.auth.system, 'mcp-clients', query.get('client_id') ?? '')
+    const record = await this.options.store.get(
+      this.auth.system,
+      'mcp-clients',
+      query.get('client_id') ?? '',
+    )
     if (!record || !client(record.value)) throw badRequest('client_id', 'invalid')
     const redirectUri = query.get('redirect_uri') ?? ''
-    if (!record.value.redirectUris.includes(redirectUri)) throw badRequest('redirect_uri', 'mismatch')
+    if (!record.value.redirectUris.includes(redirectUri))
+      throw badRequest('redirect_uri', 'mismatch')
     if (query.get('response_type') !== 'code' || query.get('code_challenge_method') !== 'S256')
       throw badRequest('response_type', 'unsupported')
     const challenge = query.get('code_challenge') ?? ''
     if (!/^[A-Za-z0-9_-]{43}$/u.test(challenge)) throw badRequest('code_challenge', 'invalid')
     const resource = `${this.options.origin}/mcp`
-    if (query.has('resource') && query.get('resource') !== resource) throw badRequest('resource', 'invalid')
+    if (query.has('resource') && query.get('resource') !== resource)
+      throw badRequest('resource', 'invalid')
     const scopes = this.auth.requested((query.get('scope') ?? '').split(/\s+/u).filter(Boolean))
-    return { client: record.value, redirectUri, scopes, challenge, state: query.get('state') ?? '', resource }
+    return {
+      client: record.value,
+      redirectUri,
+      scopes,
+      challenge,
+      state: query.get('state') ?? '',
+      resource,
+    }
   }
   private async authorize(request: Request): Promise<Response> {
     const parsed = await this.parse(request)
@@ -178,7 +207,8 @@ export class McpOAuth {
     this.auth.actor(actor)
     this.auth.requested(parsed.scopes, actor)
     const settings = await this.auth.settings(actor)
-    if (!settings.enabled || parsed.scopes.some((scope) => !settings.enabledScopes.includes(scope))) forbidden()
+    if (!settings.enabled || parsed.scopes.some((scope) => !settings.enabledScopes.includes(scope)))
+      forbidden()
     const requestHash = await hash(new URL(request.url).searchParams.toString())
     if (request.method === 'GET') {
       const csrf = random()
@@ -196,7 +226,8 @@ export class McpOAuth {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
-          'Content-Security-Policy': "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+          'Content-Security-Policy':
+            "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
           'Referrer-Policy': 'no-referrer',
           'X-Content-Type-Options': 'nosniff',
         },
@@ -222,11 +253,19 @@ export class McpOAuth {
     })
     const target = new URL(parsed.redirectUri)
     if (parsed.state) target.searchParams.set('state', parsed.state)
-    if (form.get('decision') !== 'approve' || !(await this.options.authorizeConsent(actor, parsed.scopes, request))) {
+    if (
+      form.get('decision') !== 'approve' ||
+      !(await this.options.authorizeConsent(actor, parsed.scopes, request))
+    ) {
       target.searchParams.set('error', 'access_denied')
       return redirect(target.toString())
     }
-    const grant = await this.auth.createGrant(actor, parsed.client.id, parsed.redirectUri, parsed.scopes)
+    const grant = await this.auth.createGrant(
+      actor,
+      parsed.client.id,
+      parsed.redirectUri,
+      parsed.scopes,
+    )
     const code = random()
     await this.options.store.compareAndSet(this.auth.system, 'mcp-codes', await hash(code), null, {
       owner: actor,
@@ -242,10 +281,15 @@ export class McpOAuth {
     return redirect(target.toString())
   }
   private async form(request: Request): Promise<URLSearchParams> {
-    if (!(request.headers.get('Content-Type') ?? '').toLowerCase().startsWith('application/x-www-form-urlencoded'))
+    if (
+      !(request.headers.get('Content-Type') ?? '')
+        .toLowerCase()
+        .startsWith('application/x-www-form-urlencoded')
+    )
       throw badRequest('body', 'form_required')
     const form = new URLSearchParams(await body(request, 16384))
-    for (const key of new Set(form.keys())) if (form.getAll(key).length !== 1) throw badRequest(key, 'duplicate')
+    for (const key of new Set(form.keys()))
+      if (form.getAll(key).length !== 1) throw badRequest(key, 'duplicate')
     return form
   }
   private async token(request: Request): Promise<Response> {
@@ -255,8 +299,13 @@ export class McpOAuth {
       throw badRequest('resource', 'invalid')
     if (form.get('grant_type') === 'refresh_token')
       return json(await this.auth.refresh(form.get('refresh_token') ?? '', clientId))
-    if (form.get('grant_type') !== 'authorization_code') throw badRequest('grant_type', 'unsupported')
-    const document = await this.options.store.get(this.auth.system, 'mcp-codes', await hash(form.get('code') ?? ''))
+    if (form.get('grant_type') !== 'authorization_code')
+      throw badRequest('grant_type', 'unsupported')
+    const document = await this.options.store.get(
+      this.auth.system,
+      'mcp-codes',
+      await hash(form.get('code') ?? ''),
+    )
     if (!document || !object(document.value)) throw new KitFailure('unauthorized', 'Invalid grant')
     const value = document.value
     const verifier = form.get('code_verifier') ?? ''
@@ -275,10 +324,16 @@ export class McpOAuth {
       !equal(await hash(verifier), value.challenge)
     )
       throw new KitFailure('unauthorized', 'Invalid grant')
-    await this.options.store.compareAndSet(this.auth.system, 'mcp-codes', document.key, document.revision, {
-      ...value,
-      used: true,
-    })
+    await this.options.store.compareAndSet(
+      this.auth.system,
+      'mcp-codes',
+      document.key,
+      document.revision,
+      {
+        ...value,
+        used: true,
+      },
+    )
     return json(await this.auth.issueTokens(value.owner, value.grantId, undefined, clientId))
   }
 }

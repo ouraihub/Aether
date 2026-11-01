@@ -43,7 +43,8 @@ export async function executeCall(
     return await boundedWait(pending, signal, timeoutMs, () => controller.abort(), 'tool')
   } catch {
     controller.abort()
-    // A dispatched tool may still confirm its result after cancellation; otherwise preserve uncertainty.
+    // A dispatched tool may still confirm its result after cancellation.
+    // Otherwise preserve uncertainty.
     const settled = pending.catch((): ToolExecution => ({
       kind: 'unknown',
       reason: 'Executor failed after dispatch',

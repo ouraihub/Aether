@@ -28,4 +28,6 @@ export function truncate(text: string, limit: number, marker = '…(truncated)')
   return chars.slice(0, Math.max(0, limit - charCount(marker))).join('') + marker.slice(0, limit)
 }
 export const tokens = (value: unknown): number | null =>
-  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff ? value : null
+  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff
+    ? value
+    : null

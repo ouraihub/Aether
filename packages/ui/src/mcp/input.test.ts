@@ -38,7 +38,11 @@ describe('MCP input mapping', () => {
   it('maps HTTP secrets at only their first separator and ignores blank lines', () => {
     expect(
       mapped(
-        draft({ headers: '\nAuthorization: Bearer a:b\n X-Test : x:y ', query: '\nak=a=b\n', env: 'ignored=env' }),
+        draft({
+          headers: '\nAuthorization: Bearer a:b\n X-Test : x:y ',
+          query: '\nak=a=b\n',
+          env: 'ignored=env',
+        }),
       ),
     ).toEqual({
       name: 'Example',
@@ -69,7 +73,12 @@ describe('MCP input mapping', () => {
       id: 'old',
       name: 'Example',
       slug: 'example',
-      transport: { kind: 'stdio', command: 'npx', args: ['  spaced  ', '--literal=$x;`y`', '"quoted"'], cwd: '/work' },
+      transport: {
+        kind: 'stdio',
+        command: 'npx',
+        args: ['  spaced  ', '--literal=$x;`y`', '"quoted"'],
+        cwd: '/work',
+      },
       enabled: true,
       trusted: true,
       allowPrivate: false,
@@ -83,7 +92,9 @@ describe('MCP input mapping', () => {
   })
 
   it('distinguishes preservation, explicit clearing, replacement, and empty new input', () => {
-    expect(mapped(draft({ replaceSecret: false, headers: 'ignored' }), current)).not.toHaveProperty('secret')
+    expect(mapped(draft({ replaceSecret: false, headers: 'ignored' }), current)).not.toHaveProperty(
+      'secret',
+    )
     expect(mapped(draft(), current).secret).toEqual({})
     expect(mapped(draft({ headers: 'Authorization: replacement' }), current).secret).toEqual({
       headers: { Authorization: 'replacement' },
@@ -92,12 +103,17 @@ describe('MCP input mapping', () => {
   })
 
   it('requires explicit replacement or clearing when switching either transport', () => {
-    expect(mapMcpInput(current, draft({ kind: 'stdio', command: 'npx', replaceSecret: false }))).toEqual({
+    expect(
+      mapMcpInput(current, draft({ kind: 'stdio', command: 'npx', replaceSecret: false })),
+    ).toEqual({
       ok: false,
       error: 'transportChanged',
     })
     const stdio = { ...current, transport: { kind: 'stdio' as const, command: 'npx', args: [] } }
-    expect(mapMcpInput(stdio, draft({ replaceSecret: false }))).toEqual({ ok: false, error: 'transportChanged' })
+    expect(mapMcpInput(stdio, draft({ replaceSecret: false }))).toEqual({
+      ok: false,
+      error: 'transportChanged',
+    })
     expect(mapped(draft(), stdio).secret).toEqual({})
   })
 

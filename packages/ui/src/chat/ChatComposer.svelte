@@ -77,7 +77,8 @@
         restoreFocus = active instanceof HTMLElement && normal?.contains(active) ? active : null
       } else if (!next && overridden) {
         const active = document.activeElement
-        const shouldRestore = active === document.body || !!(active && replacement?.contains(active))
+        const shouldRestore =
+          active === document.body || !!(active && replacement?.contains(active))
         const target = restoreFocus
         void tick().then(() => {
           if (
@@ -150,7 +151,12 @@
           expanded = false
           return
         }
-        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing && event.keyCode !== 229) {
+        if (
+          event.key === 'Enter' &&
+          (event.ctrlKey || event.metaKey) &&
+          !event.isComposing &&
+          event.keyCode !== 229
+        ) {
           event.preventDefault()
           if (!event.repeat) submit()
         }
@@ -180,7 +186,9 @@
       </div>
     </div>
   </form>
-  {#if override}<div class="composer-override" bind:this={replacement}>{@render override()}</div>{/if}
+  {#if override}<div class="composer-override" bind:this={replacement}>
+      {@render override()}
+    </div>{/if}
 </div>
 
 <style>

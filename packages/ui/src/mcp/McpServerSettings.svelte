@@ -101,7 +101,11 @@
 
   async function load() {
     if (!server) return
-    const [nextStatus, nextScopes, nextTokens] = await Promise.all([server.status(), server.scopes(), server.tokens()])
+    const [nextStatus, nextScopes, nextTokens] = await Promise.all([
+      server.status(),
+      server.scopes(),
+      server.tokens(),
+    ])
     setStatus(nextStatus)
     scopes = nextScopes
     tokens = nextTokens
@@ -111,7 +115,8 @@
     void act(load)
   })
 
-  const toggleRunning = () => act(async () => setStatus(status?.running ? await need().stop() : await need().start()))
+  const toggleRunning = () =>
+    act(async () => setStatus(status?.running ? await need().stop() : await need().start()))
 
   const savePort = () => act(async () => setStatus(await need().setPort(Number(port))))
 
@@ -143,7 +148,8 @@
     const revision = tokenRevision
     const name = tokenName
     const grants = [...tokenScopes]
-    const current = () => tokenSession.isCurrent(token) && targetName === serverName && targetUrl === status?.url
+    const current = () =>
+      tokenSession.isCurrent(token) && targetName === serverName && targetUrl === status?.url
     issuing = true
     try {
       const next = await need().issueToken(name, grants)
@@ -204,7 +210,9 @@
         <Field.Content>
           <Field.Label>{t('mcp.server.title')}</Field.Label>
           <Field.Description>
-            {status.running ? t('mcp.server.running', { url: status.url }) : t('mcp.server.stopped')}
+            {status.running
+              ? t('mcp.server.running', { url: status.url })
+              : t('mcp.server.stopped')}
             · {t('mcp.server.toolCount', { count: status.toolCount })}
           </Field.Description>
         </Field.Content>
@@ -218,7 +226,14 @@
       </Field.Field>
       <Field.Field orientation="horizontal">
         <Field.Label for="kit-mcp-port">{t('mcp.server.port')}</Field.Label>
-        <Input id="kit-mcp-port" class="w-32" type="number" min="1024" max="65535" bind:value={port} />
+        <Input
+          id="kit-mcp-port"
+          class="w-32"
+          type="number"
+          min="1024"
+          max="65535"
+          bind:value={port}
+        />
         <Button
           disabled={busy || issuing || port === String(status.port)}
           variant="outline"
@@ -240,7 +255,9 @@
               bind:checked={() => scope.enabled, (on) => void toggleScope(scope, on)}
               disabled={busy || issuing}
             />
-            <Field.Label for={`kit-mcp-scope-${scope.id}`}>{t(scope.labelKey)} ({scope.id})</Field.Label>
+            <Field.Label for={`kit-mcp-scope-${scope.id}`}
+              >{t(scope.labelKey)} ({scope.id})</Field.Label
+            >
           </Field.Field>
         {/each}
       </Field.Group>
@@ -251,7 +268,12 @@
       <Field.Group>
         <Field.Field>
           <Field.Label for="kit-mcp-token-name">{t('mcp.server.tokenName')}</Field.Label>
-          <Input id="kit-mcp-token-name" bind:value={tokenName} maxlength={200} oninput={() => tokenRevision++} />
+          <Input
+            id="kit-mcp-token-name"
+            bind:value={tokenName}
+            maxlength={200}
+            oninput={() => tokenRevision++}
+          />
         </Field.Field>
         {#each scopes as scope (scope.id)}
           <Field.Field orientation="horizontal">
@@ -260,7 +282,9 @@
               checked={tokenScopes.includes(scope.id)}
               onCheckedChange={(on) => toggleTokenScope(scope.id, on)}
             />
-            <Field.Label for={`kit-mcp-grant-${scope.id}`}>{t(scope.labelKey)} ({scope.id})</Field.Label>
+            <Field.Label for={`kit-mcp-grant-${scope.id}`}
+              >{t(scope.labelKey)} ({scope.id})</Field.Label
+            >
           </Field.Field>
         {/each}
         <Field.Field orientation="horizontal">
@@ -289,10 +313,17 @@
             >
               {t('mcp.server.copyClaude')}
             </Button>
-            <Button size="sm" variant="outline" disabled={!configInput} onclick={() => void copy('json')}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!configInput}
+              onclick={() => void copy('json')}
+            >
               {t('mcp.server.copyJson')}
             </Button>
-            <Button size="sm" variant="ghost" onclick={clearIssued}>{t('mcp.server.dismiss')}</Button>
+            <Button size="sm" variant="ghost" onclick={clearIssued}
+              >{t('mcp.server.dismiss')}</Button
+            >
           </div>
         </AlertDescription>
       </Alert>
@@ -313,7 +344,12 @@
               </span>
             </div>
             {#if token.revokedAt === null}
-              <Button size="sm" variant="destructive" disabled={busy || issuing} onclick={() => void revoke(token)}>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={busy || issuing}
+                onclick={() => void revoke(token)}
+              >
                 {t('mcp.server.revoke')}
               </Button>
             {:else}

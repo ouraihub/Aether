@@ -16,7 +16,8 @@ for (const key of zhKeys) if (!enKeys.has(key)) problems.push(`en missing ${key}
 // Dynamic keys (`errors.${code}`) are covered by the Messages type instead.
 const USE = /\bt\(\s*['"]([^'"]+)['"]/g
 for (const entry of readdirSync(SRC, { recursive: true, withFileTypes: true })) {
-  if (!entry.isFile() || !/\.(ts|svelte)$/.test(entry.name) || /\.test\.ts$/.test(entry.name)) continue
+  if (!entry.isFile() || !/\.(ts|svelte)$/.test(entry.name) || /\.test\.ts$/.test(entry.name))
+    continue
   const file = join(entry.parentPath, entry.name)
   for (const [, key] of readFileSync(file, 'utf8').matchAll(USE)) {
     if (!enKeys.has(key)) problems.push(`${file}: unknown key ${key}`)

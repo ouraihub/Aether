@@ -10,7 +10,10 @@ describe('standalone chat presentation', () => {
   it('keeps unknown context unknown, clamps only the meter, and restores focus on Escape', async () => {
     const i18n = createI18n('en-US')
     const view = render(UsageControl, {
-      props: { i18n, context: { tokens: null, contextWindow: 1000, modelName: 'Model A', source: 'unknown' } },
+      props: {
+        i18n,
+        context: { tokens: null, contextWindow: 1000, modelName: 'Model A', source: 'unknown' },
+      },
     })
     const trigger = screen.getByRole('button', { name: 'Usage and settings' })
     await fireEvent.click(trigger)
@@ -45,8 +48,12 @@ describe('standalone chat presentation', () => {
     const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
     await fireEvent(input, escape)
     expect(escape.defaultPrevented).toBe(true)
-    expect(screen.getByRole('button', { name: 'Expand input' }).getAttribute('aria-expanded')).toBe('false')
-    const override = createRawSnippet(() => ({ render: () => '<button type="button">Approve</button>' }))
+    expect(screen.getByRole('button', { name: 'Expand input' }).getAttribute('aria-expanded')).toBe(
+      'false',
+    )
+    const override = createRawSnippet(() => ({
+      render: () => '<button type="button">Approve</button>',
+    }))
     await view.rerender({ ...props, override })
     expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull()
     screen.getByRole('button', { name: 'Approve' }).focus()

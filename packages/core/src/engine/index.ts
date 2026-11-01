@@ -1,7 +1,13 @@
 // One run: performs the actions of `RunMachine` (model requests, host authorization, approval
 // waits, tool execution) and owns usage, context accounting and the single `end`.
 import type { ContextUsage, RunEvent, TokenUsage } from '@ouraihub/aether-contracts'
-import type { Approver, ArgumentsValidator, EventSink, OutboundHttp, ToolExecutor } from '../ports.js'
+import type {
+  Approver,
+  ArgumentsValidator,
+  EventSink,
+  OutboundHttp,
+  ToolExecutor,
+} from '../ports.js'
 import type { Message, RunInput, RunSummary } from '../types.js'
 import { KitFailure, safeError } from '../error.js'
 import { addUsage, cost, emptyUsage } from '../pricing.js'
@@ -90,7 +96,16 @@ export class RunEngine {
         if (action.kind === 'model') {
           const roundUsage = emptyUsage()
           const stream = (): Promise<RoundResult> =>
-            streamRound(this.options.outbound, run.input, system, messages, controller.signal, roundUsage, state, emit)
+            streamRound(
+              this.options.outbound,
+              run.input,
+              system,
+              messages,
+              controller.signal,
+              roundUsage,
+              state,
+              emit,
+            )
           let result: RoundResult
           try {
             try {
@@ -115,7 +130,10 @@ export class RunEngine {
           emit({ kind: 'context', usage: contextUsage })
           action = run.modelDone(result)
         } else if (action.kind === 'authorize')
-          action = run.authorized(action.pending, this.options.tools.authorize(action.pending.call, action.context))
+          action = run.authorized(
+            action.pending,
+            this.options.tools.authorize(action.pending.call, action.context),
+          )
         else if (action.kind === 'approve') {
           const allow = await waitApproval(
             this.options.approver,

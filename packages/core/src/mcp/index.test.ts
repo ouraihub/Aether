@@ -90,7 +90,10 @@ for (const value of [
     const wire = new Wire(({ rpc }) => json(rpc.id, value))
     const runtime = new McpRuntime(wire, new Store([server()]))
     const session = await runtime.session(signal())
-    assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), { kind: 'unknown', reason: 'invalid_response' })
+    assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), {
+      kind: 'unknown',
+      reason: 'invalid_response',
+    })
     assert.equal(wire.sent.filter((sent) => sent.rpc.method === 'tools/call').length, 1)
     await runtime.shutdown()
   })
@@ -109,7 +112,10 @@ test('preserves structured, nontext, extension and error content without interpr
   const wire = new Wire(({ rpc }) => json(rpc.id, result))
   const runtime = new McpRuntime(wire, new Store([server()]))
   const session = await runtime.session(signal())
-  assert.deepEqual(await session.call('mcp_one_echo', { message: 'hello' }, signal()), { kind: 'completed', ...result })
+  assert.deepEqual(await session.call('mcp_one_echo', { message: 'hello' }, signal()), {
+    kind: 'completed',
+    ...result,
+  })
   assert.deepEqual(
     wire.sent.map((sent) => sent.rpc.method),
     ['initialize', 'notifications/initialized', 'tools/call'],
@@ -145,7 +151,8 @@ test('SSE matches JSON-RPC id rather than SSE event id and handles chunked multi
     return new Response(
       new ReadableStream<Uint8Array>({
         start(controller) {
-          for (let offset = 0; offset < bytes.length; offset += 7) controller.enqueue(bytes.slice(offset, offset + 7))
+          for (let offset = 0; offset < bytes.length; offset += 7)
+            controller.enqueue(bytes.slice(offset, offset + 7))
           controller.close()
         },
       }),
@@ -166,7 +173,10 @@ test('mismatched JSON response id is unknown and never replayed', async () => {
   const wire = new Wire(() => json(999, { content: [] }))
   const runtime = new McpRuntime(wire, new Store([server()]))
   const session = await runtime.session(signal())
-  assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), { kind: 'unknown', reason: 'invalid_response' })
+  assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), {
+    kind: 'unknown',
+    reason: 'invalid_response',
+  })
   assert.equal(wire.sent.length, 3)
   await runtime.shutdown()
 })
@@ -175,7 +185,11 @@ test('valid RPC errors are definite failures but upstream messages are not expos
   const wire = new Wire(
     ({ rpc }) =>
       new Response(
-        JSON.stringify({ jsonrpc: '2.0', id: rpc.id, error: { code: -32602, message: 'secret upstream payload' } }),
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: rpc.id,
+          error: { code: -32602, message: 'secret upstream payload' },
+        }),
         { headers: { 'content-type': 'application/json' } },
       ),
   )
@@ -206,7 +220,10 @@ for (const type of ['application/json', 'text/event-stream']) {
     })
     const runtime = new McpRuntime(wire, new Store([server()]))
     const session = await runtime.session(signal())
-    assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), { kind: 'unknown', reason: 'budget_exceeded' })
+    assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), {
+      kind: 'unknown',
+      reason: 'budget_exceeded',
+    })
     assert.equal(wire.sent.length, 3)
     await runtime.shutdown()
   })
@@ -254,7 +271,10 @@ test('network failure after dispatch is unknown, with no automatic replay', asyn
   })
   const runtime = new McpRuntime(wire, new Store([server()]))
   const session = await runtime.session(signal())
-  assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), { kind: 'unknown', reason: 'network' })
+  assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), {
+    kind: 'unknown',
+    reason: 'network',
+  })
   assert.equal(wire.sent.length, 3)
   await runtime.shutdown()
 })
@@ -273,7 +293,14 @@ test('enabled and trusted catalogue and approval/config snapshots remain fixed',
     session.tools().map((tool) => [tool.prefixed, tool.approval]),
     [['mcp_one_echo', 'ask']],
   )
-  store.configs = [server({ name: 'changed', slug: 'changed', trusted: false, tools: [cached({ approval: 'deny' })] })]
+  store.configs = [
+    server({
+      name: 'changed',
+      slug: 'changed',
+      trusted: false,
+      tools: [cached({ approval: 'deny' })],
+    }),
+  ]
   assert.equal(session.tools()[0]?.server, 'Server one')
   assert.equal(session.tools()[0]?.approval, 'ask')
   assert.equal((await session.call('mcp_one_echo', {}, signal())).kind, 'completed')
@@ -286,7 +313,14 @@ test('discovery paginates, bounds descriptions/schema, retains approval, and def
     pages++
     if (pages === 1)
       return json(rpc.id, {
-        tools: [{ name: 'echo', description: 'd'.repeat(1100), inputSchema: {}, annotations: { readOnlyHint: true } }],
+        tools: [
+          {
+            name: 'echo',
+            description: 'd'.repeat(1100),
+            inputSchema: {},
+            annotations: { readOnlyHint: true },
+          },
+        ],
         nextCursor: 'next',
       })
     assert.deepEqual(rpc.params, { cursor: 'next' })
@@ -297,7 +331,9 @@ test('discovery paginates, bounds descriptions/schema, retains approval, and def
       ],
     })
   })
-  const store = new Store([server({ enabled: false, trusted: false, tools: [cached({ approval: 'deny' })] })])
+  const store = new Store([
+    server({ enabled: false, trusted: false, tools: [cached({ approval: 'deny' })] }),
+  ])
   const runtime = new McpRuntime(wire, store)
   const tools = await runtime.refresh('one', signal())
   assert.deepEqual(
@@ -315,7 +351,12 @@ test('discovery paginates, bounds descriptions/schema, retains approval, and def
 test('uncached discovery connection is reused for tool call and isolated discovery failure excludes only that server', async () => {
   const wire = new Wire(({ rpc, url }) => {
     if (new URL(url).pathname === '/bad') throw new Error('unreachable')
-    return json(rpc.id, rpc.method === 'tools/list' ? { tools: [{ name: 'echo', inputSchema: {} }] } : { content: [] })
+    return json(
+      rpc.id,
+      rpc.method === 'tools/list'
+        ? { tools: [{ name: 'echo', inputSchema: {} }] }
+        : { content: [] },
+    )
   })
   const store = new Store([
     server({ id: 'bad', slug: 'bad', url: 'https://mcp.example/bad', tools: [] }),
@@ -343,7 +384,9 @@ test('failed explicit refresh leaves previous cache intact', async () => {
 test('discovery can reinitialize once after session 404', async () => {
   let lists = 0
   const wire = new Wire(({ rpc }) =>
-    ++lists === 1 ? new Response(null, { status: 404 }) : json(rpc.id, { tools: [{ name: 'echo', inputSchema: {} }] }),
+    ++lists === 1
+      ? new Response(null, { status: 404 })
+      : json(rpc.id, { tools: [{ name: 'echo', inputSchema: {} }] }),
   )
   const runtime = new McpRuntime(wire, new Store([server()]))
   assert.equal((await runtime.refresh('one', signal())).length, 1)
@@ -359,7 +402,10 @@ test('side effect session 404 is unknown and not replayed; only a later explicit
   )
   const runtime = new McpRuntime(wire, new Store([server()]))
   const session = await runtime.session(signal())
-  assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), { kind: 'unknown', reason: 'network' })
+  assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), {
+    kind: 'unknown',
+    reason: 'network',
+  })
   assert.equal(calls, 1)
   assert.equal(wire.sent.filter((sent) => sent.rpc.method === 'initialize').length, 1)
   assert.equal((await session.call('mcp_one_echo', {}, signal())).kind, 'completed')
@@ -432,7 +478,10 @@ test('unsupported initialization and rejected URL fail before tools/call dispatc
   const invalidWire = new Wire(() => {
     throw new Error('must not send')
   })
-  const invalidRuntime = new McpRuntime(invalidWire, new Store([server({ url: 'https://user:password@mcp.example' })]))
+  const invalidRuntime = new McpRuntime(
+    invalidWire,
+    new Store([server({ url: 'https://user:password@mcp.example' })]),
+  )
   const invalidSession = await invalidRuntime.session(signal())
   const result = await invalidSession.call('mcp_one_echo', {}, signal())
   assert.equal(result.kind, 'failed')
@@ -446,7 +495,10 @@ test('request timer failure remains unknown after dispatch', async () => {
   })
   const runtime = new McpRuntime(wire, new Store([server()]))
   const session = await runtime.session(signal())
-  assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), { kind: 'unknown', reason: 'timeout' })
+  assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), {
+    kind: 'unknown',
+    reason: 'timeout',
+  })
   await runtime.shutdown()
 })
 
@@ -455,7 +507,10 @@ test('discovery rejects an unbounded page chain without replacing successful cac
   const wire = new Wire(({ rpc }) => json(rpc.id, { tools: [], nextCursor: `page-${++page}` }))
   const store = new Store([server()])
   const runtime = new McpRuntime(wire, store)
-  await assert.rejects(runtime.refresh('one', signal()), { code: 'upstream', details: { reason: 'budget_exceeded' } })
+  await assert.rejects(runtime.refresh('one', signal()), {
+    code: 'upstream',
+    details: { reason: 'budget_exceeded' },
+  })
   assert.equal(page, 10)
   assert.equal(store.replacements, 0)
   await runtime.shutdown()
@@ -467,7 +522,12 @@ test('discovery rejects more than 200 tools and repeated cursors', async () => {
       json(
         rpc.id,
         tooMany
-          ? { tools: Array.from({ length: 201 }, (_, index) => ({ name: `tool-${index}`, inputSchema: {} })) }
+          ? {
+              tools: Array.from({ length: 201 }, (_, index) => ({
+                name: `tool-${index}`,
+                inputSchema: {},
+              })),
+            }
           : { tools: [], nextCursor: 'same' },
       ),
     )
@@ -481,7 +541,11 @@ test('discovery rejects more than 200 tools and repeated cursors', async () => {
 
 test('exactly 2 MiB JSON reply is accepted and counts UTF-8 encoded bytes', async () => {
   const wire = new Wire(({ rpc }) => {
-    const empty = JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { content: [{ type: 'image', data: '' }] } })
+    const empty = JSON.stringify({
+      jsonrpc: '2.0',
+      id: rpc.id,
+      result: { content: [{ type: 'image', data: '' }] },
+    })
     const data = 'x'.repeat(MAX_MESSAGE_BYTES - new TextEncoder().encode(empty).byteLength)
     return json(rpc.id, { content: [{ type: 'image', data }] })
   })
@@ -493,10 +557,15 @@ test('exactly 2 MiB JSON reply is accepted and counts UTF-8 encoded bytes', asyn
 })
 
 test('malformed UTF-8 response is invalid rather than a definite failure', async () => {
-  const wire = new Wire(() => new Response(new Uint8Array([0xff]), { headers: { 'content-type': 'application/json' } }))
+  const wire = new Wire(
+    () => new Response(new Uint8Array([0xff]), { headers: { 'content-type': 'application/json' } }),
+  )
   const runtime = new McpRuntime(wire, new Store([server()]))
   const session = await runtime.session(signal())
-  assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), { kind: 'unknown', reason: 'invalid_response' })
+  assert.deepEqual(await session.call('mcp_one_echo', {}, signal()), {
+    kind: 'unknown',
+    reason: 'invalid_response',
+  })
   await runtime.shutdown()
 })
 
@@ -585,7 +654,11 @@ test('oversized arguments are a definite failure and never dispatch tools/call',
   })
   const runtime = new McpRuntime(wire, new Store([server()]))
   const session = await runtime.session(signal())
-  const result = await session.call('mcp_one_echo', { text: 'é'.repeat(MAX_MESSAGE_BYTES / 2) }, signal())
+  const result = await session.call(
+    'mcp_one_echo',
+    { text: 'é'.repeat(MAX_MESSAGE_BYTES / 2) },
+    signal(),
+  )
   assert.equal(result.kind, 'failed')
   if (result.kind === 'failed') assert.equal(result.code, 'bad_request')
   assert.equal(wire.sent.filter((sent) => sent.rpc.method === 'tools/call').length, 0)
@@ -610,7 +683,11 @@ test('direct core configs require explicit private-address consent before networ
       const runtime = new McpRuntime(wire, new Store([server({ url, allowPrivate })]))
       const session = await runtime.session(signal())
       const result = await session.call('mcp_one_echo', {}, signal())
-      assert.equal(result.kind, allowPrivate ? 'completed' : 'failed', `${url}: allowPrivate=${String(allowPrivate)}`)
+      assert.equal(
+        result.kind,
+        allowPrivate ? 'completed' : 'failed',
+        `${url}: allowPrivate=${String(allowPrivate)}`,
+      )
       assert.equal(wire.sent.length, allowPrivate ? 3 : 0)
       await runtime.shutdown()
     }

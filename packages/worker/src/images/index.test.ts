@@ -101,7 +101,10 @@ test('generation failure never calls persistence', async () => {
       return { mime: value.mime, url: '/api/v1/files/unreachable' }
     },
   })
-  await assert.rejects(service.generate(connection, input, context), { dispatch: 'unknown', code: 'network' })
+  await assert.rejects(service.generate(connection, input, context), {
+    dispatch: 'unknown',
+    code: 'network',
+  })
   assert.equal(saved, 0)
 })
 

@@ -88,7 +88,9 @@ export const validUrl = (url: string): boolean => /^https?:\/\/\S+$/.test(url.tr
 export function savable(draft: ProviderDraft): ProviderDraft {
   return {
     ...draft,
-    endpoints: draft.endpoints.filter((e) => e.saved !== null || !e.baseUrl.trim() || validUrl(e.baseUrl)),
+    endpoints: draft.endpoints.filter(
+      (e) => e.saved !== null || !e.baseUrl.trim() || validUrl(e.baseUrl),
+    ),
   }
 }
 
@@ -96,7 +98,11 @@ export function savable(draft: ProviderDraft): ProviderDraft {
  * Takes the stored provider after a save without discarding what the user typed meanwhile:
  * sent endpoints get their stored record (new ones matched by slug); edits stay in the draft.
  */
-export function adopt(current: ProviderDraft, sent: ProviderDraft, stored: Provider): ProviderDraft {
+export function adopt(
+  current: ProviderDraft,
+  sent: ProviderDraft,
+  stored: Provider,
+): ProviderDraft {
   const sentEndpoints = new Map(sent.endpoints.map((endpoint) => [endpoint.slug, endpoint]))
   return {
     ...current,
@@ -105,7 +111,9 @@ export function adopt(current: ProviderDraft, sent: ProviderDraft, stored: Provi
       const original = sentEndpoints.get(endpoint.slug)
       const record =
         original &&
-        stored.endpoints.find((item) => (original.saved ? item.id === original.saved.id : item.slug === original.slug))
+        stored.endpoints.find((item) =>
+          original.saved ? item.id === original.saved.id : item.slug === original.slug,
+        )
       return record ? { ...endpoint, saved: record } : endpoint
     }),
   }
@@ -120,7 +128,9 @@ export function mergeModels(
 ): Model[] {
   const fetched = new Set(probed.map((model) => model.id))
   const existing = new Map(current.map((model) => [model.id, model]))
-  const merged = new Map(current.filter((model) => !fetched.has(model.id)).map((model) => [model.id, model]))
+  const merged = new Map(
+    current.filter((model) => !fetched.has(model.id)).map((model) => [model.id, model]),
+  )
   for (const model of probed) {
     if (!checked[model.id] || merged.has(model.id)) continue
     const previous = existing.get(model.id)
@@ -156,7 +166,8 @@ export function toSave(draft: ProviderDraft): ProviderSave {
       models: e.models.map((model) => {
         const save: ModelSave = {
           ...model,
-          nativeWebSearch: model.modelType === 'chat' && e.protocol !== 'openai-chat' && model.nativeWebSearch,
+          nativeWebSearch:
+            model.modelType === 'chat' && e.protocol !== 'openai-chat' && model.nativeWebSearch,
         }
         // Contract §2: omitted reasoning keeps the stored value, so an untouched (possibly inferred) value is not frozen.
         // Key order matches: edits spread the stored config and append `budgetTokens` last, like serde.
@@ -182,7 +193,13 @@ export const groupKey = (model: Model): string => model.groupName ?? idPrefix(mo
 /** Purpose maps onto existing fields (docs/41 §3.3): edit = image + canVision. */
 export type Purpose = 'chat' | 'image' | 'edit'
 export const purposeOf = (model: Model): Purpose | null =>
-  model.modelType === 'chat' ? 'chat' : model.modelType === 'image' ? (model.canVision ? 'edit' : 'image') : null
+  model.modelType === 'chat'
+    ? 'chat'
+    : model.modelType === 'image'
+      ? model.canVision
+        ? 'edit'
+        : 'image'
+      : null
 export function withPurpose(model: Model, purpose: Purpose): Model {
   const typed = withType(model, purpose === 'chat' ? 'chat' : 'image')
   return purpose === 'chat' ? typed : { ...typed, canVision: purpose === 'edit' }
@@ -191,10 +208,13 @@ export function withPurpose(model: Model, purpose: Purpose): Model {
 export function withType(model: Model, modelType: ModelType): Model {
   if (modelType === model.modelType) return model
   const next: Model = { ...model, modelType, typeSource: 'user' }
-  return modelType === 'chat' ? next : { ...next, reasoning: null, nativeWebSearch: false, pricing: null }
+  return modelType === 'chat'
+    ? next
+    : { ...next, reasoning: null, nativeWebSearch: false, pricing: null }
 }
 
-export type ModelField = 'name' | 'groupName' | 'contextWindow' | 'maxOutput' | 'reasoning' | 'pricing'
+export type ModelField =
+  'name' | 'groupName' | 'contextWindow' | 'maxOutput' | 'reasoning' | 'pricing'
 export interface ModelError {
   field: ModelField
   reason: string
@@ -211,7 +231,8 @@ export function validateModel(model: Model, protocol: Protocol): ModelError[] {
   // Non-integers also fail the backend's integer schema; doc §4.2 shows them as the same `invalid`.
   if (contextWindow !== null && !(Number.isInteger(contextWindow) && contextWindow >= 1))
     add('contextWindow', 'invalid')
-  if (maxOutput !== null && !(Number.isInteger(maxOutput) && maxOutput >= 1)) add('maxOutput', 'invalid')
+  if (maxOutput !== null && !(Number.isInteger(maxOutput) && maxOutput >= 1))
+    add('maxOutput', 'invalid')
   else if (chat && contextWindow !== null && maxOutput !== null && maxOutput >= contextWindow)
     add('maxOutput', 'exceeds_context')
   if (reasoning) {
@@ -234,7 +255,8 @@ export function validateModel(model: Model, protocol: Protocol): ModelError[] {
   }
   if (pricing) {
     const { tiers } = pricing
-    const price = (value: number | null) => value === null || (Number.isFinite(value) && value >= 0 && value <= 1e6)
+    const price = (value: number | null) =>
+      value === null || (Number.isFinite(value) && value >= 0 && value <= 1e6)
     if (
       !chat ||
       !tiers.length ||
@@ -274,7 +296,8 @@ const CHAT_PATH: Record<Protocol, string> = {
   'anthropic-messages': 'messages',
 }
 /** Mirrors `aether_chat::protocol` request paths. */
-export const chatUrl = (baseUrl: string, protocol: Protocol): string => `${apiBase(baseUrl)}/${CHAT_PATH[protocol]}`
+export const chatUrl = (baseUrl: string, protocol: Protocol): string =>
+  `${apiBase(baseUrl)}/${CHAT_PATH[protocol]}`
 
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,100}$/
 const RESERVED_HEADERS: Record<string, true> = {
@@ -289,13 +312,16 @@ const RESERVED_HEADERS: Record<string, true> = {
   'transfer-encoding': true,
   cookie: true,
 }
-export type HeadersError = { key: 'headers_too_many' | 'headers_invalid' } | { key: 'headers_reserved'; name: string }
+export type HeadersError =
+  { key: 'headers_too_many' | 'headers_invalid' } | { key: 'headers_reserved'; name: string }
 
 /** Front-end mirror of the backend header rules (docs/36 §3.3); blank rows are dropped. */
 export function checkHeaders(
   rows: readonly { name: string; value: string }[],
 ): { headers: Record<string, string> } | { error: HeadersError } {
-  const kept = rows.map((r) => ({ name: r.name.trim(), value: r.value })).filter((r) => r.name || r.value)
+  const kept = rows
+    .map((r) => ({ name: r.name.trim(), value: r.value }))
+    .filter((r) => r.name || r.value)
   if (kept.length > 20) return { error: { key: 'headers_too_many' } }
   const headers: Record<string, string> = {}
   const seen = new Set<string>()

@@ -14,12 +14,17 @@ import {
   validateImageBytes,
 } from './index.js'
 
-const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg=='
+const PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg=='
 const connection: ImageConnection = {
   baseUrl: 'https://images.example/v1',
   modelId: 'image-model',
   keys: ['first-secret', 'second-secret'],
-  headers: { Authorization: 'custom-secret', 'Content-Type': 'application/json', 'x-custom': 'yes' },
+  headers: {
+    Authorization: 'custom-secret',
+    'Content-Type': 'application/json',
+    'x-custom': 'yes',
+  },
   canVision: true,
 }
 const input: ImageRequest = { prompt: '  Draw a tree  ', size: '1024x1024', images: [] }
@@ -35,7 +40,10 @@ test('generation uses explicit transport, trimmed prompt, headers, and no respon
       assert.equal(init.redirect, 'manual')
       assert.equal(new Headers(init.headers).get('authorization'), 'Bearer first-secret')
       assert.equal(new Headers(init.headers).get('x-custom'), 'yes')
-      assert.equal(init.body, JSON.stringify({ model: 'image-model', prompt: 'Draw a tree', size: '1024x1024', n: 1 }))
+      assert.equal(
+        init.body,
+        JSON.stringify({ model: 'image-model', prompt: 'Draw a tree', size: '1024x1024', n: 1 }),
+      )
       return success()
     },
   }
@@ -174,7 +182,8 @@ test('download uses same injected policy without forwarding provider credentials
   const http: OutboundHttp = {
     async fetch(url, init) {
       calls.push(url)
-      if (calls.length === 1) return Response.json({ data: [{ url: 'https://cdn.example/image.png' }] })
+      if (calls.length === 1)
+        return Response.json({ data: [{ url: 'https://cdn.example/image.png' }] })
       assert.equal(new Headers(init.headers).has('authorization'), false)
       assert.equal(init.redirect, 'manual')
       return new Response(
@@ -189,7 +198,10 @@ test('download uses same injected policy without forwarding provider credentials
     usage: emptyUsage(),
     totalTokens: null,
   })
-  assert.deepEqual(calls, ['https://images.example/v1/images/generations', 'https://cdn.example/image.png'])
+  assert.deepEqual(calls, [
+    'https://images.example/v1/images/generations',
+    'https://cdn.example/image.png',
+  ])
 })
 
 test('download address rejection is never bypassed or retried', async () => {
@@ -202,7 +214,10 @@ test('download address rejection is never bypassed or retried', async () => {
       throw new ImageFailure('bad_request', 'Address blocked', 'not_dispatched')
     },
   }
-  await assert.rejects(generateImage(http, connection, input, signal()), { dispatch: 'unknown', code: 'bad_request' })
+  await assert.rejects(generateImage(http, connection, input, signal()), {
+    dispatch: 'unknown',
+    code: 'bad_request',
+  })
   assert.equal(calls, 2)
 })
 
@@ -241,7 +256,9 @@ test('redirects, unknown image bytes, MIME mismatch and oversized downloads fail
         return calls === 1
           ? Response.json({ data: [{ url: 'https://cdn.example/image' }] })
           : new Response(
-              oversized ? new Uint8Array(MAX_IMAGE_BYTES + 1) : Uint8Array.from(atob(PNG), (c) => c.charCodeAt(0)),
+              oversized
+                ? new Uint8Array(MAX_IMAGE_BYTES + 1)
+                : Uint8Array.from(atob(PNG), (c) => c.charCodeAt(0)),
               { headers: { 'content-type': oversized ? 'image/png' : 'image/jpeg' } },
             )
       },
@@ -270,7 +287,10 @@ test('stream failure after successful status never advances key', async () => {
       )
     },
   }
-  await assert.rejects(generateImage(http, connection, input, signal()), { code: 'network', dispatch: 'unknown' })
+  await assert.rejects(generateImage(http, connection, input, signal()), {
+    code: 'network',
+    dispatch: 'unknown',
+  })
   assert.equal(calls, 1)
 })
 
@@ -355,7 +375,12 @@ test('GPT quality and PNG mask are explicit multipart options and usage stays re
     signal(),
   )
   assert.equal(result.revisedPrompt, 'A revised tree')
-  assert.deepEqual(result.usage, { ...emptyUsage(), inputTokens: 12, outputTokens: 8, cacheReadTokens: 3 })
+  assert.deepEqual(result.usage, {
+    ...emptyUsage(),
+    inputTokens: 12,
+    outputTokens: 8,
+    cacheReadTokens: 3,
+  })
 })
 
 test('generic and SiliconFlow reject unsupported options before dispatch', async () => {
@@ -366,7 +391,11 @@ test('generic and SiliconFlow reject unsupported options before dispatch', async
   }
   for (const request of [
     { ...input, quality: 'medium' as const },
-    { ...input, images: [{ mime: 'image/png', data: PNG }], mask: { mime: 'image/png', data: PNG } },
+    {
+      ...input,
+      images: [{ mime: 'image/png', data: PNG }],
+      mask: { mime: 'image/png', data: PNG },
+    },
   ])
     await assert.rejects(generateImage(http, connection, request, signal()), {
       code: 'unsupported',
@@ -449,10 +478,17 @@ test('successful malformed and multiple-image responses are unknown, never retri
 
 test('structural validation checks dimensions, alpha and complete PNG/GIF containers', () => {
   const bytes = Uint8Array.from(atob(PNG), (c) => c.charCodeAt(0))
-  assert.deepEqual(validateImageBytes(bytes), { mime: 'image/png', width: 1, height: 1, alpha: true })
+  assert.deepEqual(validateImageBytes(bytes), {
+    mime: 'image/png',
+    width: 1,
+    height: 1,
+    alpha: true,
+  })
   assert.throws(() => validateImageBytes(bytes.subarray(0, bytes.length - 1)))
   assert.throws(() => validateImageBytes(new Uint8Array([...bytes, 0])))
-  const gif = Uint8Array.from(atob('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='), (c) => c.charCodeAt(0))
+  const gif = Uint8Array.from(atob('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='), (c) =>
+    c.charCodeAt(0),
+  )
   assert.equal(validateImageBytes(gif).mime, 'image/gif')
   assert.throws(() => validateImageBytes(gif.subarray(0, gif.length - 1)))
 })
@@ -503,7 +539,9 @@ test('missing download MIME is sniffed and one explicit larger output limit is h
   const result = await generateImage(
     {
       async fetch() {
-        return ++calls === 1 ? Response.json({ data: [{ url: 'https://cdn.example/large' }] }) : new Response(bytes)
+        return ++calls === 1
+          ? Response.json({ data: [{ url: 'https://cdn.example/large' }] })
+          : new Response(bytes)
       },
     },
     connection,
@@ -572,9 +610,15 @@ test('mask dimensions, MIME, alpha and missing references are validated before d
 
 test('custom deadline expires once across a stalled generation', async (context) => {
   context.mock.timers.enable({ apis: ['setTimeout'] })
-  const pending = generateImage({ fetch: () => new Promise<Response>(() => {}) }, connection, input, signal(), {
-    timeoutMs: 10,
-  })
+  const pending = generateImage(
+    { fetch: () => new Promise<Response>(() => {}) },
+    connection,
+    input,
+    signal(),
+    {
+      timeoutMs: 10,
+    },
+  )
   const assertion = assert.rejects(pending, { code: 'timeout', dispatch: 'unknown' })
   context.mock.timers.tick(10)
   await assertion

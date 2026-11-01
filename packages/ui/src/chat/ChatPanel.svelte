@@ -121,12 +121,16 @@
   let modelError = $state<string | null>(null)
   let modelReload = $state(0)
   const capability = $derived(
-    modelOptions?.find((item) => item.endpointId === picked?.endpointId && item.modelId === picked?.modelId) ?? null,
+    modelOptions?.find(
+      (item) => item.endpointId === picked?.endpointId && item.modelId === picked?.modelId,
+    ) ?? null,
   )
   // The saved choice survives model switches; each model sends its nearest allowed effort (docs/28 RT3).
   // svelte-ignore state_referenced_locally
   let chosenEffort = $state<ReasoningEffort>(reasoningEffortProp ?? 'default')
-  const allowedEfforts = $derived(REASONING_EFFORTS.filter((effort) => capability?.reasoning?.efforts.includes(effort)))
+  const allowedEfforts = $derived(
+    REASONING_EFFORTS.filter((effort) => capability?.reasoning?.efforts.includes(effort)),
+  )
   const reasoningEffort = $derived(nearestEffort(chosenEffort, allowedEfforts))
   function chooseEffort(effort: ReasoningEffort) {
     if (session?.running || effort === chosenEffort) return
@@ -155,7 +159,12 @@
         }))
       )
         return
-      if (!disposed && generation === viewGeneration && !session?.running && allowedModes.includes(next))
+      if (
+        !disposed &&
+        generation === viewGeneration &&
+        !session?.running &&
+        allowedModes.includes(next)
+      )
         fullAccess = true
     } else {
       fullAccess = false
@@ -165,7 +174,8 @@
   let reasoningOpen = $state(false)
   const reasoningId = $props.id()
   const noModels = $derived(modelOptions !== null && modelOptions.length === 0)
-  const errorText = (error: unknown) => t(`errors.${isKitClientError(error) ? error.code : 'internal'}`)
+  const errorText = (error: unknown) =>
+    t(`errors.${isKitClientError(error) ? error.code : 'internal'}`)
   $effect(() => {
     void modelReload
     void providersRevision.value
@@ -357,7 +367,11 @@
     const generation = viewGeneration
     historyBusy = true
     try {
-      const ok = await notify.confirm({ title: t('chat.deleteTitle'), body: t('chat.deleteBody'), danger: true })
+      const ok = await notify.confirm({
+        title: t('chat.deleteTitle'),
+        body: t('chat.deleteBody'),
+        danger: true,
+      })
       if (!ok || disposed || generation !== viewGeneration) return
       await history.remove(id)
       if (disposed || generation !== viewGeneration) return
@@ -399,14 +413,19 @@
   let replyError = $state<string | null>(null)
   const validReplyModel = $derived(
     modelOptions?.some(
-      (option) => option.endpointId === replyModel?.endpointId && option.modelId === replyModel?.modelId,
+      (option) =>
+        option.endpointId === replyModel?.endpointId && option.modelId === replyModel?.modelId,
     ) === true,
   )
   function sourceModel(turn: ChatTurn): ModelRef | null {
-    return turn.endpointId && turn.modelId ? { endpointId: turn.endpointId, modelId: turn.modelId } : null
+    return turn.endpointId && turn.modelId
+      ? { endpointId: turn.endpointId, modelId: turn.modelId }
+      : null
   }
   function sourceLabel(turn: ChatTurn) {
-    const option = modelOptions?.find((item) => item.endpointId === turn.endpointId && item.modelId === turn.modelId)
+    const option = modelOptions?.find(
+      (item) => item.endpointId === turn.endpointId && item.modelId === turn.modelId,
+    )
     return option
       ? (option.name ?? option.modelId)
       : turn.modelId
@@ -414,7 +433,11 @@
         : t('chat.noSourceModel')
   }
   function hasChildren(turn: ChatTurn) {
-    return session?.turns.some((child) => child.parentId === turn.id || child.supersedesId === turn.id) === true
+    return (
+      session?.turns.some(
+        (child) => child.parentId === turn.id || child.supersedesId === turn.id,
+      ) === true
+    )
   }
   function canEdit(turn: ChatTurn) {
     return turn.status !== 'running' && !hasChildren(turn)
@@ -494,7 +517,9 @@
       }
       if (
         !source ||
-        !modelOptions.some((option) => option.endpointId === source.endpointId && option.modelId === source.modelId)
+        !modelOptions.some(
+          (option) => option.endpointId === source.endpointId && option.modelId === source.modelId,
+        )
       ) {
         notify.toast('error', t('chat.sourceModelUnavailable'))
         return
@@ -517,7 +542,8 @@
     replyError = null
     if (replyDialog === 'edit') {
       const id = session.conversationId
-      if (!history || !id || !editDraft.trim() || editDraft.length > 24_000 || !canEdit(turn)) return
+      if (!history || !id || !editDraft.trim() || editDraft.length > 24_000 || !canEdit(turn))
+        return
       historyBusy = true
       try {
         const conversation = await history.editTurn(id, turn.id, editDraft, expectedText)
@@ -534,10 +560,15 @@
     } else {
       if (!validReplyModel || !replyModel) return
       if (!targetLanguage.trim() || targetLanguage.trim().length > 80) return
-      const accepted = await session.translate({ ...consumeBase(), model: replyModel }, turn.id, targetLanguage.trim())
+      const accepted = await session.translate(
+        { ...consumeBase(), model: replyModel },
+        turn.id,
+        targetLanguage.trim(),
+      )
       if (disposed || generation !== viewGeneration) return
       if (accepted) replyOpen = false
-      else replyError = session.actionError ? t(`errors.${session.actionError}`) : t('errors.internal')
+      else
+        replyError = session.actionError ? t(`errors.${session.actionError}`) : t('errors.internal')
     }
   }
 
@@ -545,7 +576,9 @@
   let followKey = $state(0)
   let contentRevision = 0
   const pendingApprovals = $derived(
-    session?.running ? session.turns.flatMap((turn) => turn.tools.filter((tool) => tool.pending !== null)) : [],
+    session?.running
+      ? session.turns.flatMap((turn) => turn.tools.filter((tool) => tool.pending !== null))
+      : [],
   )
   $effect.pre(() => {
     for (const turn of session?.turns ?? []) {
@@ -570,7 +603,9 @@
     if (
       reasoningOpen ||
       historyOpen ||
-      document.querySelector('[data-popover-content], [data-slot="select-content"], [role="dialog"]')
+      document.querySelector(
+        '[data-popover-content], [data-slot="select-content"], [role="dialog"]',
+      )
     )
       return
     if (onClose && !session?.running) onClose()
@@ -599,7 +634,9 @@
   let customizing = $state(false)
   let panelWidth = $state(0)
   const visiblePinned = $derived(
-    pinned.filter((id) => tools.includes(id)).slice(0, panelWidth > 0 && panelWidth < 480 ? 1 : pinned.length),
+    pinned
+      .filter((id) => tools.includes(id))
+      .slice(0, panelWidth > 0 && panelWidth < 480 ? 1 : pinned.length),
   )
   /** Tools usable here; unavailable pinned ids stay stored but hidden (docs/38 §3.2). */
   const tools = $derived(
@@ -728,7 +765,8 @@
   function readBase64(file: File) {
     const { promise, resolve, reject } = Promise.withResolvers<string>()
     const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result).slice(String(reader.result).indexOf(',') + 1))
+    reader.onload = () =>
+      resolve(String(reader.result).slice(String(reader.result).indexOf(',') + 1))
     reader.onerror = () => reject(reader.error ?? new Error('read failed'))
     reader.readAsDataURL(file)
     return promise
@@ -738,8 +776,10 @@
     const picked = [...(files ?? [])].filter((file) => file.type.startsWith('image/'))
     if (picked.length === 0) return
     if (!vision) notify.toast('error', t('chat.visionUnsupported'))
-    else if (picked.some((file) => !IMAGE_MIMES.includes(file.type))) notify.toast('error', t('chat.imageType'))
-    else if (picked.some((file) => file.size > MAX_IMAGE_BYTES)) notify.toast('error', t('chat.imageSize'))
+    else if (picked.some((file) => !IMAGE_MIMES.includes(file.type)))
+      notify.toast('error', t('chat.imageType'))
+    else if (picked.some((file) => file.size > MAX_IMAGE_BYTES))
+      notify.toast('error', t('chat.imageSize'))
     else if (images.length + picked.length > MAX_IMAGES)
       notify.toast('error', t('chat.imageLimit', { max: MAX_IMAGES }))
     else {
@@ -749,8 +789,16 @@
           picked.map(async (file) => ({ mime: file.type, data: await readBase64(file), file })),
         )
         // Another add may have landed while reading.
-        if (images.length + read.length > MAX_IMAGES) notify.toast('error', t('chat.imageLimit', { max: MAX_IMAGES }))
-        else images.push(...read.map(({ mime, data, file }) => ({ mime, data, preview: URL.createObjectURL(file) })))
+        if (images.length + read.length > MAX_IMAGES)
+          notify.toast('error', t('chat.imageLimit', { max: MAX_IMAGES }))
+        else
+          images.push(
+            ...read.map(({ mime, data, file }) => ({
+              mime,
+              data,
+              preview: URL.createObjectURL(file),
+            })),
+          )
       } catch {
         notify.toast('error', t('errors.internal'))
       } finally {
@@ -765,7 +813,12 @@
 
 {#if session}
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Esc bubbles from controls) -->
-  <section class="chat-panel" bind:clientWidth={panelWidth} aria-label={t('chat.title')} {onkeydown}>
+  <section
+    class="chat-panel"
+    bind:clientWidth={panelWidth}
+    aria-label={t('chat.title')}
+    {onkeydown}
+  >
     <ChatSurface
       label={t('chat.title')}
       messagesLabel={t('chat.messages')}
@@ -853,7 +906,9 @@
                 chosen={candidates && session.selectedTurnId === turn.id}
                 busy={actionBusy}
                 editable={canEdit(turn)}
-                onRetry={purpose === 'chat' && !restoreBlocked && (turn.persisted || capability !== null)
+                onRetry={purpose === 'chat' &&
+                !restoreBlocked &&
+                (turn.persisted || capability !== null)
                   ? () => void retryReply(turn)
                   : undefined}
                 onEdit={purpose === 'chat' && history && session.conversationId && turn.persisted
@@ -862,23 +917,36 @@
                 onBranch={purpose === 'chat' && history && session.conversationId && turn.persisted
                   ? () => void mutateReply(turn, 'branch')
                   : undefined}
-                onCopyConversation={purpose === 'chat' && history && session.conversationId && turn.persisted
+                onCopyConversation={purpose === 'chat' &&
+                history &&
+                session.conversationId &&
+                turn.persisted
                   ? () => void mutateReply(turn, 'copy')
                   : undefined}
-                onSwitchModel={purpose === 'chat' && history && session.conversationId && turn.persisted
+                onSwitchModel={purpose === 'chat' &&
+                history &&
+                session.conversationId &&
+                turn.persisted
                   ? (picked: ModelRef) => void switchModel(turn, picked)
                   : undefined}
                 modelOptions={turn.images.length > 0
                   ? (modelOptions?.filter((option) => option.canVision) ?? null)
                   : modelOptions}
                 sourceModel={sourceModel(turn)}
-                onTranslate={purpose === 'chat' && history && session.conversationId && turn.persisted
+                onTranslate={purpose === 'chat' &&
+                history &&
+                session.conversationId &&
+                turn.persisted
                   ? () => translateDialog(turn)
                   : undefined}
                 onDelete={purpose === 'chat' && history && session.conversationId && turn.persisted
                   ? () => void mutateReply(turn, 'remove')
                   : undefined}
-                onUseContext={candidates && purpose === 'chat' && history && session.conversationId && turn.persisted
+                onUseContext={candidates &&
+                purpose === 'chat' &&
+                history &&
+                session.conversationId &&
+                turn.persisted
                   ? () => void mutateReply(turn, 'select')
                   : undefined}
               />
@@ -962,7 +1030,9 @@
                   </li>
                 {/each}
               </ul>
-              {#if !vision}<p class="search-status" role="status">{t('chat.visionUnsupported')}</p>{/if}
+              {#if !vision}<p class="search-status" role="status">
+                  {t('chat.visionUnsupported')}
+                </p>{/if}
             {/if}
             {#if recovery}
               <div class="draft-recovery" role="status">
@@ -984,7 +1054,8 @@
           {/snippet}
           {#snippet tools()}
             {#snippet toolIcon(id: string)}
-              {#if id === 'new-conversation'}<MessageSquarePlusIcon />{:else if id === 'web-search'}<GlobeIcon
+              {#if id === 'new-conversation'}<MessageSquarePlusIcon
+                />{:else if id === 'web-search'}<GlobeIcon
                   >{#if !webSearch}<path d="m2 2 20 20" />{/if}</GlobeIcon
                 >{:else if id === 'attachment'}<PaperclipIcon />{:else}<ImageIcon />{/if}
             {/snippet}
@@ -1022,7 +1093,9 @@
                   size="icon-sm"
                   aria-label={t('chat.generateImage')}
                   aria-pressed={generateImage}
-                  disabled={session.running || !paintingModel || capability?.supportsTools === false}
+                  disabled={session.running ||
+                    !paintingModel ||
+                    capability?.supportsTools === false}
                   title={!paintingModel
                     ? t('chat.paintingUnconfigured')
                     : capability?.supportsTools === false
@@ -1042,7 +1115,10 @@
                 void attach(input.files).finally(() => (input.value = ''))
               }}
             />
-            <Popover.Root bind:open={toolsOpen} onOpenChange={(open) => !open && (customizing = false)}>
+            <Popover.Root
+              bind:open={toolsOpen}
+              onOpenChange={(open) => !open && (customizing = false)}
+            >
               <Popover.Trigger disabled={session.running}>
                 {#snippet child({ props })}<Button
                     {...props}
@@ -1053,7 +1129,13 @@
                     title={t('chat.tools')}><PlusIcon /></Button
                   >{/snippet}
               </Popover.Trigger>
-              <Popover.Content class="tools-menu" side="top" align="start" sideOffset={6} collisionPadding={8}>
+              <Popover.Content
+                class="tools-menu"
+                side="top"
+                align="start"
+                sideOffset={6}
+                collisionPadding={8}
+              >
                 {#if customizing}
                   <p class="tools-title" id="{reasoningId}-toolbar">{t('chat.toolbarCustomize')}</p>
                   <ul class="tools-order" aria-labelledby="{reasoningId}-toolbar">
@@ -1078,7 +1160,11 @@
                           aria-label={t(TOOL_LABEL[id] ?? id)}
                           checked={pinned.includes(id)}
                           onCheckedChange={(on) =>
-                            setPinned(toolOrder.filter((item) => (item === id ? on : pinned.includes(item))))}
+                            setPinned(
+                              toolOrder.filter((item) =>
+                                item === id ? on : pinned.includes(item),
+                              ),
+                            )}
                         />
                       </li>
                     {/each}
@@ -1110,7 +1196,8 @@
                           toolsOpen = false
                           webSearch = !webSearch
                         }}
-                        >{@render toolIcon(id)}<span>{t('chat.network')}</span>{#if webSearch}<CheckIcon />{/if}</button
+                        >{@render toolIcon(id)}<span>{t('chat.network')}</span
+                        >{#if webSearch}<CheckIcon />{/if}</button
                       >{:else if id === 'attachment'}<button
                         type="button"
                         class="tools-item"
@@ -1120,9 +1207,8 @@
                           toolsOpen = false
                           fileInput?.click()
                         }}
-                        >{@render toolIcon(id)}<span>{t('chat.uploadAttachment')}</span>{#if !vision}<small
-                            >{t('chat.visionUnsupported')}</small
-                          >{/if}</button
+                        >{@render toolIcon(id)}<span>{t('chat.uploadAttachment')}</span
+                        >{#if !vision}<small>{t('chat.visionUnsupported')}</small>{/if}</button
                       >{:else}<button
                         type="button"
                         class="tools-item"
@@ -1137,8 +1223,8 @@
                           toolsOpen = false
                           generateImage = !generateImage
                         }}
-                        >{@render toolIcon(id)}<span>{t('chat.generateImage')}</span>{#if !paintingModel}<small
-                            >{t('chat.paintingUnconfigured')}</small
+                        >{@render toolIcon(id)}<span>{t('chat.generateImage')}</span
+                        >{#if !paintingModel}<small>{t('chat.paintingUnconfigured')}</small
                           >{:else if generateImage}<CheckIcon />{/if}</button
                       >{/if}
                   {/each}
@@ -1146,7 +1232,8 @@
                     type="button"
                     class="tools-item tools-footer"
                     aria-label={t('chat.toolbarCustomize')}
-                    onclick={() => (customizing = true)}><span>{t('chat.quickPanel')}</span><Settings2Icon /></button
+                    onclick={() => (customizing = true)}
+                    ><span>{t('chat.quickPanel')}</span><Settings2Icon /></button
                   >
                 {/if}
               </Popover.Content>
@@ -1158,7 +1245,8 @@
                 class="tool-chip"
                 aria-label={t('chat.generateImageOff')}
                 title={t('chat.generateImageOff')}
-                onclick={() => (generateImage = false)}><ImageIcon />{t('chat.generateImage')}<XIcon /></Button
+                onclick={() => (generateImage = false)}
+                ><ImageIcon />{t('chat.generateImage')}<XIcon /></Button
               >{/if}
             {#if ports.skills}<div class="skills-control">
                 <SkillPicker
@@ -1172,7 +1260,9 @@
               </div>{/if}
           {/snippet}
           {#snippet actions()}
-            {#if mode === 'plan'}<span class="plan-badge" role="status">{t('chat.mode.planBadge')}</span>{/if}
+            {#if mode === 'plan'}<span class="plan-badge" role="status"
+                >{t('chat.mode.planBadge')}</span
+              >{/if}
             {#if allowedModes.length > 1 || allowedModes.includes('full_access')}
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger disabled={session.running}>
@@ -1182,9 +1272,9 @@
                       size="sm"
                       class={mode === 'full_access' ? 'mode-danger' : undefined}
                       aria-label={`${t('chat.mode.label')}: ${t(`chat.mode.${mode}`)}`}
-                      ><ShieldIcon data-icon="inline-start" />{t(`chat.mode.${mode}`)}<ChevronDownIcon
-                        data-icon="inline-end"
-                      /></Button
+                      ><ShieldIcon data-icon="inline-start" />{t(
+                        `chat.mode.${mode}`,
+                      )}<ChevronDownIcon data-icon="inline-end" /></Button
                     >{/snippet}
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content side="top" align="end" class="mode-menu">
@@ -1203,7 +1293,13 @@
                         <span class="mode-description">{t(`chat.mode.${option}Hint`)}</span>
                         <span class="mode-notice">
                           {#if option === 'auto' || option === 'full_access'}
-                            <span title={t(option === 'auto' ? 'chat.mode.ruleNotice' : 'chat.mode.fullAccessBody')}>
+                            <span
+                              title={t(
+                                option === 'auto'
+                                  ? 'chat.mode.ruleNotice'
+                                  : 'chat.mode.fullAccessBody',
+                              )}
+                            >
                               <InfoIcon />
                             </span>
                           {/if}
@@ -1217,9 +1313,9 @@
                   <div class="mode-footer">
                     <span>{t('chat.mode.label')}</span>
                     <span class="mode-keys"
-                      ><kbd>↑↓</kbd>{t('chat.mode.navigate')}<kbd>↵</kbd>{t('chat.mode.confirm')}<kbd>Esc</kbd>{t(
-                        'chat.mode.close',
-                      )}</span
+                      ><kbd>↑↓</kbd>{t('chat.mode.navigate')}<kbd>↵</kbd>{t(
+                        'chat.mode.confirm',
+                      )}<kbd>Esc</kbd>{t('chat.mode.close')}</span
                     >
                   </div>
                 </DropdownMenu.Content>
@@ -1235,7 +1331,9 @@
                 onchange={chooseEffort}
                 onOpenSettings={onOpenSettings
                   ? () => {
-                      settingsTarget.value = picked ? { endpointId: picked.endpointId, modelId: picked.modelId } : null
+                      settingsTarget.value = picked
+                        ? { endpointId: picked.endpointId, modelId: picked.modelId }
+                        : null
                       onOpenSettings()
                     }
                   : undefined}
@@ -1259,7 +1357,9 @@
             {tool}
             onAnswer={(allow) => session.approve(tool, allow)}
           />{/each}
-        <Button type="button" variant="outline" onclick={() => session.stop()}>{t('chat.stop')}</Button>
+        <Button type="button" variant="outline" onclick={() => session.stop()}
+          >{t('chat.stop')}</Button
+        >
       </div>
     {/snippet}
     {#if history}
@@ -1293,8 +1393,13 @@
               >
                 <Field.FieldGroup
                   ><Field.Field
-                    ><Field.FieldLabel for="chat-conversation-title">{t('chat.conversationTitle')}</Field.FieldLabel
-                    ><Input id="chat-conversation-title" bind:value={renameTitle} disabled={historyBusy} /></Field.Field
+                    ><Field.FieldLabel for="chat-conversation-title"
+                      >{t('chat.conversationTitle')}</Field.FieldLabel
+                    ><Input
+                      id="chat-conversation-title"
+                      bind:value={renameTitle}
+                      disabled={historyBusy}
+                    /></Field.Field
                   ><Button type="submit" disabled={historyBusy || renameTitle.trim() === ''}
                     >{t('common.confirm')}</Button
                   ></Field.FieldGroup
@@ -1308,12 +1413,15 @@
                   renaming = true
                 }}>{t('chat.rename')}</Button
               >{/if}
-            <Button variant="destructive" disabled={historyBusy || session.running} onclick={() => void remove()}
-              >{t('chat.delete')}</Button
+            <Button
+              variant="destructive"
+              disabled={historyBusy || session.running}
+              onclick={() => void remove()}>{t('chat.delete')}</Button
             >
           {/if}
           <Dialog.Footer
-            ><Button variant="ghost" onclick={() => (historyOpen = false)}>{t('chat.close')}</Button></Dialog.Footer
+            ><Button variant="ghost" onclick={() => (historyOpen = false)}>{t('chat.close')}</Button
+            ></Dialog.Footer
           >
         </Dialog.Content>
       </Dialog.Root>
@@ -1321,9 +1429,13 @@
     <Dialog.Root bind:open={replyOpen}>
       <Dialog.Content class="reply-dialog" showCloseButton={false}>
         <Dialog.Header>
-          <Dialog.Title>{t(replyDialog === 'edit' ? 'chat.editReply' : 'chat.translate')}</Dialog.Title>
+          <Dialog.Title
+            >{t(replyDialog === 'edit' ? 'chat.editReply' : 'chat.translate')}</Dialog.Title
+          >
           <Dialog.Description
-            >{t(replyDialog === 'edit' ? 'chat.editReplyHint' : 'chat.candidateHint')}</Dialog.Description
+            >{t(
+              replyDialog === 'edit' ? 'chat.editReplyHint' : 'chat.candidateHint',
+            )}</Dialog.Description
           >
         </Dialog.Header>
         <form
@@ -1335,7 +1447,8 @@
           <Field.FieldGroup>
             {#if replyDialog === 'edit'}
               <Field.Field
-                ><Field.FieldLabel for="chat-reply-edit">{t('chat.replyText')}</Field.FieldLabel><Textarea
+                ><Field.FieldLabel for="chat-reply-edit">{t('chat.replyText')}</Field.FieldLabel
+                ><Textarea
                   id="chat-reply-edit"
                   bind:value={editDraft}
                   rows={8}
@@ -1354,12 +1467,17 @@
               >
               {#if noModels}<p role="status">{t('chat.noModels')}</p>{/if}
               {#if modelError}<p role="alert">
-                  {modelError}<Button type="button" variant="outline" size="sm" onclick={() => modelReload++}
-                    >{t('chat.retryModels')}</Button
+                  {modelError}<Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onclick={() => modelReload++}>{t('chat.retryModels')}</Button
                   >
                 </p>{/if}
               <Field.Field
-                ><Field.FieldLabel for="chat-target-language">{t('chat.targetLanguage')}</Field.FieldLabel><Input
+                ><Field.FieldLabel for="chat-target-language"
+                  >{t('chat.targetLanguage')}</Field.FieldLabel
+                ><Input
                   id="chat-target-language"
                   bind:value={targetLanguage}
                   maxlength={80}
@@ -1369,8 +1487,11 @@
             {/if}
             {#if replyError}<p role="alert" class="text-destructive">{replyError}</p>{/if}
             <Dialog.Footer>
-              <Button type="button" variant="ghost" disabled={actionBusy} onclick={() => (replyOpen = false)}
-                >{t('common.cancel')}</Button
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={actionBusy}
+                onclick={() => (replyOpen = false)}>{t('common.cancel')}</Button
               >
               <Button
                 type="submit"
@@ -1557,7 +1678,8 @@
   :global(.tools-footer) {
     margin-top: 0.25rem;
     border-top: 1px solid var(--color-border);
-    border-radius: 0 0 calc(var(--kit-radius, var(--radius)) - 2px) calc(var(--kit-radius, var(--radius)) - 2px);
+    border-radius: 0 0 calc(var(--kit-radius, var(--radius)) - 2px)
+      calc(var(--kit-radius, var(--radius)) - 2px);
     color: var(--color-muted-foreground);
   }
   :global(.tools-title) {

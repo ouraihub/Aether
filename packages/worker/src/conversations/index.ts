@@ -70,7 +70,10 @@ export class ConversationService {
   private update<T>(attempt: Parameters<typeof retryCas<T>>[0]): Promise<T> {
     return retryCas(attempt, () => conflict('conversation_contended'), this.retry)
   }
-  private async load(id: string, actor: Actor): Promise<{ revision: number; document: ConversationDocument }> {
+  private async load(
+    id: string,
+    actor: Actor,
+  ): Promise<{ revision: number; document: ConversationDocument }> {
     checkId('conversationId', id)
     const stored = await this.store.get(actor, COLLECTION, id)
     if (!stored) throw notFound('conversation')
@@ -79,7 +82,10 @@ export class ConversationService {
   private async *documents(actor: Actor): AsyncGenerator<StoredDocument> {
     let after: string | undefined
     while (true) {
-      const page = await this.store.list(actor, COLLECTION, { ...(after === undefined ? {} : { after }), limit: 200 })
+      const page = await this.store.list(actor, COLLECTION, {
+        ...(after === undefined ? {} : { after }),
+        limit: 200,
+      })
       for (const stored of page) yield stored
       if (page.length < 200) return
       const last = page.at(-1)?.key
@@ -95,14 +101,18 @@ export class ConversationService {
       const summary = parseDocument(stored.value, stored.key).summary
       if (scope === null || summary.scope === scope) summaries.push(summary)
     }
-    return summaries.sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id)).slice(0, 200)
+    return summaries
+      .sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id))
+      .slice(0, 200)
   }
   async get(id: string, actor: Actor): Promise<Conversation> {
     return project((await this.load(id, actor)).document)
   }
   async resolve(request: RunRequest, actor: Actor): Promise<PreparedAction> {
     const snapshot = structuredClone(request)
-    const document = snapshot.conversationId ? (await this.load(snapshot.conversationId, actor)).document : null
+    const document = snapshot.conversationId
+      ? (await this.load(snapshot.conversationId, actor)).document
+      : null
     return resolveAction(snapshot, document)
   }
   plan(prepared: PreparedAction, runId: string): AcceptedHandle {
@@ -132,8 +142,13 @@ export class ConversationService {
         throw conflict('preparation_changed')
       }
       if (
-        (await fingerprint(prepared.request, prepared.action, prepared.selectionGuard, document, input)) !==
-        prepared.expected
+        (await fingerprint(
+          prepared.request,
+          prepared.action,
+          prepared.selectionGuard,
+          document,
+          input,
+        )) !== prepared.expected
       )
         throw conflict('preparation_changed')
       const runInput = validate ? validate(input, validatedInput) : validatedInput
@@ -149,9 +164,14 @@ export class ConversationService {
           runInput.connection.endpointId !== input.sourceModel.endpointId ||
           runInput.connection.modelId !== input.sourceModel.modelId)
       )
-        throw new KitFailure('needs_config', 'Source model unavailable', { reason: 'source_model_unavailable' })
+        throw new KitFailure('needs_config', 'Source model unavailable', {
+          reason: 'source_model_unavailable',
+        })
       const now = this.now(),
-        source = document && prepared.action.kind !== 'reply' ? target(document, prepared.action.sourceId) : null
+        source =
+          document && prepared.action.kind !== 'reply'
+            ? target(document, prepared.action.sourceId)
+            : null
       const parentId =
         prepared.action.kind === 'reply'
           ? prepared.action.parentId
@@ -201,7 +221,13 @@ export class ConversationService {
       next.summary.updatedAt = now
       const checked = parseDocument(next, handle.conversationId)
       await cas(() =>
-        this.store.compareAndSet(actor, COLLECTION, handle.conversationId, stored?.revision ?? null, checked),
+        this.store.compareAndSet(
+          actor,
+          COLLECTION,
+          handle.conversationId,
+          stored?.revision ?? null,
+          checked,
+        ),
       )
       return {
         handle,
@@ -214,7 +240,8 @@ export class ConversationService {
   private checkHandle(document: ConversationDocument, handle: AcceptedHandle): StoredTurn {
     if (document.summary.id !== handle.conversationId) throw notFound('turn')
     const turn = target(document, handle.turnId)
-    if (turn.runId !== handle.runId || turn.reservationId !== handle.reservationId) throw notFound('turn')
+    if (turn.runId !== handle.runId || turn.reservationId !== handle.reservationId)
+      throw notFound('turn')
     if (turn.status !== 'running') throw conflict('turn_finished')
     return turn
   }
@@ -229,9 +256,12 @@ export class ConversationService {
       turn.contextUsage = structuredClone(summary.contextUsage)
       turn.errorCode = summary.status === 'failed' ? (summary.error?.code ?? 'internal') : null
       document.summary.updatedAt = this.now()
-      if (summary.status === 'completed' && turn.supersedesId === null) document.summary.selectedTurnId = turn.id
+      if (summary.status === 'completed' && turn.supersedesId === null)
+        document.summary.selectedTurnId = turn.id
       const checked = parseDocument(document, document.summary.id)
-      await cas(() => this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, checked))
+      await cas(() =>
+        this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, checked),
+      )
       return project(checked)
     })
   }
@@ -244,11 +274,17 @@ export class ConversationService {
       turn.errorCode = 'interrupted'
       turn.contextUsage = null
       document.summary.updatedAt = this.now()
-      await cas(() => this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document))
+      await cas(() =>
+        this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document),
+      )
       return project(document)
     })
   }
-  async addGenerated(handle: AcceptedHandle, images: readonly ImagePart[], actor: Actor): Promise<ImageRef[]> {
+  async addGenerated(
+    handle: AcceptedHandle,
+    images: readonly ImagePart[],
+    actor: Actor,
+  ): Promise<ImageRef[]> {
     for (const image of images) parseImage(image)
     return this.update(async (cas) => {
       const { document, revision } = await this.load(handle.conversationId, actor),
@@ -256,8 +292,12 @@ export class ConversationService {
         first = turn.generated.length
       const now = this.now()
       turn.generated.push(...images.map((image) => ({ ...image, createdAt: now })))
-      await cas(() => this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document))
-      return imageRefs(handle.conversationId, handle.turnId, 'generated', turn.generated).slice(first)
+      await cas(() =>
+        this.store.compareAndSet(actor, COLLECTION, handle.conversationId, revision, document),
+      )
+      return imageRefs(handle.conversationId, handle.turnId, 'generated', turn.generated).slice(
+        first,
+      )
     })
   }
   async purgeImages(beforeMs: number, actor: Actor): Promise<number> {
@@ -280,7 +320,10 @@ export class ConversationService {
               image.data = null
               count++
             }
-        if (count) await cas(() => this.store.compareAndSet(actor, COLLECTION, stored.key, stored.revision, document))
+        if (count)
+          await cas(() =>
+            this.store.compareAndSet(actor, COLLECTION, stored.key, stored.revision, document),
+          )
         return count
       })
     }
@@ -301,7 +344,13 @@ export class ConversationService {
     idle(document)
     await this.store.remove(actor, COLLECTION, id, revision)
   }
-  async editTurn(id: string, turnId: string, text: string, expectedText: string, actor: Actor): Promise<Conversation> {
+  async editTurn(
+    id: string,
+    turnId: string,
+    text: string,
+    expectedText: string,
+    actor: Actor,
+  ): Promise<Conversation> {
     checkText('text', text, 24_000, true)
     const { document, revision } = await this.load(id, actor)
     idle(document)
@@ -373,7 +422,8 @@ export class ConversationService {
       ids = new Map(path.map((t) => [t.id, this.newId()])),
       questions = new Map<string, string>()
     for (const turn of path)
-      if (!questions.has(turn.questionId)) questions.set(turn.questionId, ids.get(turn.questionId) ?? this.newId())
+      if (!questions.has(turn.questionId))
+        questions.set(turn.questionId, ids.get(turn.questionId) ?? this.newId())
     const now = this.now(),
       selected = ids.get(turnId)
     if (!selected) throw notFound('turn')
@@ -392,7 +442,13 @@ export class ConversationService {
     })
     const fork: ConversationDocument = {
       version: 1,
-      summary: { ...document.summary, id: forkId, selectedTurnId: selected, createdAt: now, updatedAt: now },
+      summary: {
+        ...document.summary,
+        id: forkId,
+        selectedTurnId: selected,
+        createdAt: now,
+        updatedAt: now,
+      },
       turns,
     }
     await this.store.compareAndSet(actor, COLLECTION, forkId, null, fork)
@@ -424,11 +480,21 @@ export class ConversationService {
       await this.delete(id, actor)
       return json({ ok: true })
     }
-    if (parts.length === 6 && parts[1] === 'turns' && parts[3] === 'images' && request.method === 'GET') {
+    if (
+      parts.length === 6 &&
+      parts[1] === 'turns' &&
+      parts[3] === 'images' &&
+      request.method === 'GET'
+    ) {
       const turnId = parts[2],
         kind = parts[4],
         index = parts[5]
-      if (!turnId || (kind !== 'input' && kind !== 'generated') || !index || !/^(0|[1-9]\d*)$/u.test(index))
+      if (
+        !turnId ||
+        (kind !== 'input' && kind !== 'generated') ||
+        !index ||
+        !/^(0|[1-9]\d*)$/u.test(index)
+      )
         throw notFound('image')
       const { document } = await this.load(id, actor),
         turn = target(document, turnId),
@@ -454,15 +520,21 @@ export class ConversationService {
     if (!isRecord(body)) throw badRequest('body', 'object')
     const action = parts[1],
       fields =
-        action === 'rename' ? ['title'] : action === 'edit-turn' ? ['turnId', 'text', 'expectedText'] : ['turnId']
-    if (Object.keys(body).some((key) => !fields.includes(key))) throw badRequest('body', 'unknown_field')
+        action === 'rename'
+          ? ['title']
+          : action === 'edit-turn'
+            ? ['turnId', 'text', 'expectedText']
+            : ['turnId']
+    if (Object.keys(body).some((key) => !fields.includes(key)))
+      throw badRequest('body', 'unknown_field')
     if (action === 'rename') {
       if (typeof body.title !== 'string') throw badRequest('title', 'required')
       return json(await this.rename(id, body.title, actor))
     }
     if (typeof body.turnId !== 'string') throw badRequest('turnId', 'required')
     if (action === 'edit-turn') {
-      if (typeof body.text !== 'string' || typeof body.expectedText !== 'string') throw badRequest('text', 'required')
+      if (typeof body.text !== 'string' || typeof body.expectedText !== 'string')
+        throw badRequest('text', 'required')
       return json(await this.editTurn(id, body.turnId, body.text, body.expectedText, actor))
     }
     if (action === 'remove-turn') return json(await this.removeTurn(id, body.turnId, actor))

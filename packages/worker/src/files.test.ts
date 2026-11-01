@@ -20,7 +20,10 @@ export function testBucket(): {
   const bucket: R2Bucket = {
     async put(key, value, options) {
       if (options?.onlyIf?.etagDoesNotMatch === '*' && objects.has(key)) return null
-      objects.set(key, { data: new Uint8Array(value), mime: options?.httpMetadata?.contentType ?? '' })
+      objects.set(key, {
+        data: new Uint8Array(value),
+        mime: options?.httpMetadata?.contentType ?? '',
+      })
       return { key }
     },
     async get(key) {
@@ -57,11 +60,17 @@ test('R2 files isolate app/tenant/subject, validate MIME/size, and never expose 
   await assert.rejects(files.put(actor, 'bad', { mime: 'image/png', data: new Uint8Array([1]) }), {
     code: 'bad_request',
   })
-  await assert.rejects(files.put(actor, 'large', { mime: 'application/octet-stream', data: new Uint8Array(33) }), {
-    code: 'bad_request',
-  })
   await assert.rejects(
-    files.put(actor, '../traversal', { mime: 'application/octet-stream', data: new Uint8Array([1]) }),
+    files.put(actor, 'large', { mime: 'application/octet-stream', data: new Uint8Array(33) }),
+    {
+      code: 'bad_request',
+    },
+  )
+  await assert.rejects(
+    files.put(actor, '../traversal', {
+      mime: 'application/octet-stream',
+      data: new Uint8Array([1]),
+    }),
     { code: 'bad_request' },
   )
   await files.remove(actor, 'image')

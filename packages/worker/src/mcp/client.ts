@@ -10,7 +10,12 @@ import {
 } from '@ouraihub/aether-core/mcp'
 import type { OutboundHttp } from '@ouraihub/aether-core/ports'
 import { ownerKey, type Actor, type WorkerContext } from '../context.js'
-import { isSealedCredential, type CredentialPort, type CredentialScope, type SealedCredential } from '../credentials.js'
+import {
+  isSealedCredential,
+  type CredentialPort,
+  type CredentialScope,
+  type SealedCredential,
+} from '../credentials.js'
 import type { DocumentStore } from '../storage.js'
 
 const COLLECTION = 'mcp-client'
@@ -70,7 +75,8 @@ function bool(value: unknown, field: string, fallback?: boolean): boolean {
   return value
 }
 function approval(value: unknown): Approval {
-  if (value !== 'auto' && value !== 'ask' && value !== 'deny') throw badRequest('approval', 'invalid')
+  if (value !== 'auto' && value !== 'ask' && value !== 'deny')
+    throw badRequest('approval', 'invalid')
   return value
 }
 function looksSecret(value: string): boolean {
@@ -95,7 +101,8 @@ function serverUrl(raw: unknown, allowPrivate: boolean): string {
       throw badRequest('url', 'credential_query')
   }
   const host = url.hostname.replace(/^\[|\]$/g, '')
-  const loopback = host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127\./.test(host)
+  const loopback =
+    host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127\./.test(host)
   if (url.protocol === 'http:' && !allowPrivate) throw badRequest('url', 'plain_http')
   // DNS and connection-time restrictions remain the injected outbound port's responsibility.
   const restricted =
@@ -112,7 +119,8 @@ function maskedUrl(raw: string): string {
   url.username = ''
   url.password = ''
   for (const [name, value] of url.searchParams)
-    if (Object.hasOwn(SECRET_PARAMS, name.toLowerCase()) || looksSecret(value)) url.searchParams.set(name, '***')
+    if (Object.hasOwn(SECRET_PARAMS, name.toLowerCase()) || looksSecret(value))
+      url.searchParams.set(name, '***')
   return url.href
 }
 function strings(value: unknown, field: string): Record<string, string> {
@@ -121,7 +129,12 @@ function strings(value: unknown, field: string): Record<string, string> {
   const result: Record<string, string> = {}
   for (const [key, entry] of Object.entries(value)) {
     if (!key || typeof entry !== 'string') throw badRequest(field, 'invalid')
-    Object.defineProperty(result, key, { value: entry, enumerable: true, writable: true, configurable: true })
+    Object.defineProperty(result, key, {
+      value: entry,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    })
   }
   return result
 }
@@ -150,7 +163,8 @@ function cached(value: unknown): McpCachedTool {
   )
     throw badRequest('tools', 'invalid')
   if ([...value.description].length > 1024) throw badRequest('tools', 'too_large')
-  if (new TextEncoder().encode(JSON.stringify(value.schema)).length > 32768) throw badRequest('tools', 'too_large')
+  if (new TextEncoder().encode(JSON.stringify(value.schema)).length > 32768)
+    throw badRequest('tools', 'too_large')
   return {
     name: text(value.name, 'tool'),
     description: value.description,
@@ -163,12 +177,18 @@ function cached(value: unknown): McpCachedTool {
 function toolList(value: unknown): McpCachedTool[] {
   if (!Array.isArray(value) || value.length > 200) throw badRequest('tools', 'invalid')
   const tools = value.map(cached)
-  if (new Set(tools.map((tool) => tool.name)).size !== tools.length) throw badRequest('tools', 'duplicate')
+  if (new Set(tools.map((tool) => tool.name)).size !== tools.length)
+    throw badRequest('tools', 'duplicate')
   return tools
 }
 function readState(value: unknown): State {
   try {
-    if (!object(value) || value.version !== 1 || !Array.isArray(value.servers) || !Array.isArray(value.deleted))
+    if (
+      !object(value) ||
+      value.version !== 1 ||
+      !Array.isArray(value.servers) ||
+      !Array.isArray(value.deleted)
+    )
       throw badRequest('mcp', 'invalid')
     fields(value, ['version', 'servers', 'deleted'], 'mcp')
     const deleted = value.deleted.map((id: unknown) => text(id, 'id'))
@@ -176,7 +196,18 @@ function readState(value: unknown): State {
       if (!object(entry)) throw badRequest('mcp', 'invalid')
       fields(
         entry,
-        ['id', 'slug', 'name', 'url', 'enabled', 'trusted', 'allowPrivate', 'secret', 'secretKeys', 'tools'],
+        [
+          'id',
+          'slug',
+          'name',
+          'url',
+          'enabled',
+          'trusted',
+          'allowPrivate',
+          'secret',
+          'secretKeys',
+          'tools',
+        ],
         'mcp',
       )
       const slug = text(entry.slug, 'slug')
@@ -186,7 +217,8 @@ function readState(value: unknown): State {
         !(entry.secret === null || isSealedCredential(entry.secret))
       )
         throw badRequest('mcp', 'invalid')
-      if (entry.secret !== null) fields(entry.secret, ['version', 'keyId', 'nonce', 'ciphertext'], 'secret')
+      if (entry.secret !== null)
+        fields(entry.secret, ['version', 'keyId', 'nonce', 'ciphertext'], 'secret')
       if (
         new Set(entry.secretKeys).size !== entry.secretKeys.length ||
         (entry.secret !== null && !entry.secretKeys.length)
@@ -211,7 +243,8 @@ function readState(value: unknown): State {
       new Set(servers.map((server) => server.slug)).size !== servers.length ||
       new Set(deleted).size !== deleted.length ||
       servers.some(
-        (server) => deleted.includes(server.id) || (server.secret === null && server.secretKeys.length !== 0),
+        (server) =>
+          deleted.includes(server.id) || (server.secret === null && server.secretKeys.length !== 0),
       )
     )
       throw badRequest('mcp', 'invalid')
@@ -221,7 +254,12 @@ function readState(value: unknown): State {
   }
 }
 function toolDto(tool: McpCachedTool): ToolDto {
-  return { name: tool.name, description: tool.description, readOnly: tool.readOnly, approval: tool.approval }
+  return {
+    name: tool.name,
+    description: tool.description,
+    readOnly: tool.readOnly,
+    approval: tool.approval,
+  }
 }
 function dto(server: Server): ServerDto {
   return {
@@ -288,7 +326,9 @@ export class McpClientSettings {
         const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
         secret = parseSecret(value)
       } catch {
-        throw new KitFailure('needs_config', 'MCP credentials are unreadable', { reason: 'key_unreadable' })
+        throw new KitFailure('needs_config', 'MCP credentials are unreadable', {
+          reason: 'key_unreadable',
+        })
       } finally {
         bytes?.fill(0)
       }
@@ -326,7 +366,10 @@ export class McpClientSettings {
         const server = snapshot.state.servers.find((entry) => entry.id === id)
         if (!server) throw missing()
         const approvals = new Map(server.tools.map((tool) => [tool.name, tool.approval]))
-        server.tools = toolList(tools).map((tool) => ({ ...tool, approval: approvals.get(tool.name) ?? 'ask' }))
+        server.tools = toolList(tools).map((tool) => ({
+          ...tool,
+          approval: approvals.get(tool.name) ?? 'ask',
+        }))
         await this.commit(owner, snapshot)
       },
     }
@@ -334,18 +377,31 @@ export class McpClientSettings {
     this.runtimes.set(key, runtime)
     return runtime
   }
-  private async save(actor: Actor, input: Record<string, unknown>, id?: string): Promise<ServerDto[]> {
-    fields(input, ['id', 'slug', 'name', 'transport', 'secret', 'enabled', 'trusted', 'allowPrivate'], 'body')
+  private async save(
+    actor: Actor,
+    input: Record<string, unknown>,
+    id?: string,
+  ): Promise<ServerDto[]> {
+    fields(
+      input,
+      ['id', 'slug', 'name', 'transport', 'secret', 'enabled', 'trusted', 'allowPrivate'],
+      'body',
+    )
     if (input.id !== undefined && input.id !== id) throw badRequest('id', 'mismatch')
     const snapshot = await this.snapshot(actor)
-    const existing = id === undefined ? undefined : snapshot.state.servers.find((server) => server.id === id)
+    const existing =
+      id === undefined ? undefined : snapshot.state.servers.find((server) => server.id === id)
     if (id !== undefined && !existing) throw missing()
     const slug = text(input.slug, 'slug')
     if (!/^[a-z0-9_]{1,24}$/.test(slug)) throw badRequest('slug', 'invalid')
     if (snapshot.state.servers.some((server) => server.slug === slug && server.id !== id))
-      throw new KitFailure('conflict', 'MCP slug already exists', { reason: 'duplicate_slug', field: 'slug' })
+      throw new KitFailure('conflict', 'MCP slug already exists', {
+        reason: 'duplicate_slug',
+        field: 'slug',
+      })
     if (!object(input.transport)) throw badRequest('transport', 'invalid')
-    if (input.transport.kind === 'stdio') throw new KitFailure('unsupported', 'Worker MCP clients support HTTP only')
+    if (input.transport.kind === 'stdio')
+      throw new KitFailure('unsupported', 'Worker MCP clients support HTTP only')
     fields(input.transport, ['kind', 'url'], 'transport')
     if (input.transport.kind !== 'http') throw badRequest('transport', 'invalid')
     const allowPrivate = bool(input.allowPrivate, 'allowPrivate', false)
@@ -363,7 +419,9 @@ export class McpClientSettings {
     }
     if (input.secret !== undefined) {
       const secret = parseSecret(input.secret)
-      server.secretKeys = [...new Set([...Object.keys(secret.headers), ...Object.keys(secret.query)])].sort()
+      server.secretKeys = [
+        ...new Set([...Object.keys(secret.headers), ...Object.keys(secret.query)]),
+      ].sort()
       if (server.secretKeys.length) {
         const bytes = new TextEncoder().encode(JSON.stringify(secret))
         try {
@@ -380,7 +438,10 @@ export class McpClientSettings {
   }
   async handle(request: Request, context: WorkerContext): Promise<Response | null> {
     const path = new URL(request.url).pathname
-    const match = /^\/api\/v1\/mcp\/servers(?:\/([^/]+)(?:\/(refresh)|\/tools\/([^/]+)\/(approval))?)?$/.exec(path)
+    const match =
+      /^\/api\/v1\/mcp\/servers(?:\/([^/]+)(?:\/(refresh)|\/tools\/([^/]+)\/(approval))?)?$/.exec(
+        path,
+      )
     if (!match) return null
     let id: string | undefined
     let tool: string | undefined
@@ -391,8 +452,10 @@ export class McpClientSettings {
       throw badRequest('path', 'invalid')
     }
     const actor = context.actor
-    if (!id && request.method === 'GET') return Response.json((await this.snapshot(actor)).state.servers.map(dto))
-    if (!id && request.method === 'POST') return Response.json(await this.save(actor, await body(request)))
+    if (!id && request.method === 'GET')
+      return Response.json((await this.snapshot(actor)).state.servers.map(dto))
+    if (!id && request.method === 'POST')
+      return Response.json(await this.save(actor, await body(request)))
     if (id && !match[2] && !match[4] && request.method === 'PUT')
       return Response.json(await this.save(actor, await body(request), id))
     if (id && !match[2] && !match[4] && request.method === 'DELETE') {
@@ -417,7 +480,9 @@ export class McpClientSettings {
       const server = snapshot.state.servers.find((entry) => entry.id === id)
       const cached = server?.tools.find((entry) => entry.name === tool)
       if (!server || !cached) throw missing()
-      server.tools = server.tools.map((entry) => (entry === cached ? { ...entry, approval: value } : entry))
+      server.tools = server.tools.map((entry) =>
+        entry === cached ? { ...entry, approval: value } : entry,
+      )
       await this.commit(actor, snapshot)
       return Response.json({ ok: true })
     }

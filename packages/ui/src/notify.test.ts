@@ -12,7 +12,10 @@ describe('KitNotifier confirm', () => {
     const notify = createDefaultNotify()
     render(KitNotifier, { notify, i18n: createI18n('en') })
     const answer = notify.confirm({ title: 'Delete?', body: 'Gone for good.' })
-    expect(await screen.findByRole('alertdialog')).toHaveProperty('textContent', expect.stringContaining('Delete?'))
+    expect(await screen.findByRole('alertdialog')).toHaveProperty(
+      'textContent',
+      expect.stringContaining('Delete?'),
+    )
     expect(overlays()).toBe(1)
 
     await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))

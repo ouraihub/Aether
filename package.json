@@ -16,9 +16,11 @@
   "scripts": {
     "lint": "eslint packages/ui/src packages/core/src packages/worker/src packages/contracts/src",
     "format:check": "prettier --check \"packages/{ui,core,worker,contracts}/src/**/*.{ts,svelte}\" eslint.config.js scripts/*.mjs",
+    "format:length": "node scripts/line-length.mjs",
+    "format:size": "node scripts/file-size.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test",
+    "check": "pnpm run lint && pnpm run format:check && pnpm run format:length && pnpm run format:size && pnpm run typecheck && pnpm run test",
     "ci": "node scripts/ci.mjs",
     "kit:check-deps": "node scripts/check-deps.mjs",
     "kit:nondet-check": "node scripts/nondet-check.mjs",
@@ -27,7 +29,7 @@
     "kit:i18n": "node scripts/i18n-check.mjs",
     "aether:check-deps": "pnpm run kit:check-deps",
     "aether:dto-check": "pnpm run kit:dto-check",
-    "aether:i18n": "pnpm run kit:i18n"
+    "aether:line-length": "pnpm run format:length"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

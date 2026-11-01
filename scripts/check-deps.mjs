@@ -70,7 +70,9 @@ for (const pkg of members) {
   const kitDeps = pkg.dependencies.filter(
     (dep) => memberNames.has(dep.name) && isKitCrate(dep.name) && !DEV_ONLY.includes(dep.name),
   )
-  for (const dep of pkg.dependencies.filter((dep) => DEV_ONLY.includes(dep.name) && dep.kind !== 'dev'))
+  for (const dep of pkg.dependencies.filter(
+    (dep) => DEV_ONLY.includes(dep.name) && dep.kind !== 'dev',
+  ))
     violations.push(`${pkg.name} -> ${dep.name}: test-only crate, allowed as a dev-dependency only`)
 
   if (isKitCrate(pkg.name)) {
@@ -97,7 +99,9 @@ for (const pkg of members) {
 // Normal-dependency closure from the resolve graph; dev and build dependencies do not ship.
 const nodes = new Map(metadata.resolve.nodes.map((node) => [node.id, node]))
 const normalDeps = (id) =>
-  (nodes.get(id)?.deps ?? []).filter((dep) => dep.dep_kinds.some((kind) => kind.kind === null)).map((dep) => dep.pkg)
+  (nodes.get(id)?.deps ?? [])
+    .filter((dep) => dep.dep_kinds.some((kind) => kind.kind === null))
+    .map((dep) => dep.pkg)
 
 for (const pkg of members.filter((m) => NO_TAURI.includes(m.name))) {
   const parent = new Map([[pkg.id, null]])

@@ -62,7 +62,9 @@
 <Dialog.Root bind:open>
   <Dialog.Content class="flex max-h-[85vh] flex-col sm:max-w-2xl">
     <Dialog.Header>
-      <Dialog.Title>{skill ? t('skills.edit_title', { name: skill.name }) : t('skills.new')}</Dialog.Title>
+      <Dialog.Title
+        >{skill ? t('skills.edit_title', { name: skill.name }) : t('skills.new')}</Dialog.Title
+      >
     </Dialog.Header>
     <Field.Group class="min-h-0 overflow-y-auto">
       <div class="flex gap-3">
@@ -72,7 +74,12 @@
         </Field.Field>
         <Field.Field class="w-32">
           <Field.Label for="kit-skill-version">{t('skills.version')}</Field.Label>
-          <Input id="kit-skill-version" maxlength={32} placeholder={t('skills.unversioned')} bind:value={version} />
+          <Input
+            id="kit-skill-version"
+            maxlength={32}
+            placeholder={t('skills.unversioned')}
+            bind:value={version}
+          />
         </Field.Field>
       </div>
       <Field.Field>
@@ -86,7 +93,10 @@
     </Field.Group>
     <Dialog.Footer>
       <Button variant="outline" onclick={() => (open = false)}>{t('common.cancel')}</Button>
-      <Button disabled={saving || !name.trim() || !description.trim() || !body.trim()} onclick={() => void save()}>
+      <Button
+        disabled={saving || !name.trim() || !description.trim() || !body.trim()}
+        onclick={() => void save()}
+      >
         {t('skills.save')}
       </Button>
     </Dialog.Footer>

@@ -178,7 +178,8 @@
   const suggested = $derived.by((): Protocol | null => {
     if (check?.state === 'ok') return check.suggested
     if (check?.state !== 'keys') return null
-    for (const { value } of check.results) if (value.state === 'ok' && value.suggested) return value.suggested
+    for (const { value } of check.results)
+      if (value.state === 'ok' && value.suggested) return value.suggested
     return null
   })
 </script>
@@ -196,7 +197,12 @@
     </div>
     <div class="flex min-w-0 items-start gap-2">
       <SecretInput id="kit-endpoint-key" endpoint={endpoint.saved} onchanged={onkeys} />
-      <Button variant="outline" class="shrink-0" disabled={!validUrl(endpoint.baseUrl)} onclick={oncheck}>
+      <Button
+        variant="outline"
+        class="shrink-0"
+        disabled={!validUrl(endpoint.baseUrl)}
+        onclick={oncheck}
+      >
         {#if check?.state === 'running'}<LoaderIcon class="animate-spin" />{/if}
         {t('providers.check')}
       </Button>
@@ -219,7 +225,9 @@
               >
               <Switch
                 size="sm"
-                aria-label={t('providers.keys_enable_for', { name: key.label || maskedText(key, t) })}
+                aria-label={t('providers.keys_enable_for', {
+                  name: key.label || maskedText(key, t),
+                })}
                 checked={key.enabled}
                 disabled={keySaving}
                 onCheckedChange={(enabled) => void setKeyEnabled(key.id, enabled)}
@@ -231,14 +239,20 @@
     {:else if check && check.state !== 'running'}
       <p
         role="status"
-        class={cn('text-kit-xs whitespace-pre-line', check.state === 'ok' ? 'text-success' : 'text-destructive')}
+        class={cn(
+          'text-kit-xs whitespace-pre-line',
+          check.state === 'ok' ? 'text-success' : 'text-destructive',
+        )}
       >
         {check.state === 'ok' ? t('providers.check_ok', { count: check.count }) : check.message}
       </p>
     {/if}
     {#if suggested && suggested !== endpoint.protocol}
       {@const next = suggested}
-      <div role="status" class="bg-info/10 flex min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-kit-xs">
+      <div
+        role="status"
+        class="bg-info/10 flex min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-kit-xs"
+      >
         <span class="min-w-0 flex-1">{t('providers.suggest_protocol')}</span>
         <Button
           variant="outline"
@@ -287,7 +301,11 @@
     <div class="flex items-center gap-2">
       <Field.Label for="kit-endpoint-url">{t('providers.base_url')}</Field.Label>
       {#if onaddendpoint}
-        <button type="button" class="text-primary text-kit-xs hover:underline" onclick={onaddendpoint}>
+        <button
+          type="button"
+          class="text-primary text-kit-xs hover:underline"
+          onclick={onaddendpoint}
+        >
           {t('providers.add_endpoint')}
         </button>
       {/if}
@@ -314,20 +332,25 @@
     {#if urlError}
       <p role="alert" class="text-destructive text-kit-xs">{t('providers.url_invalid')}</p>
     {:else if validUrl(endpoint.baseUrl)}
-      <p class="text-muted-foreground truncate font-mono text-kit-xs">GET {probeUrl(endpoint.baseUrl)}</p>
+      <p class="text-muted-foreground truncate font-mono text-kit-xs">
+        GET {probeUrl(endpoint.baseUrl)}
+      </p>
     {/if}
   </Field.Field>
 
   <section class="flex min-w-0 flex-col gap-2" aria-labelledby="kit-endpoint-models">
     <div class="flex min-w-0 flex-wrap items-center gap-1">
-      <h3 id="kit-endpoint-models" class="mr-1 text-kit-base font-semibold">{t('providers.models')}</h3>
+      <h3 id="kit-endpoint-models" class="mr-1 text-kit-base font-semibold">
+        {t('providers.models')}
+      </h3>
       <Button
         variant="ghost"
         size="icon-xs"
         title={t(allFolded ? 'providers.expand_all' : 'providers.collapse_all')}
         aria-label={t(allFolded ? 'providers.expand_all' : 'providers.collapse_all')}
         disabled={groups.length === 0}
-        onclick={() => (folded = allFolded ? {} : Object.fromEntries(groups.map(([group]) => [group, true])))}
+        onclick={() =>
+          (folded = allFolded ? {} : Object.fromEntries(groups.map(([group]) => [group, true])))}
         >{#if allFolded}<ChevronsUpDownIcon />{:else}<ChevronsDownUpIcon />{/if}</Button
       >
       {#if searching || query}
@@ -338,7 +361,8 @@
           aria-label={t('providers.model_search')}
           bind:value={query}
           onblur={() => (searching = false)}
-          onkeydown={(event) => event.key === 'Escape' && ((query = ''), event.currentTarget.blur())}
+          onkeydown={(event) =>
+            event.key === 'Escape' && ((query = ''), event.currentTarget.blur())}
         />
       {:else}
         <Button
@@ -349,7 +373,11 @@
           onclick={() => (searching = true)}><SearchIcon /></Button
         >
       {/if}
-      <Select.Root type="single" value={capFilter} onValueChange={(value) => (capFilter = value as Cap | 'all')}>
+      <Select.Root
+        type="single"
+        value={capFilter}
+        onValueChange={(value) => (capFilter = value as Cap | 'all')}
+      >
         <Select.Trigger
           size="sm"
           class={cn('border-0 shadow-none', capFilter !== 'all' && 'bg-accent')}
@@ -360,7 +388,10 @@
         <Select.Content>
           <Select.Group>
             <Select.Item value="all" label={t('providers.all_types')} />
-            {#each CAPS as cap (cap)}<Select.Item value={cap} label={t(`providers.cap_${cap}`)} />{/each}
+            {#each CAPS as cap (cap)}<Select.Item
+                value={cap}
+                label={t(`providers.cap_${cap}`)}
+              />{/each}
           </Select.Group>
         </Select.Content>
       </Select.Root>
@@ -387,7 +418,9 @@
             aria-expanded={!folded[group]}
             onclick={() => (folded[group] = !folded[group])}
           >
-            <ChevronRightIcon class={cn('size-4 shrink-0 transition-transform', !folded[group] && 'rotate-90')} />
+            <ChevronRightIcon
+              class={cn('size-4 shrink-0 transition-transform', !folded[group] && 'rotate-90')}
+            />
             <span class="truncate">{group || t('providers.no_group')}</span>
             <span class="text-muted-foreground text-kit-xs tabular-nums">{models.length}</span>
           </button>
@@ -397,7 +430,8 @@
             class="opacity-0 group-hover/model-group:opacity-100 focus-visible:opacity-100"
             title={t('providers.remove_group')}
             aria-label={t('providers.remove_group')}
-            onclick={() => setModels(endpoint.models.filter((model) => !models.includes(model)))}><MinusIcon /></Button
+            onclick={() => setModels(endpoint.models.filter((model) => !models.includes(model)))}
+            ><MinusIcon /></Button
           >
         </div>
         {#if !folded[group]}
@@ -409,14 +443,21 @@
                   class="bg-muted text-muted-foreground flex size-6 shrink-0 items-center justify-center rounded-full text-kit-xs uppercase"
                   >{(model.name ?? model.id).slice(0, 1)}</span
                 >
-                <span class="min-w-0 flex-1 truncate text-kit-sm" title={model.id}>{model.name ?? model.id}</span>
+                <span class="min-w-0 flex-1 truncate text-kit-sm" title={model.id}
+                  >{model.name ?? model.id}</span
+                >
                 <span class="flex shrink-0 items-center gap-0.5">
                   {#each CAPS.filter((cap) => has(model, cap)) as cap (cap)}
                     <span
-                      class={cn('flex h-5 w-6 items-center justify-center rounded-full', CAP_STYLE[cap])}
+                      class={cn(
+                        'flex h-5 w-6 items-center justify-center rounded-full',
+                        CAP_STYLE[cap],
+                      )}
                       title={t(`providers.cap_${cap}`)}
                     >
-                      {#if cap === 'vision'}<EyeIcon class="size-3" />{:else if cap === 'reasoning'}<BrainIcon
+                      {#if cap === 'vision'}<EyeIcon
+                          class="size-3"
+                        />{:else if cap === 'reasoning'}<BrainIcon
                           class="size-3"
                         />{:else if cap === 'tools'}<WrenchIcon class="size-3" />{:else}<Globe2Icon
                           class="size-3"
@@ -449,7 +490,9 @@
         {/if}
       </section>
     {:else}
-      <p class="text-muted-foreground rounded-kit border border-dashed px-3 py-6 text-center text-kit-sm">
+      <p
+        class="text-muted-foreground rounded-kit border border-dashed px-3 py-6 text-center text-kit-sm"
+      >
         {endpoint.models.length === 0 ? t('providers.no_models') : t('providers.no_model_matches')}
       </p>
     {/each}
@@ -461,7 +504,8 @@
   model={editing}
   protocol={endpoint.protocol}
   usedBy={editing && endpoint.saved && usedBy ? usedBy(endpoint.saved.id, editing.id) : []}
-  onsave={(saved) => setModels(endpoint.models.map((model) => (model.id === saved.id ? saved : model)))}
+  onsave={(saved) =>
+    setModels(endpoint.models.map((model) => (model.id === saved.id ? saved : model)))}
 />
 
 <RequestConfigDialog bind:open={settingsOpen} bind:endpoint {onaddendpoint} {onremove} {oncommit} />
@@ -480,10 +524,18 @@
     >
       <Field.Field>
         <Field.Label for="kit-model-new">{t('providers.model_id')}</Field.Label>
-        <Input id="kit-model-new" class="font-mono" autocomplete="off" spellcheck={false} bind:value={newModelId} />
+        <Input
+          id="kit-model-new"
+          class="font-mono"
+          autocomplete="off"
+          spellcheck={false}
+          bind:value={newModelId}
+        />
       </Field.Field>
       <Dialog.Footer>
-        <Button type="button" variant="outline" onclick={() => (addOpen = false)}>{t('common.cancel')}</Button>
+        <Button type="button" variant="outline" onclick={() => (addOpen = false)}
+          >{t('common.cancel')}</Button
+        >
         <Button type="submit" disabled={!newModelId.trim()}>{t('common.confirm')}</Button>
       </Dialog.Footer>
     </form>

@@ -10,8 +10,13 @@ export interface KitI18n {
 }
 
 /** `zh*` locales get Chinese, everything else English; `overrides` replace kit texts per key. */
-export function createI18n(locale: string, overrides: Readonly<Record<string, string>> = {}): KitI18n {
-  const messages: Readonly<Record<string, string>> = locale.toLowerCase().startsWith('zh') ? zhCN : en
+export function createI18n(
+  locale: string,
+  overrides: Readonly<Record<string, string>> = {},
+): KitI18n {
+  const messages: Readonly<Record<string, string>> = locale.toLowerCase().startsWith('zh')
+    ? zhCN
+    : en
   return {
     locale,
     t(key, params = {}) {

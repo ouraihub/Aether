@@ -10,7 +10,9 @@ Aether is a shared AI foundation with Rust/Tauri desktop services, a TypeScript 
 
 ## Source of truth
 
-Use the current project files first. Do not invent an API from memory.
+Read [`docs/AI工程规范.md`](../../docs/AI工程规范.md) before the topic-specific rules below. It is the reusable cross-project contract for architecture, interfaces, modules, logs, errors, TypeScript, Svelte 5, Rust, Python, tests, file size and verification.
+
+For Aether-specific behavior, use the current source and the following order:
 
 1. Current Rust and TypeScript source, especially public `lib.rs` and package `index.ts` files.
 2. Canonical generated DTOs in `packages/contracts/src/generated/`, exported by `@ouraihub/aether-contracts` with precompiled validators (never hand-edit them).

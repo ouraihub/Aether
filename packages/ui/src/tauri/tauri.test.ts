@@ -33,7 +33,11 @@ describe('createTauriPorts', () => {
   })
 
   it('turns a KitError rejection into KitClientError', async () => {
-    invokeMock.mockRejectedValueOnce({ code: 'conflict', message: 'exists', details: { reason: 'exists' } })
+    invokeMock.mockRejectedValueOnce({
+      code: 'conflict',
+      message: 'exists',
+      details: { reason: 'exists' },
+    })
     const error: unknown = await createTauriPorts({ skills: true })
       .skills?.list()
       .catch((caught: unknown) => caught)
@@ -46,7 +50,14 @@ describe('createTauriPorts', () => {
   })
   it('maps history turn mutations to native commands', async () => {
     const conversation: Conversation = {
-      summary: { id: 'c1', title: 'Conversation', scope: null, createdAt: 0, updatedAt: 0, selectedTurnId: null },
+      summary: {
+        id: 'c1',
+        title: 'Conversation',
+        scope: null,
+        createdAt: 0,
+        updatedAt: 0,
+        selectedTurnId: null,
+      },
       turns: [],
     }
     invokeMock.mockResolvedValue(conversation)
@@ -56,7 +67,10 @@ describe('createTauriPorts', () => {
     await history?.fork('c1', 't1')
     await history?.selectTurn('c1', 't1')
     expect(invokeMock.mock.calls.slice(0, 4)).toEqual([
-      ['plugin:aether|chat_edit_turn', { conversationId: 'c1', turnId: 't1', text: 'new', expectedText: 'old' }],
+      [
+        'plugin:aether|chat_edit_turn',
+        { conversationId: 'c1', turnId: 't1', text: 'new', expectedText: 'old' },
+      ],
       ['plugin:aether|chat_remove_turn', { conversationId: 'c1', turnId: 't1' }],
       ['plugin:aether|chat_fork', { conversationId: 'c1', turnId: 't1' }],
       ['plugin:aether|chat_select_turn', { conversationId: 'c1', turnId: 't1' }],
@@ -72,7 +86,11 @@ describe('createTauriPorts', () => {
       () => history.selectTurn('c1', 't1'),
     ]
     for (const action of actions) {
-      invokeMock.mockRejectedValueOnce({ code: 'conflict', message: 'changed', details: { reason: 'text_changed' } })
+      invokeMock.mockRejectedValueOnce({
+        code: 'conflict',
+        message: 'changed',
+        details: { reason: 'text_changed' },
+      })
       const error: unknown = await action().catch((caught: unknown) => caught)
       expect(isKitClientError(error) && [error.code, error.message, error.details.reason]).toEqual([
         'conflict',
@@ -91,7 +109,9 @@ describe('createTauriPorts', () => {
       retryTurnId: 'original',
       model: { endpointId: 'endpoint', modelId: 'model' },
     }
-    expect(await required(createTauriPorts({ chat: true }).chat).start(request, () => undefined)).toEqual(accepted)
+    expect(
+      await required(createTauriPorts({ chat: true }).chat).start(request, () => undefined),
+    ).toEqual(accepted)
     expect(invokeMock.mock.calls[0]?.[0]).toBe('plugin:aether|chat_run')
     expect(invokeMock.mock.calls[0]?.[1]).toMatchObject({ request })
   })
@@ -121,7 +141,10 @@ describe('createTauriPorts', () => {
       .catch((caught: unknown) => caught)
     expect(isKitClientError(error) && error.code).toBe('cancelled')
     const probeArgs = invokeMock.mock.calls[0]?.[1] as { jobId: string }
-    expect(invokeMock.mock.calls[1]).toEqual(['plugin:aether|providers_cancel', { jobId: probeArgs.jobId }])
+    expect(invokeMock.mock.calls[1]).toEqual([
+      'plugin:aether|providers_cancel',
+      { jobId: probeArgs.jobId },
+    ])
   })
 
   it('aborting an accepted run calls chat_cancel once', async () => {
@@ -155,9 +178,13 @@ describe('createTauriPorts', () => {
     invokeMock.mockReturnValueOnce(pending.promise).mockResolvedValue(undefined)
     const controller = new AbortController()
     const events: RunEvent[] = []
-    const started = required(createTauriPorts({ chat: true }).chat).start(REQUEST, (event) => events.push(event), {
-      signal: controller.signal,
-    })
+    const started = required(createTauriPorts({ chat: true }).chat).start(
+      REQUEST,
+      (event) => events.push(event),
+      {
+        signal: controller.signal,
+      },
+    )
     controller.abort()
     expect(events).toEqual([])
     pending.resolve({ runId: 'late', conversationId: null, turnId: null })
@@ -179,7 +206,9 @@ describe('createTauriPorts', () => {
       },
       { signal: controller.signal },
     )
-    const args = invokeMock.mock.calls[0]?.[1] as { onEvent: { onmessage: (event: RunEvent) => void } }
+    const args = invokeMock.mock.calls[0]?.[1] as {
+      onEvent: { onmessage: (event: RunEvent) => void }
+    }
     args.onEvent.onmessage({ kind: 'end', status: 'completed' })
     pending.resolve({ runId: 'ended', conversationId: null, turnId: null })
     await started
@@ -193,9 +222,13 @@ describe('createTauriPorts', () => {
     invokeMock.mockReturnValueOnce(pending.promise)
     const controller = new AbortController()
     const events: RunEvent[] = []
-    const started = required(createTauriPorts({ chat: true }).chat).start(REQUEST, (event) => events.push(event), {
-      signal: controller.signal,
-    })
+    const started = required(createTauriPorts({ chat: true }).chat).start(
+      REQUEST,
+      (event) => events.push(event),
+      {
+        signal: controller.signal,
+      },
+    )
     pending.reject({ code: 'network', message: 'offline' })
     await expect(started).rejects.toMatchObject({ code: 'network' })
     controller.abort()

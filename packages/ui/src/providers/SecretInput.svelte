@@ -83,7 +83,10 @@
       if (copying) await copy()
     } catch (error) {
       if (session.isCurrent(token))
-        notify.toast('error', error instanceof Error ? error.message : t('providers.key_reveal_failed'))
+        notify.toast(
+          'error',
+          error instanceof Error ? error.message : t('providers.key_reveal_failed'),
+        )
     } finally {
       if (session.isCurrent(token)) {
         busy = false
@@ -143,7 +146,10 @@
     if (!endpointId || !keyId) return
     const token = session.capture()
     if (
-      !(await notify.confirm({ title: t('providers.key_delete'), body: t('providers.key_delete_confirm') })) ||
+      !(await notify.confirm({
+        title: t('providers.key_delete'),
+        body: t('providers.key_delete_confirm'),
+      })) ||
       !session.isCurrent(token)
     )
       return
@@ -189,7 +195,9 @@
           class="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-2.5 text-left outline-none"
           onclick={() => manage(null)}
         >
-          {#if primary.label}<span class="shrink-0 font-sans text-muted-foreground">{primary.label}</span>{/if}
+          {#if primary.label}<span class="shrink-0 font-sans text-muted-foreground"
+              >{primary.label}</span
+            >{/if}
           <span class="min-w-0 truncate">{plain ?? maskedText(primary, t)}</span>
           {#if keys.length > 1}<span class="shrink-0 font-sans text-kit-xs text-muted-foreground"
               >+{keys.length - 1}</span

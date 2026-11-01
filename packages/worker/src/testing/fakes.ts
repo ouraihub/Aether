@@ -62,7 +62,12 @@ export class MemoryDocuments implements DocumentStore {
     return structuredClone(this.documents.get(this.id(owner, collection, key)) ?? null)
   }
   async list(owner: Actor, collection: string): Promise<readonly StoredDocument[]> {
-    const prefix = JSON.stringify([owner.applicationId, owner.tenantId, owner.subjectId, collection]).slice(0, -1)
+    const prefix = JSON.stringify([
+      owner.applicationId,
+      owner.tenantId,
+      owner.subjectId,
+      collection,
+    ]).slice(0, -1)
     return [...this.documents.entries()]
       .filter(([key]) => key.startsWith(prefix))
       .map(([, value]) => structuredClone(value))
@@ -85,7 +90,8 @@ export class MemoryDocuments implements DocumentStore {
   }
   async remove(owner: Actor, collection: string, key: string, expected: number): Promise<void> {
     const id = this.id(owner, collection, key)
-    if (this.documents.get(id)?.revision !== expected) throw new KitFailure('conflict', 'Concurrent update')
+    if (this.documents.get(id)?.revision !== expected)
+      throw new KitFailure('conflict', 'Concurrent update')
     this.documents.delete(id)
   }
 }

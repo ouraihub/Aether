@@ -44,7 +44,12 @@ const stored: Provider = {
   presetId: null,
   endpoints: [endpoint],
 }
-const result: ProbeResult = { probeUrl: endpoint.probeUrl, models: [], error: null, suggestedProtocol: null }
+const result: ProbeResult = {
+  probeUrl: endpoint.probeUrl,
+  models: [],
+  error: null,
+  suggestedProtocol: null,
+}
 
 function setup(
   overrides: NonNullable<Parameters<typeof createFakePorts>[0]>['providers'] = {},
@@ -84,13 +89,20 @@ describe('provider edit session', () => {
     initial.name = 'Edited while saving'
     required(initial.endpoints[0]).baseUrl = 'https://new.example'
     const two = flow.session.commit().then(completed)
-    const created = { ...stored, id: 'created', endpoints: [{ ...endpoint, id: 'created-endpoint', slug: 'ep-1' }] }
+    const created = {
+      ...stored,
+      id: 'created',
+      endpoints: [{ ...endpoint, id: 'created-endpoint', slug: 'ep-1' }],
+    }
     first.resolve([stored, created])
     await first.promise
     await Promise.resolve()
     expect(save).toHaveBeenCalledTimes(2)
     expect(completed).not.toHaveBeenCalled()
-    expect(save.mock.calls[0]?.[0]).toMatchObject({ name: 'Original', endpoints: [{ baseUrl: '' }] })
+    expect(save.mock.calls[0]?.[0]).toMatchObject({
+      name: 'Original',
+      endpoints: [{ baseUrl: '' }],
+    })
     expect(save.mock.calls[1]?.[0]).toMatchObject({
       id: 'created',
       name: 'Edited while saving',
@@ -167,7 +179,10 @@ describe('provider edit session', () => {
     const one = flow.session.commit()
     const two = flow.session.probe('main')
     const failure = new Error('save failed')
-    const rejected = Promise.all([expect(one).rejects.toBe(failure), expect(two).rejects.toBe(failure)])
+    const rejected = Promise.all([
+      expect(one).rejects.toBe(failure),
+      expect(two).rejects.toBe(failure),
+    ])
     pending.reject(failure)
     await rejected
     expect(probe).not.toHaveBeenCalled()
@@ -258,21 +273,33 @@ describe('probe model merge', () => {
       supportsTools: false,
     }
     const metadata = { ...probed, groupName: probed.group }
-    const existing = { ...metadata, groupName: 'User group', name: 'User name', canVision: true, supportsTools: true }
+    const existing = {
+      ...metadata,
+      groupName: 'User group',
+      name: 'User name',
+      canVision: true,
+      supportsTools: true,
+    }
     const outside = { ...existing, id: 'outside' }
-    const merged = mergeModels([existing, outside, outside], [probed, probed, { ...probed, id: 'new' }], {
-      model: true,
-      new: true,
-    })
+    const merged = mergeModels(
+      [existing, outside, outside],
+      [probed, probed, { ...probed, id: 'new' }],
+      {
+        model: true,
+        new: true,
+      },
+    )
     expect(merged.map((model) => model.id)).toEqual(['outside', 'model', 'new'])
     expect(merged[1]).toBe(existing)
     expect(merged[2]).toMatchObject({ name: 'Probe name', groupName: 'Probe group' })
     expect(mergeModels([existing, outside], [probed], { model: false })).toEqual([outside])
-    expect(mergeModels([existing], [probed], { model: true }, { model: 'image' })[0]).toMatchObject({
-      modelType: 'image',
-      typeSource: 'user',
-      reasoning: null,
-      pricing: null,
-    })
+    expect(mergeModels([existing], [probed], { model: true }, { model: 'image' })[0]).toMatchObject(
+      {
+        modelType: 'image',
+        typeSource: 'user',
+        reasoning: null,
+        pricing: null,
+      },
+    )
   })
 })

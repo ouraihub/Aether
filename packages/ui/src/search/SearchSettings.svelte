@@ -67,7 +67,8 @@
   let passwordRevision = 0
 
   const keyOf = (cap: SearchCap, provider: string) => `${cap}:${provider}`
-  const errorText = (error: unknown) => (isKitClientError(error) ? t(`errors.${error.code}`) : t('errors.internal'))
+  const errorText = (error: unknown) =>
+    isKitClientError(error) ? t(`errors.${error.code}`) : t('errors.internal')
   const activeProvider = (cap: SearchCap) =>
     settings[cap]?.providers.find((p) => p.id === settings[cap]?.defaultProvider)
   const dialogProvider = $derived.by(() => {
@@ -98,7 +99,8 @@
     const key = keyOf(cap, provider)
     drafts = { ...drafts, [key]: { ...drafts[key], ...patch } }
     const revisions = draftRevisions[key] ?? {}
-    for (const field of Object.keys(patch) as (keyof Draft)[]) revisions[field] = (revisions[field] ?? 0) + 1
+    for (const field of Object.keys(patch) as (keyof Draft)[])
+      revisions[field] = (revisions[field] ?? 0) + 1
     draftRevisions[key] = revisions
     checks = { ...checks, [key]: undefined }
   }
@@ -168,7 +170,8 @@
           onConfigSaved(sent) {
             const next = { ...drafts[key] }
             for (const field of ['baseUrl', 'basicAuthUsername'] as const) {
-              if (sent[field] !== undefined && draftRevisions[key]?.[field] === revisions[field]) delete next[field]
+              if (sent[field] !== undefined && draftRevisions[key]?.[field] === revisions[field])
+                delete next[field]
             }
             drafts = { ...drafts, [key]: next }
           },
@@ -276,7 +279,8 @@
         if (isCurrent()) notify.toast('success', t('search.copied'))
       } else revealed = { ...revealed, [key.id]: value }
     } catch (error) {
-      if (isCurrent()) dialogError = copy && !isKitClientError(error) ? t('search.copyFailed') : errorText(error)
+      if (isCurrent())
+        dialogError = copy && !isKitClientError(error) ? t('search.copyFailed') : errorText(error)
     } finally {
       if (isCurrent() && passwordRevision === revision) {
         password = ''
@@ -364,7 +368,10 @@
       {@const provider = activeProvider(cap)}
       {#if provider}
         {@const key = keyOf(cap, provider.id)}
-        <section class="flex min-w-0 flex-col gap-3 rounded-kit border p-4" aria-labelledby={`search-${cap}`}>
+        <section
+          class="flex min-w-0 flex-col gap-3 rounded-kit border p-4"
+          aria-labelledby={`search-${cap}`}
+        >
           <header class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <h2 id={`search-${cap}`} class="text-kit-base font-semibold">{t(`search.${cap}`)}</h2>
@@ -443,7 +450,8 @@
                     aria-label={t('search.check')}
                     title={t('search.check')}
                     onclick={() => void saveAndCheck(cap, provider, true)}
-                    >{#if pending[cap]}<LoaderCircleIcon class="animate-spin" />{:else}<ActivityIcon />{/if}</Button
+                    >{#if pending[cap]}<LoaderCircleIcon class="animate-spin" />{:else}<ActivityIcon
+                      />{/if}</Button
                   >
                 </div>
                 <Field.Description
@@ -461,8 +469,11 @@
                     id={`search-url-${cap}`}
                     class="min-w-0 flex-1"
                     disabled={pending[cap]}
-                    value={draftOf(cap, provider.id).baseUrl ?? provider.baseUrl ?? provider.defaultBaseUrl}
-                    oninput={(event) => patchDraft(cap, provider.id, { baseUrl: event.currentTarget.value })}
+                    value={draftOf(cap, provider.id).baseUrl ??
+                      provider.baseUrl ??
+                      provider.defaultBaseUrl}
+                    oninput={(event) =>
+                      patchDraft(cap, provider.id, { baseUrl: event.currentTarget.value })}
                   />
                   {#if provider.keyMode === 'none' && !provider.basicAuth}<Button
                       type="button"
@@ -471,7 +482,8 @@
                       disabled={pending[cap]}
                       aria-label={t('search.check')}
                       title={t('search.check')}
-                      onclick={() => void saveAndCheck(cap, provider, true)}><ActivityIcon /></Button
+                      onclick={() => void saveAndCheck(cap, provider, true)}
+                      ><ActivityIcon /></Button
                     >{/if}
                 </div>
               </Field.Field>
@@ -481,8 +493,11 @@
                 ><Field.Label for={`search-user-${cap}`}>{t('search.username')}</Field.Label><Input
                   id={`search-user-${cap}`}
                   disabled={pending[cap]}
-                  value={draftOf(cap, provider.id).basicAuthUsername ?? provider.basicAuthUsername ?? ''}
-                  oninput={(event) => patchDraft(cap, provider.id, { basicAuthUsername: event.currentTarget.value })}
+                  value={draftOf(cap, provider.id).basicAuthUsername ??
+                    provider.basicAuthUsername ??
+                    ''}
+                  oninput={(event) =>
+                    patchDraft(cap, provider.id, { basicAuthUsername: event.currentTarget.value })}
                 /></Field.Field
               >
             {/if}
@@ -494,9 +509,11 @@
                 disabled={pending[cap]}
                 onclick={() => void saveAndCheck(cap, provider)}>{t('search.save')}</Button
               >{/if}
-            {#if pending[cap]}<span class="text-muted-foreground text-kit-sm" role="status">{t('search.checking')}</span
-              >{:else if checks[key] !== undefined}<span class="text-muted-foreground text-kit-sm" role="status"
-                >{t('search.resultCount', { count: checks[key] ?? 0 })}</span
+            {#if pending[cap]}<span class="text-muted-foreground text-kit-sm" role="status"
+                >{t('search.checking')}</span
+              >{:else if checks[key] !== undefined}<span
+                class="text-muted-foreground text-kit-sm"
+                role="status">{t('search.resultCount', { count: checks[key] ?? 0 })}</span
               >{/if}
           </div>
         </section>
@@ -552,21 +569,37 @@
       </details>
       <Field.Field class="mt-3 border-t pt-3"
         ><label class="flex items-center gap-2 text-kit-sm"
-          ><input type="checkbox" disabled={pending.preferences} bind:checked={preferences.modelToolsPreferred} />{t(
-            'search.nativePreferred',
-          )}</label
+          ><input
+            type="checkbox"
+            disabled={pending.preferences}
+            bind:checked={preferences.modelToolsPreferred}
+          />{t('search.nativePreferred')}</label
         ><Field.Description>{t('search.nativePrivacy')}</Field.Description></Field.Field
       >
-      {#if errors.preferences}<p role="alert" class="text-destructive text-kit-sm">{errors.preferences}</p>{/if}
-      <Button class="mt-3" type="button" size="sm" disabled={pending.preferences} onclick={() => void savePreferences()}
-        >{t('search.save')}</Button
+      {#if errors.preferences}<p role="alert" class="text-destructive text-kit-sm">
+          {errors.preferences}
+        </p>{/if}
+      <Button
+        class="mt-3"
+        type="button"
+        size="sm"
+        disabled={pending.preferences}
+        onclick={() => void savePreferences()}>{t('search.save')}</Button
       >
     </section>
-    <section class="flex min-w-0 flex-col gap-3 rounded-kit border p-4" aria-label={t('search.tools')}>
+    <section
+      class="flex min-w-0 flex-col gap-3 rounded-kit border p-4"
+      aria-label={t('search.tools')}
+    >
       <Field.Field
         ><Field.Label for="search-query">{t('search.query')}</Field.Label>
         <div class="flex min-w-0 gap-2">
-          <Input id="search-query" class="min-w-0 flex-1" disabled={pending.query} bind:value={query} /><Button
+          <Input
+            id="search-query"
+            class="min-w-0 flex-1"
+            disabled={pending.query}
+            bind:value={query}
+          /><Button
             type="button"
             disabled={pending.query || !query.trim()}
             onclick={() => void search()}>{t('search.runSearch')}</Button
@@ -589,7 +622,12 @@
       <Field.Field
         ><Field.Label for="search-page-url">{t('search.pageUrl')}</Field.Label>
         <div class="flex min-w-0 gap-2">
-          <Input id="search-page-url" class="min-w-0 flex-1" disabled={pending.page} bind:value={pageUrl} /><Button
+          <Input
+            id="search-page-url"
+            class="min-w-0 flex-1"
+            disabled={pending.page}
+            bind:value={pageUrl}
+          /><Button
             type="button"
             disabled={pending.page || !pageUrl.trim()}
             onclick={() => void readPage()}>{t('search.read')}</Button
@@ -604,7 +642,8 @@
           target="_blank"
           rel="noopener noreferrer">{page.url}</a
         >
-        <pre class="max-h-96 overflow-auto whitespace-pre-wrap break-words text-kit-sm">{page.content}</pre>{/if}
+        <pre
+          class="max-h-96 overflow-auto whitespace-pre-wrap break-words text-kit-sm">{page.content}</pre>{/if}
     </section>
   </div>
 {/if}
@@ -665,15 +704,21 @@
                 disabled={dialogBusy || (port?.revealNeedsPassword && !password)}
                 onclick={() => void revealKey(key, true)}>{t('search.copy')}</Button
               >
-              <Button type="button" variant="ghost" size="sm" disabled={dialogBusy} onclick={() => void removeKey(key)}
-                >{t('search.delete')}</Button
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={dialogBusy}
+                onclick={() => void removeKey(key)}>{t('search.delete')}</Button
               >
             </div>
           </li>
         {/each}
       </ul>
       <Field.Field
-        ><Field.Label for="search-edit-key">{t(editingId ? 'search.editKey' : 'search.newKey')}</Field.Label><Input
+        ><Field.Label for="search-edit-key"
+          >{t(editingId ? 'search.editKey' : 'search.newKey')}</Field.Label
+        ><Input
           id="search-edit-key"
           type="password"
           autocomplete="off"
@@ -692,8 +737,11 @@
         <Button
           type="button"
           size="sm"
-          disabled={dialogBusy || !editValue.trim() || (!editingId && dialogProvider.keys.length >= 16)}
-          onclick={() => void saveEditedKey()}>{t(editingId ? 'search.save' : 'search.addKey')}</Button
+          disabled={dialogBusy ||
+            !editValue.trim() ||
+            (!editingId && dialogProvider.keys.length >= 16)}
+          onclick={() => void saveEditedKey()}
+          >{t(editingId ? 'search.save' : 'search.addKey')}</Button
         ><Button type="button" variant="outline" size="sm" onclick={() => keyDialog.close()}
           >{t('common.cancel')}</Button
         >

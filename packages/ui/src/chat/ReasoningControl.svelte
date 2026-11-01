@@ -29,10 +29,14 @@
   let trigger = $state<HTMLButtonElement | null>(null)
   const t = (key: string) => i18n.t(key)
   const allowedEfforts = $derived(REASONING_EFFORTS.filter((effort) => efforts.includes(effort)))
-  const effectiveEffort = $derived(value === 'default' || allowedEfforts.includes(value) ? value : 'default')
+  const effectiveEffort = $derived(
+    value === 'default' || allowedEfforts.includes(value) ? value : 'default',
+  )
   const effortLabel = $derived(t(`chat.effort.${effectiveEffort}`))
   const effortIndex = $derived(
-    effectiveEffort === 'default' ? Math.floor(allowedEfforts.length / 2) : allowedEfforts.indexOf(effectiveEffort),
+    effectiveEffort === 'default'
+      ? Math.floor(allowedEfforts.length / 2)
+      : allowedEfforts.indexOf(effectiveEffort),
   )
   function choose(effort: ReasoningEffort) {
     if (!disabled && (effort === 'default' || allowedEfforts.includes(effort))) onchange(effort)
@@ -121,7 +125,9 @@
             onkeyup={(event) => {
               if (
                 !event.isComposing &&
-                ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)
+                ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(
+                  event.key,
+                )
               ) {
                 commit(event)
               }
@@ -155,7 +161,9 @@
           {/each}
         </Field.FieldSet>
       {/if}
-      {#if effectiveEffort === 'default'}<p class="reasoning-hint">{t('chat.reasoningDefaultHint')}</p>{/if}
+      {#if effectiveEffort === 'default'}<p class="reasoning-hint">
+          {t('chat.reasoningDefaultHint')}
+        </p>{/if}
     </Popover.Content>
   </Popover.Portal>
 </Popover.Root>

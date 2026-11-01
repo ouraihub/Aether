@@ -78,7 +78,9 @@
             >{format(context?.tokens)} / {format(context?.contextWindow)}{#if percent !== null}
               ({Math.round(percent)}%){/if}</span
           >
-          {#if context?.modelName}<span class="context-model" title={context.modelName}>{context.modelName}</span>{/if}
+          {#if context?.modelName}<span class="context-model" title={context.modelName}
+              >{context.modelName}</span
+            >{/if}
         </div>
         <small
           >{t(

@@ -49,10 +49,19 @@ function setup(
 ) {
   const runs: Run[] = []
   const stored: Conversation = {
-    summary: { id: 'c1', title: 'Test', scope: null, selectedTurnId: null, createdAt: 0, updatedAt: 0 },
+    summary: {
+      id: 'c1',
+      title: 'Test',
+      scope: null,
+      selectedTurnId: null,
+      createdAt: 0,
+      updatedAt: 0,
+    },
     turns: [],
   }
-  const approve = vi.fn<(runId: string, callId: string, allow: boolean) => Promise<void>>(() => Promise.resolve())
+  const approve = vi.fn<(runId: string, callId: string, allow: boolean) => Promise<void>>(() =>
+    Promise.resolve(),
+  )
   const ports = createFakePorts({
     providers: {
       modelOptions: () =>
@@ -74,7 +83,9 @@ function setup(
     chat: {
       start: (request, emit, options) => {
         const id = crypto.randomUUID()
-        const source = stored.turns.find((turn) => turn.id === (request.retryTurnId ?? request.translateTurnId))
+        const source = stored.turns.find(
+          (turn) => turn.id === (request.retryTurnId ?? request.translateTurnId),
+        )
         const turn: Conversation['turns'][number] = {
           id,
           parentId: request.retryTurnId
@@ -102,7 +113,8 @@ function setup(
         stored.turns.push(turn)
         const wrapped = (event: RunEvent) => {
           if (event.kind === 'text_delta') turn.text += event.text
-          if (event.kind === 'reasoning_delta') turn.reasoningText = (turn.reasoningText ?? '') + event.text
+          if (event.kind === 'reasoning_delta')
+            turn.reasoningText = (turn.reasoningText ?? '') + event.text
           if (event.kind === 'usage') {
             turn.usage = {
               inputTokens: event.inputTokens,
@@ -117,12 +129,15 @@ function setup(
           if (event.kind === 'end') {
             turn.status = event.status
             turn.errorCode = event.error?.code ?? null
-            if (event.status === 'completed' && !request.retryTurnId) stored.summary.selectedTurnId = id
+            if (event.status === 'completed' && !request.retryTurnId)
+              stored.summary.selectedTurnId = id
           }
           emit(event)
         }
         runs.push({ request, turnId: id, emit: wrapped, signal: options?.signal })
-        options?.signal?.addEventListener('abort', () => wrapped({ kind: 'end', status: 'cancelled' }))
+        options?.signal?.addEventListener('abort', () =>
+          wrapped({ kind: 'end', status: 'cancelled' }),
+        )
         return Promise.resolve({
           runId: `r${runs.length}`,
           conversationId: withHistory ? (request.conversationId ?? 'c1') : null,
@@ -140,7 +155,9 @@ function setup(
         get: (id: string) =>
           id === stored.summary.id
             ? Promise.resolve(structuredClone(stored))
-            : Promise.reject(new KitClientError({ code: 'not_found', message: 'conversation not found' })),
+            : Promise.reject(
+                new KitClientError({ code: 'not_found', message: 'conversation not found' }),
+              ),
       },
       extra.history,
     )
@@ -153,7 +170,9 @@ function setup(
 }
 
 async function send(text: string) {
-  await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: text } })
+  await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+    target: { value: text },
+  })
   const button = screen.getByRole('button', { name: 'Send' })
   await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false))
   await fireEvent.click(button)
@@ -164,7 +183,12 @@ describe('ChatPanel', () => {
     const { runs } = setup(true)
     await send('hello')
     const first = runs[0]
-    expect(first?.request).toMatchObject({ input: 'hello', model, regenerate: false, conversationId: null })
+    expect(first?.request).toMatchObject({
+      input: 'hello',
+      model,
+      regenerate: false,
+      conversationId: null,
+    })
     first?.emit({ kind: 'text_delta', text: 'Hi **there**' })
     await screen.findByText('there')
     await fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
@@ -200,7 +224,11 @@ describe('ChatPanel', () => {
     expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1)
     expect(screen.queryByRole('button', { name: 'Regenerate' })).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(runs[1]?.request).toMatchObject({ input: 'one', regenerate: false, conversationId: null })
+    expect(runs[1]?.request).toMatchObject({
+      input: 'one',
+      regenerate: false,
+      conversationId: null,
+    })
   })
 
   it('sends the host context, drops it for one message when removed, then sends it again', async () => {
@@ -208,7 +236,9 @@ describe('ChatPanel', () => {
     await send('one')
     expect(runs[0]?.request.context).toEqual({ kind: 'note', id: 'n1' })
     runs[0]?.emit({ kind: 'end', status: 'completed' })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Do not send Draft with the next message' }))
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Do not send Draft with the next message' }),
+    )
     expect(screen.queryByText('Draft')).toBeNull()
     await send('two')
     expect(runs[1]?.request.context).toBeNull()
@@ -234,7 +264,12 @@ describe('ChatPanel', () => {
     await screen.findByText('read_note: two lines')
 
     run?.emit({ kind: 'tool_call', callId: 'c2', name: 'write_note', source: 'host' })
-    run?.emit({ kind: 'approval_required', callId: 'c2', name: 'write_note', argsPreview: '{"text":"x"}' })
+    run?.emit({
+      kind: 'approval_required',
+      callId: 'c2',
+      name: 'write_note',
+      argsPreview: '{"text":"x"}',
+    })
     await screen.findByText('{"text":"x"}')
     await fireEvent.click(screen.getByRole('button', { name: 'Allow once' }))
     expect(approve).toHaveBeenLastCalledWith('r1', 'c2', true)
@@ -262,9 +297,13 @@ describe('ChatPanel', () => {
     const { runs } = setup(false, null, { props: { onInsert } })
     await send('hi')
     runs[0]?.emit({ kind: 'text_delta', text: 'Hi **there**' })
-    expect((await screen.findByRole('button', { name: 'Insert' })).hasAttribute('disabled')).toBe(true)
+    expect((await screen.findByRole('button', { name: 'Insert' })).hasAttribute('disabled')).toBe(
+      true,
+    )
     runs[0]?.emit({ kind: 'end', status: 'completed' })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Insert' }).hasAttribute('disabled')).toBe(false))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Insert' }).hasAttribute('disabled')).toBe(false),
+    )
     await fireEvent.click(screen.getByRole('button', { name: 'Insert' }))
     expect(onInsert).toHaveBeenCalledWith('Hi **there**')
   })
@@ -286,13 +325,20 @@ describe('ChatPanel', () => {
     await send('hi')
     runs[0]?.emit({ kind: 'end', status: 'failed', error: { code: 'upstream', message: 'x' } })
     await fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
-    expect(runs[1]?.request).toMatchObject({ regenerate: false, retryTurnId: runs[0]?.turnId, conversationId: 'c1' })
+    expect(runs[1]?.request).toMatchObject({
+      regenerate: false,
+      retryTurnId: runs[0]?.turnId,
+      conversationId: 'c1',
+    })
   })
 
   it('deletes the current conversation after confirming, then starts a new one', async () => {
     const remove = vi.fn(() => Promise.resolve())
     const onConversationChange = vi.fn()
-    const { runs, notify } = setup(true, null, { history: { remove }, props: { onConversationChange } })
+    const { runs, notify } = setup(true, null, {
+      history: { remove },
+      props: { onConversationChange },
+    })
     await send('hi')
     runs[0]?.emit({ kind: 'end', status: 'completed' })
     await fireEvent.click(screen.getByRole('button', { name: 'Conversation' }))
@@ -332,7 +378,10 @@ describe('ChatPanel', () => {
     }
     const get = vi.fn<ConversationClient['get']>(() => Promise.resolve({ summary, turns: [turn] }))
     const onConversationChange = vi.fn()
-    const { runs } = setup(true, null, { history: { get }, props: { conversationId: 'c9', onConversationChange } })
+    const { runs } = setup(true, null, {
+      history: { get },
+      props: { conversationId: 'c9', onConversationChange },
+    })
     await screen.findByText('earlier')
     expect(get).toHaveBeenCalledWith('c9')
     expect(onConversationChange).not.toHaveBeenCalled()
@@ -345,7 +394,9 @@ describe('ChatPanel', () => {
     setup(true, null, { props: { conversationId: 'gone', onConversationChange } })
     await screen.findByText('Not found')
     expect(onConversationChange).not.toHaveBeenCalled()
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'draft' } })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+      target: { value: 'draft' },
+    })
     expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true)
     await fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
     await waitFor(() => expect(onConversationChange).toHaveBeenCalledWith(null))
@@ -403,7 +454,9 @@ describe('ChatPanel', () => {
     })
     expect(await screen.findByText('Mine')).toBeTruthy()
     await fireEvent.click(await screen.findByRole('button', { name: 'Reasoning effort: Default' }))
-    await fireEvent.input(await screen.findByRole('slider', { name: 'Reasoning effort' }), { target: { value: '1' } })
+    await fireEvent.input(await screen.findByRole('slider', { name: 'Reasoning effort' }), {
+      target: { value: '1' },
+    })
     await fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
     const generate = screen.getByRole('button', { name: 'Generate image' })
     await fireEvent.click(generate)
@@ -420,7 +473,10 @@ describe('ChatPanel', () => {
 
   it('without chat models offers to open settings', async () => {
     const onOpenSettings = vi.fn()
-    setup(false, null, { providers: { modelOptions: () => Promise.resolve([]) }, props: { onOpenSettings } })
+    setup(false, null, {
+      providers: { modelOptions: () => Promise.resolve([]) },
+      props: { onOpenSettings },
+    })
     await fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }))
     expect(onOpenSettings).toHaveBeenCalledOnce()
   })
@@ -450,8 +506,12 @@ describe('ChatPanel', () => {
     })
     runs[0]?.emit({ kind: 'end', status: 'completed' })
     await screen.findByRole('link', { name: 'Example' })
-    expect(screen.getByRole('link', { name: 'Example' }).getAttribute('href')).toBe('https://example.com')
-    expect(screen.getByRole('button', { name: 'Web search' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('link', { name: 'Example' }).getAttribute('href')).toBe(
+      'https://example.com',
+    )
+    expect(screen.getByRole('button', { name: 'Web search' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    )
     await fireEvent.click(screen.getByRole('button', { name: 'Web search' }))
     await send('do not search')
     expect(runs[1]?.request.webSearch).not.toBe(true)
@@ -470,17 +530,30 @@ describe('ChatPanel', () => {
     expect(screen.getAllByRole('button', { name: 'Web search' })).toHaveLength(1)
     await fireEvent.click(screen.getByRole('button', { name: 'Customize toolbar' }))
     await fireEvent.click(await screen.findByRole('switch', { name: 'Upload attachment' }))
-    expect(onToolbarChange).toHaveBeenLastCalledWith(['new-conversation', 'web-search', 'attachment'])
-    await fireEvent.keyDown(screen.getByRole('button', { name: 'Drag or use ↑/↓ to reorder Upload attachment' }), {
-      key: 'ArrowUp',
-    })
-    expect(onToolbarChange).toHaveBeenLastCalledWith(['new-conversation', 'attachment', 'web-search'])
+    expect(onToolbarChange).toHaveBeenLastCalledWith([
+      'new-conversation',
+      'web-search',
+      'attachment',
+    ])
+    await fireEvent.keyDown(
+      screen.getByRole('button', { name: 'Drag or use ↑/↓ to reorder Upload attachment' }),
+      {
+        key: 'ArrowUp',
+      },
+    )
+    expect(onToolbarChange).toHaveBeenLastCalledWith([
+      'new-conversation',
+      'attachment',
+      'web-search',
+    ])
     await fireEvent.click(screen.getByRole('switch', { name: 'New conversation' }))
     expect(onToolbarChange).toHaveBeenLastCalledWith(['attachment', 'web-search'])
     expect(toolbarLabels()).toEqual(['Upload attachment', 'Web search', 'More tools'])
     await fireEvent.click(screen.getByRole('button', { name: 'Restore default' }))
     expect(onToolbarChange).toHaveBeenLastCalledWith(['new-conversation', 'web-search'])
-    expect(screen.getByRole('button', { name: 'Restore default' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Restore default' }).hasAttribute('disabled')).toBe(
+      true,
+    )
   })
   it('shows the last request context separately from known cumulative usage and clears it on regeneration', async () => {
     const { runs } = setup(true)
@@ -495,7 +568,10 @@ describe('ChatPanel', () => {
     }
     runs[0]?.emit({ kind: 'usage', ...usage })
     runs[0]?.emit({ kind: 'usage', ...usage })
-    runs[0]?.emit({ kind: 'context', usage: { tokens: 150, contextWindow: 1000, source: 'reported', ...model } })
+    runs[0]?.emit({
+      kind: 'context',
+      usage: { tokens: 150, contextWindow: 1000, source: 'reported', ...model },
+    })
     runs[0]?.emit({ kind: 'end', status: 'completed' })
     await fireEvent.click(screen.getByRole('button', { name: 'Usage and settings' }))
     await waitFor(() => expect(screen.getByRole('meter').getAttribute('value')).toBe('15'))
@@ -508,7 +584,10 @@ describe('ChatPanel', () => {
       outputTokens: 40,
       cost: { amount: 0.0123, currency: 'USD' },
     })
-    runs[1]?.emit({ kind: 'context', usage: { tokens: 240, contextWindow: 1000, source: 'reported', ...model } })
+    runs[1]?.emit({
+      kind: 'context',
+      usage: { tokens: 240, contextWindow: 1000, source: 'reported', ...model },
+    })
     runs[1]?.emit({ kind: 'end', status: 'completed' })
     await waitFor(() => expect(screen.getByRole('meter').getAttribute('value')).toBe('24'))
     const inputRow = screen.getByRole('row', { name: 'Input 200 320' })
@@ -525,7 +604,14 @@ describe('ChatPanel', () => {
       history: {
         get: () =>
           Promise.resolve({
-            summary: { id: 'saved', title: 'Saved', scope: null, selectedTurnId: 't', createdAt: 0, updatedAt: 0 },
+            summary: {
+              id: 'saved',
+              title: 'Saved',
+              scope: null,
+              selectedTurnId: 't',
+              createdAt: 0,
+              updatedAt: 0,
+            },
             turns: [
               {
                 id: 't',
@@ -567,7 +653,9 @@ describe('ChatPanel', () => {
     const { runs } = setup(false)
     const input = screen.getByRole('textbox', { name: 'Message' })
     await fireEvent.input(input, { target: { value: 'first\nsecond' } })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false),
+    )
     await fireEvent.keyDown(input, { key: 'Enter' })
     await fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true, isComposing: true })
     await fireEvent.keyDown(input, { key: 'Enter', metaKey: true, keyCode: 229 })
@@ -601,7 +689,9 @@ describe('ChatPanel', () => {
     input.setSelectionRange(2, 7)
     await fireEvent.mouseDown(screen.getByRole('button', { name: 'Expand input' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Expand input' }))
-    expect(screen.getByRole('button', { name: 'Collapse input' }).getAttribute('aria-expanded')).toBe('true')
+    expect(
+      screen.getByRole('button', { name: 'Collapse input' }).getAttribute('aria-expanded'),
+    ).toBe('true')
     await fireEvent.click(screen.getByRole('button', { name: 'Collapse input' }))
     expect(screen.getByRole('textbox', { name: 'Message' })).toBe(input)
     expect(input.value).toBe('a multiline\ndraft')
@@ -617,8 +707,13 @@ describe('ChatPanel', () => {
       .mockResolvedValueOnce([])
     const { runs } = setup(false, null, { providers: { modelOptions } })
     expect(screen.queryByText('No chat model yet. Add a provider and its models first.')).toBeNull()
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'draft' } })
-    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message' }), { key: 'Enter', ctrlKey: true })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+      target: { value: 'draft' },
+    })
+    await fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message' }), {
+      key: 'Enter',
+      ctrlKey: true,
+    })
     expect(runs).toHaveLength(0)
     loading.reject(new KitClientError({ code: 'network', message: 'offline' }))
     await screen.findByText('Network connection failed')
@@ -637,7 +732,9 @@ describe('ChatPanel', () => {
         : Promise.resolve({ runId: 'r2', conversationId: null, turnId: null })
     })
     setup(false, { kind: 'note', id: 'n1', label: 'Draft' }, { chat: { start: run } })
-    await fireEvent.click(screen.getByRole('button', { name: 'Do not send Draft with the next message' }))
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Do not send Draft with the next message' }),
+    )
     await send('  recover me\nplease  ')
     const input = screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement
     await waitFor(() => expect(input.value).toBe('  recover me\nplease  '))
@@ -658,7 +755,9 @@ describe('ChatPanel', () => {
     pending.reject(new KitClientError({ code: 'network', message: 'offline' }))
     await screen.findByRole('button', { name: 'Restore unsent message' })
     expect(input.value).toBe('new draft')
-    expect(screen.getByRole('button', { name: 'Restore unsent message' }).hasAttribute('disabled')).toBe(true)
+    expect(
+      screen.getByRole('button', { name: 'Restore unsent message' }).hasAttribute('disabled'),
+    ).toBe(true)
     await fireEvent.input(input, { target: { value: '' } })
     await fireEvent.click(screen.getByRole('button', { name: 'Restore unsent message' }))
     expect(input.value).toBe('unsent original')
@@ -694,7 +793,14 @@ describe('ChatPanel', () => {
     const remove = vi.fn<ConversationClient['remove']>(() =>
       Promise.reject(new KitClientError({ code: 'network', message: 'offline' })),
     )
-    const summary = () => ({ id: 'c9', title: saved, scope: null, selectedTurnId: 't', createdAt: 0, updatedAt: 0 })
+    const summary = () => ({
+      id: 'c9',
+      title: saved,
+      scope: null,
+      selectedTurnId: 't',
+      createdAt: 0,
+      updatedAt: 0,
+    })
     setup(true, null, {
       props: { conversationId: 'c9' },
       history: {
@@ -732,7 +838,9 @@ describe('ChatPanel', () => {
     await screen.findByText('answer')
     await fireEvent.click(screen.getByRole('button', { name: 'Conversation' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Rename conversation' }))
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Conversation title' }), { target: { value: 'Renamed' } })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Conversation title' }), {
+      target: { value: 'Renamed' },
+    })
     await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
     await waitFor(() => expect(saved).toBe('Renamed'))
     await fireEvent.click(screen.getByRole('button', { name: 'Delete conversation' }))
@@ -820,7 +928,9 @@ describe('ChatPanel', () => {
     expect(runs[1]?.request.reasoningEffort).toBe('high')
     runs[1]?.emit({ kind: 'end', status: 'completed' })
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Reset to default' }).hasAttribute('disabled')).toBe(false),
+      expect(
+        screen.getByRole('button', { name: 'Reset to default' }).hasAttribute('disabled'),
+      ).toBe(false),
     )
     await fireEvent.click(screen.getByRole('button', { name: 'Reset to default' }))
     await send('reset request')
@@ -872,7 +982,9 @@ describe('ChatPanel', () => {
     })
     const trigger = await screen.findByRole('button', { name: 'Reasoning effort: Default' })
     await fireEvent.click(trigger)
-    let slider = (await screen.findByRole('slider', { name: 'Reasoning effort' })) as HTMLInputElement
+    let slider = (await screen.findByRole('slider', {
+      name: 'Reasoning effort',
+    })) as HTMLInputElement
     expect(slider.value).toBe('1')
     expect(slider.max).toBe('2')
     expect(slider.getAttribute('aria-valuetext')).toBe('Default')
@@ -984,9 +1096,13 @@ describe('ChatPanel', () => {
     expect(await screen.findByText('Local · main')).toBeTruthy()
     expect(screen.getByText('Cloud · x')).toBeTruthy()
     expect(screen.getAllByRole('option')).toHaveLength(2)
-    await fireEvent.input(screen.getByPlaceholderText('Search models…'), { target: { value: 'cloud' } })
+    await fireEvent.input(screen.getByPlaceholderText('Search models…'), {
+      target: { value: 'cloud' },
+    })
     await waitFor(() =>
-      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('m2')]),
+      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+        expect.stringContaining('m2'),
+      ]),
     )
     await fireEvent.keyDown(screen.getByPlaceholderText('Search models…'), { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('option')).toBeNull())
@@ -995,12 +1111,16 @@ describe('ChatPanel', () => {
     await screen.findAllByRole('option')
     await fireEvent.click(screen.getByRole('button', { name: 'Vision' }))
     await waitFor(() =>
-      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('m2')]),
+      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+        expect.stringContaining('m2'),
+      ]),
     )
     await fireEvent.click(screen.getByRole('button', { name: 'Vision' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Tools' }))
     await waitFor(() =>
-      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('m1')]),
+      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+        expect.stringContaining('m1'),
+      ]),
     )
     await fireEvent.click(screen.getByRole('button', { name: 'Configure models' }))
     expect(onOpenSettings).toHaveBeenCalledOnce()
@@ -1026,7 +1146,14 @@ describe('ChatPanel', () => {
       .fn<ConversationClient['get']>()
       .mockRejectedValueOnce(new KitClientError({ code: 'network', message: 'offline' }))
       .mockResolvedValueOnce({
-        summary: { id: 'saved', title: 'Saved', scope: null, selectedTurnId: 't', createdAt: 0, updatedAt: 0 },
+        summary: {
+          id: 'saved',
+          title: 'Saved',
+          scope: null,
+          selectedTurnId: 't',
+          createdAt: 0,
+          updatedAt: 0,
+        },
         turns: [
           {
             id: 't',
@@ -1047,7 +1174,10 @@ describe('ChatPanel', () => {
           },
         ],
       })
-    setup(true, null, { props: { conversationId: 'saved', onConversationChange }, history: { get } })
+    setup(true, null, {
+      props: { conversationId: 'saved', onConversationChange },
+      history: { get },
+    })
     await screen.findByText('Network connection failed')
     await fireEvent.click(screen.getByRole('button', { name: 'Retry conversation operation' }))
     await screen.findByText('saved answer')
@@ -1103,7 +1233,14 @@ describe('ChatPanel', () => {
       generated: [],
     })
     return {
-      summary: { id: 'saved', title: 'Candidates', scope: null, selectedTurnId: 'a', createdAt: 0, updatedAt: 0 },
+      summary: {
+        id: 'saved',
+        title: 'Candidates',
+        scope: null,
+        selectedTurnId: 'a',
+        createdAt: 0,
+        updatedAt: 0,
+      },
       turns: [reply('a', 'Original **reply**'), reply('b', 'Alternative reply')],
     }
   }
@@ -1111,7 +1248,10 @@ describe('ChatPanel', () => {
   it('renders full same-question candidates once and sets context via 👍 without forking', async () => {
     const conversation = candidates()
     const selectTurn = vi.fn<ConversationClient['selectTurn']>((_id, turnId) =>
-      Promise.resolve({ ...conversation, summary: { ...conversation.summary, selectedTurnId: turnId } }),
+      Promise.resolve({
+        ...conversation,
+        summary: { ...conversation.summary, selectedTurnId: turnId },
+      }),
     )
     const fork = vi.fn<ConversationClient['fork']>(() => Promise.resolve(conversation))
     const { runs } = setup(true, null, {
@@ -1123,12 +1263,19 @@ describe('ChatPanel', () => {
     expect(screen.getByText('reply', { selector: 'strong' })).toBeTruthy()
     expect(screen.getAllByText('m1', { selector: '.reply-source' })).toHaveLength(2)
     const setContext = screen.getAllByRole('button', { name: 'Set as context' })
-    expect(setContext.map((button) => button.getAttribute('aria-pressed'))).toEqual(['true', 'false'])
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Keep my draft' } })
+    expect(setContext.map((button) => button.getAttribute('aria-pressed'))).toEqual([
+      'true',
+      'false',
+    ])
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+      target: { value: 'Keep my draft' },
+    })
     await fireEvent.click(required(setContext[1]))
     await waitFor(() => expect(selectTurn).toHaveBeenCalledWith('saved', 'b'))
     expect(fork).not.toHaveBeenCalled()
-    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Keep my draft')
+    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe(
+      'Keep my draft',
+    )
     await send('Continue chosen reply')
     expect(runs[0]?.request).toMatchObject({ conversationId: 'saved', replyToId: 'b' })
   })
@@ -1151,13 +1298,20 @@ describe('ChatPanel', () => {
     await screen.findByText('Alternative reply')
     await fireEvent.click(required(screen.getAllByLabelText('More actions')[1]))
     await fireEvent.click(await screen.findByRole('menuitem', { name: 'Edit' }))
-    const editor = (await screen.findByRole('textbox', { name: 'Reply Markdown' })) as HTMLTextAreaElement
+    const editor = (await screen.findByRole('textbox', {
+      name: 'Reply Markdown',
+    })) as HTMLTextAreaElement
     await fireEvent.input(editor, { target: { value: 'Edited local draft' } })
     await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
     await screen.findByText('Conflicts with existing data')
     expect(editor.value).toBe('Edited local draft')
     expect(screen.getByText('Alternative reply')).toBeTruthy()
-    expect(editTurn).toHaveBeenLastCalledWith('saved', 'b', 'Edited local draft', 'Alternative reply')
+    expect(editTurn).toHaveBeenLastCalledWith(
+      'saved',
+      'b',
+      'Edited local draft',
+      'Alternative reply',
+    )
     await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
     await screen.findByText('Edited local draft')
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -1197,16 +1351,27 @@ describe('ChatPanel', () => {
     })
     await screen.findByText('Alternative reply')
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Regenerate' })[0]))
-    expect(runs[0]?.request).toMatchObject({ conversationId: 'saved', retryTurnId: 'a', model, regenerate: false })
+    expect(runs[0]?.request).toMatchObject({
+      conversationId: 'saved',
+      retryTurnId: 'a',
+      model,
+      regenerate: false,
+    })
     expect(screen.getByText('reply', { selector: 'strong' })).toBeTruthy()
     runs[0]?.emit({ kind: 'end', status: 'completed' })
     await waitFor(() =>
-      expect(screen.getAllByRole('button', { name: 'Switch model' })[1]?.hasAttribute('disabled')).toBe(false),
+      expect(
+        screen.getAllByRole('button', { name: 'Switch model' })[1]?.hasAttribute('disabled'),
+      ).toBe(false),
     )
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Switch model' })[1]))
     expect(screen.queryByRole('dialog')).toBeNull()
     await fireEvent.click(await screen.findByRole('option', { name: /m2/ }))
-    expect(runs[1]?.request).toMatchObject({ conversationId: 'saved', retryTurnId: 'b', model: secondModel })
+    expect(runs[1]?.request).toMatchObject({
+      conversationId: 'saved',
+      retryTurnId: 'b',
+      model: secondModel,
+    })
   })
 
   it('translates actual source text with source ID and chosen language while retaining the source', async () => {
@@ -1237,7 +1402,11 @@ describe('ChatPanel', () => {
     const conversation = candidates()
     conversation.turns = [required(conversation.turns[0])]
     const removeTurn = vi.fn<ConversationClient['removeTurn']>(() =>
-      Promise.resolve({ ...conversation, summary: { ...conversation.summary, selectedTurnId: null }, turns: [] }),
+      Promise.resolve({
+        ...conversation,
+        summary: { ...conversation.summary, selectedTurnId: null },
+        turns: [],
+      }),
     )
     const { notify } = setup(true, null, {
       props: { conversationId: 'saved' },
@@ -1253,7 +1422,11 @@ describe('ChatPanel', () => {
     expect(removeTurn).not.toHaveBeenCalled()
     await fireEvent.click(remove)
     await waitFor(() => expect(removeTurn).toHaveBeenCalledWith('saved', 'a'))
-    expect(notify.confirm).toHaveBeenLastCalledWith({ title: 'Delete this message?', body: '', danger: true })
+    expect(notify.confirm).toHaveBeenLastCalledWith({
+      title: 'Delete this message?',
+      body: '',
+      danger: true,
+    })
     await waitFor(() => expect(screen.queryByText('Shared question')).toBeNull())
   })
 
@@ -1263,7 +1436,10 @@ describe('ChatPanel', () => {
       Promise.resolve({ ...conversation, summary: { ...conversation.summary, id: 'forked' } }),
     )
     const selectTurn = vi.fn<ConversationClient['selectTurn']>((_id, turnId) =>
-      Promise.resolve({ ...conversation, summary: { ...conversation.summary, selectedTurnId: turnId } }),
+      Promise.resolve({
+        ...conversation,
+        summary: { ...conversation.summary, selectedTurnId: turnId },
+      }),
     )
     const onSaveNote = vi.fn(() => Promise.reject(new Error('disk full')))
     const onConversationChange = vi.fn()
@@ -1274,9 +1450,13 @@ describe('ChatPanel', () => {
     const card = required((await screen.findByText('Alternative reply')).closest('li'))
     const saveNote = within(card).getByRole('button', { name: 'Save to note' })
     await fireEvent.click(saveNote)
-    await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Could not save the note'))
+    await waitFor(() =>
+      expect(notify.toast).toHaveBeenCalledWith('error', 'Could not save the note'),
+    )
     expect(onSaveNote).toHaveBeenCalledWith('Alternative reply', [])
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Discard for branch' } })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+      target: { value: 'Discard for branch' },
+    })
     await fireEvent.click(required(screen.getAllByLabelText('More actions')[1]))
     await fireEvent.click(await screen.findByRole('menuitem', { name: 'Branch' }))
     await waitFor(() => expect(selectTurn).toHaveBeenCalledWith('saved', 'b'))
@@ -1336,7 +1516,10 @@ describe('ChatPanel', () => {
     })
     await screen.findByText('Alternative reply')
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Regenerate' })[1]))
-    expect(notify.toast).toHaveBeenCalledWith('error', 'The source model is unavailable. Use @ to pick another model.')
+    expect(notify.toast).toHaveBeenCalledWith(
+      'error',
+      'The source model is unavailable. Use @ to pick another model.',
+    )
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(runs).toHaveLength(0)
     expect(screen.getByText('Alternative reply')).toBeTruthy()
@@ -1347,7 +1530,10 @@ describe('ChatPanel', () => {
     conversation.summary.selectedTurnId = 'b'
     required(conversation.turns[1]).parentId = 'a'
     const removeTurn = vi.fn<ConversationClient['removeTurn']>(() =>
-      Promise.resolve({ ...conversation, turns: [{ ...required(conversation.turns[1]), parentId: null }] }),
+      Promise.resolve({
+        ...conversation,
+        turns: [{ ...required(conversation.turns[1]), parentId: null }],
+      }),
     )
     const { notify } = setup(true, null, {
       props: { conversationId: 'saved' },
@@ -1384,9 +1570,11 @@ describe('ChatPanel', () => {
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Regenerate' })[0]))
     expect(runs[0]?.request.retryTurnId).toBe('a')
     for (const label of ['Switch model', 'Translate', 'Delete', 'Set as context']) {
-      expect(screen.getAllByRole('button', { name: label }).every((button) => button.hasAttribute('disabled'))).toBe(
-        true,
-      )
+      expect(
+        screen
+          .getAllByRole('button', { name: label })
+          .every((button) => button.hasAttribute('disabled')),
+      ).toBe(true)
     }
   })
 
@@ -1402,10 +1590,14 @@ describe('ChatPanel', () => {
     })
     await screen.findByText('Alternative reply')
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Translate' })[1]))
-    const language = (await screen.findByRole('textbox', { name: 'Target language' })) as HTMLInputElement
+    const language = (await screen.findByRole('textbox', {
+      name: 'Target language',
+    })) as HTMLInputElement
     await fireEvent.input(language, { target: { value: '日本語' } })
     await fireEvent.click(screen.getByRole('button', { name: 'OK' }))
-    await waitFor(() => expect(screen.getByRole('dialog').textContent).toContain('Network connection failed'))
+    await waitFor(() =>
+      expect(screen.getByRole('dialog').textContent).toContain('Network connection failed'),
+    )
     expect(language.value).toBe('日本語')
     expect(screen.getByText('Alternative reply')).toBeTruthy()
     expect(screen.getByText('reply', { selector: 'strong' })).toBeTruthy()
@@ -1422,12 +1614,20 @@ describe('ChatPanel', () => {
       history: { get: () => Promise.resolve(conversation), selectTurn },
     })
     await screen.findByText('Alternative reply')
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Keep on failure' } })
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+      target: { value: 'Keep on failure' },
+    })
     await fireEvent.click(required(screen.getAllByLabelText('More actions')[1]))
     await fireEvent.click(await screen.findByRole('menuitem', { name: 'Branch' }))
-    await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Network connection failed'))
-    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('Keep on failure')
-    expect(screen.getAllByRole('button', { name: 'Set as context' })[0]?.getAttribute('aria-pressed')).toBe('true')
+    await waitFor(() =>
+      expect(notify.toast).toHaveBeenCalledWith('error', 'Network connection failed'),
+    )
+    expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe(
+      'Keep on failure',
+    )
+    expect(
+      screen.getAllByRole('button', { name: 'Set as context' })[0]?.getAttribute('aria-pressed'),
+    ).toBe('true')
   })
 
   it('awaits native Markdown export and reports host failure without using a browser download', async () => {
@@ -1442,7 +1642,9 @@ describe('ChatPanel', () => {
     await fireEvent.click(await screen.findByRole('menuitem', { name: 'Export' }))
     await fireEvent.click(await screen.findByRole('menuitem', { name: 'Export as Markdown' }))
     await waitFor(() => expect(onExportMarkdown).toHaveBeenCalledWith('Alternative reply'))
-    await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Could not download Markdown'))
+    await waitFor(() =>
+      expect(notify.toast).toHaveBeenCalledWith('error', 'Could not download Markdown'),
+    )
     expect(screen.getByText('Alternative reply')).toBeTruthy()
   })
 })
@@ -1466,7 +1668,9 @@ describe('ChatPanel permission modes', () => {
     expect(screen.getByRole('status').textContent).toBe('Plan only')
     await send('inspect')
     expect(runs[0]?.request.permissionMode).toBe('plan')
-    expect(screen.getByRole('button', { name: 'Permission mode: Plan only' }).hasAttribute('disabled')).toBe(true)
+    expect(
+      screen.getByRole('button', { name: 'Permission mode: Plan only' }).hasAttribute('disabled'),
+    ).toBe(true)
     runs[0]?.emit({ kind: 'tool_call', callId: 'c1', name: 'read', source: 'host' })
     runs[0]?.emit({ kind: 'approval_required', callId: 'c1', name: 'read', argsPreview: '{}' })
     await fireEvent.click(await screen.findByRole('button', { name: 'Allow once' }))
@@ -1529,20 +1733,27 @@ describe('ChatPanel images', () => {
   })
   const textOption = option(model, 'Text model', false)
   const visionOption = option(visionModel, 'Vision model', true)
-  const png = (name = 'a.png', size = 3) => new File([new Uint8Array(size).fill(65)], name, { type: 'image/png' })
+  const png = (name = 'a.png', size = 3) =>
+    new File([new Uint8Array(size).fill(65)], name, { type: 'image/png' })
   const revoke = vi.fn()
   let created = 0
   beforeEach(() => {
     created = 0
     revoke.mockClear()
-    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => `blob:image-${++created}` })
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: () => `blob:image-${++created}`,
+    })
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revoke })
   })
   function visionSetup(extra: Extra = {}) {
     return setup(true, null, {
       ...extra,
       props: { model: visionModel, ...extra.props },
-      providers: { modelOptions: () => Promise.resolve([textOption, visionOption]), ...extra.providers },
+      providers: {
+        modelOptions: () => Promise.resolve([textOption, visionOption]),
+        ...extra.providers,
+      },
     })
   }
   async function uploadItem() {
@@ -1553,7 +1764,9 @@ describe('ChatPanel images', () => {
     const upload = await uploadItem()
     await waitFor(() => expect(upload.hasAttribute('disabled')).toBe(false))
     await fireEvent.click(upload)
-    await waitFor(() => expect(screen.queryByRole('button', { name: /^Upload attachment/ })).toBeNull())
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /^Upload attachment/ })).toBeNull(),
+    )
     const input = required(document.querySelector<HTMLInputElement>('input[type=file]'))
     expect(input.accept).toBe('image/png,image/jpeg,image/webp,image/gif')
     await fireEvent.change(input, { target: { files } })
@@ -1591,10 +1804,19 @@ describe('ChatPanel images', () => {
     await pick([png('1.png'), png('2.png'), png('3.png')])
     await screen.findByRole('button', { name: 'Remove image 3' })
     const form = required(screen.getByRole('textbox', { name: 'Message' }).closest('form'))
-    await fireEvent.drop(form, { dataTransfer: { files: [png('4.png'), png('5.png')], types: ['Files'] } })
-    await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'Up to 4 images per message'))
-    await fireEvent.drop(form, { dataTransfer: { files: [new File(['x'], 'x.bmp', { type: 'image/bmp' })] } })
-    expect(notify.toast).toHaveBeenCalledWith('error', 'Only PNG, JPEG, WebP and GIF images are supported')
+    await fireEvent.drop(form, {
+      dataTransfer: { files: [png('4.png'), png('5.png')], types: ['Files'] },
+    })
+    await waitFor(() =>
+      expect(notify.toast).toHaveBeenCalledWith('error', 'Up to 4 images per message'),
+    )
+    await fireEvent.drop(form, {
+      dataTransfer: { files: [new File(['x'], 'x.bmp', { type: 'image/bmp' })] },
+    })
+    expect(notify.toast).toHaveBeenCalledWith(
+      'error',
+      'Only PNG, JPEG, WebP and GIF images are supported',
+    )
     await fireEvent.drop(form, { dataTransfer: { files: [png('big.png', 4 * 1024 * 1024 + 1)] } })
     expect(notify.toast).toHaveBeenCalledWith('error', 'Each image must be 4 MiB or smaller')
     expect(screen.queryByRole('button', { name: 'Remove image 4' })).toBeNull()
@@ -1605,22 +1827,39 @@ describe('ChatPanel images', () => {
   it('disables attach and send for a non-vision model until a vision model is picked', async () => {
     const { notify } = visionSetup({ props: { model } })
     const upload = await uploadItem()
-    await waitFor(() => expect(upload.getAttribute('title')).toBe('The current model does not support images'))
+    await waitFor(() =>
+      expect(upload.getAttribute('title')).toBe('The current model does not support images'),
+    )
     expect(upload.hasAttribute('disabled')).toBe(true)
     await fireEvent.keyDown(upload, { key: 'Escape' })
-    await fireEvent.paste(screen.getByRole('textbox', { name: 'Message' }), { clipboardData: { files: [png()] } })
-    await waitFor(() => expect(notify.toast).toHaveBeenCalledWith('error', 'The current model does not support images'))
+    await fireEvent.paste(screen.getByRole('textbox', { name: 'Message' }), {
+      clipboardData: { files: [png()] },
+    })
+    await waitFor(() =>
+      expect(notify.toast).toHaveBeenCalledWith(
+        'error',
+        'The current model does not support images',
+      ),
+    )
     expect(screen.queryByRole('button', { name: 'Remove image 1' })).toBeNull()
     await fireEvent.click(screen.getByLabelText('Select a model'))
     await fireEvent.click(await screen.findByRole('option', { name: /v1/ }))
     await pick([png()])
     await screen.findByRole('button', { name: 'Remove image 1' })
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'hi' } })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+      target: { value: 'hi' },
+    })
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false),
+    )
     await fireEvent.click(screen.getByLabelText('Select a model'))
     await fireEvent.click(await screen.findByRole('option', { name: /m1/ }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true))
-    expect(screen.getByRole('status', { name: '' }).textContent).toContain('does not support images')
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true),
+    )
+    expect(screen.getByRole('status', { name: '' }).textContent).toContain(
+      'does not support images',
+    )
   })
 
   it('restores images with the draft when the request is rejected before acceptance', async () => {
@@ -1633,7 +1872,9 @@ describe('ChatPanel images', () => {
     await send('keep my image')
     expect(run.mock.calls[0]?.[0].images).toEqual([{ mime: 'image/png', data: 'QUFB' }])
     await waitFor(() =>
-      expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe('keep my image'),
+      expect((screen.getByRole('textbox', { name: 'Message' }) as HTMLTextAreaElement).value).toBe(
+        'keep my image',
+      ),
     )
     expect(screen.getByRole('button', { name: 'Remove image 1' })).toBeTruthy()
     expect(revoke).not.toHaveBeenCalled()
@@ -1660,14 +1901,26 @@ describe('ChatPanel images', () => {
       generated: [],
     })
     const conversation: Conversation = {
-      summary: { id: 'saved', title: 'Images', scope: null, selectedTurnId: 'a', createdAt: 0, updatedAt: 0 },
+      summary: {
+        id: 'saved',
+        title: 'Images',
+        scope: null,
+        selectedTurnId: 'a',
+        createdAt: 0,
+        updatedAt: 0,
+      },
       turns: [turn('a'), turn('b')],
     }
-    visionSetup({ props: { conversationId: 'saved' }, history: { get: () => Promise.resolve(conversation) } })
+    visionSetup({
+      props: { conversationId: 'saved' },
+      history: { get: () => Promise.resolve(conversation) },
+    })
     expect(await screen.findByText('Image expired')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Open image 2' }).getAttribute('href')).toBe('/img/1')
     await waitFor(() =>
-      expect(screen.getAllByRole('button', { name: 'Switch model' })[0]?.hasAttribute('disabled')).toBe(false),
+      expect(
+        screen.getAllByRole('button', { name: 'Switch model' })[0]?.hasAttribute('disabled'),
+      ).toBe(false),
     )
     await fireEvent.click(required(screen.getAllByRole('button', { name: 'Switch model' })[0]))
     await screen.findByRole('option', { name: /v1/ })
@@ -1677,7 +1930,14 @@ describe('ChatPanel images', () => {
   it('saves an image-only reply to a note together with its generated images', async () => {
     const generated = [{ mime: 'image/png', url: 'data:image/png;base64,AAAA' }]
     const conversation: Conversation = {
-      summary: { id: 'saved', title: 'Painting', scope: null, selectedTurnId: 'a', createdAt: 0, updatedAt: 0 },
+      summary: {
+        id: 'saved',
+        title: 'Painting',
+        scope: null,
+        selectedTurnId: 'a',
+        createdAt: 0,
+        updatedAt: 0,
+      },
       turns: [
         {
           id: 'a',

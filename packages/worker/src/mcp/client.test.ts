@@ -28,7 +28,9 @@ class TestDocuments implements DocumentStore {
   }
   async list(owner: Actor, collection: string): Promise<readonly StoredDocument[]> {
     const prefix = JSON.stringify([ownerKey(owner), collection]).slice(0, -1) + ','
-    return [...this.rows].filter(([key]) => key.startsWith(prefix)).map(([, value]) => structuredClone(value))
+    return [...this.rows]
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, value]) => structuredClone(value))
   }
   async compareAndSet(
     owner: Actor,
@@ -39,14 +41,16 @@ class TestDocuments implements DocumentStore {
   ): Promise<StoredDocument> {
     const address = this.address(owner, collection, key)
     const existing = this.rows.get(address)
-    if ((existing?.revision ?? null) !== expected) throw new KitFailure('conflict', 'Document revision conflict')
+    if ((existing?.revision ?? null) !== expected)
+      throw new KitFailure('conflict', 'Document revision conflict')
     const document = { key, revision: (existing?.revision ?? 0) + 1, value: structuredClone(value) }
     this.rows.set(address, document)
     return structuredClone(document)
   }
   async remove(owner: Actor, collection: string, key: string, expected: number): Promise<void> {
     const address = this.address(owner, collection, key)
-    if (this.rows.get(address)?.revision !== expected) throw new KitFailure('conflict', 'Document revision conflict')
+    if (this.rows.get(address)?.revision !== expected)
+      throw new KitFailure('conflict', 'Document revision conflict')
     this.rows.delete(address)
   }
 }
@@ -59,7 +63,12 @@ function serverRecords(value: unknown): Record<string, unknown>[] {
   return value.map(record)
 }
 function context(owner: Actor = actor): WorkerContext {
-  return { actor: owner, signal: new AbortController().signal, requestId: 'request', now: Date.now() }
+  return {
+    actor: owner,
+    signal: new AbortController().signal,
+    requestId: 'request',
+    now: Date.now(),
+  }
 }
 async function call(
   settings: McpClientSettings,
@@ -71,7 +80,9 @@ async function call(
   const response = await settings.handle(
     new Request(`https://worker.example${path}`, {
       method,
-      ...(input === undefined ? {} : { body: JSON.stringify(input), headers: { 'Content-Type': 'application/json' } }),
+      ...(input === undefined
+        ? {}
+        : { body: JSON.stringify(input), headers: { 'Content-Type': 'application/json' } }),
     }),
     context(owner),
   )
@@ -79,13 +90,21 @@ async function call(
   return response.json()
 }
 async function setup() {
-  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+    'encrypt',
+    'decrypt',
+  ])
   const credentials = createCredentialPort({ currentKeyId: 'test', keys: new Map([['test', key]]) })
   const store = new TestDocuments()
   const sent: { url: string; headers: Headers }[] = []
   const remote = {
     tools: [
-      { name: 'read', description: 'Read', inputSchema: { type: 'object' }, annotations: { readOnlyHint: true } },
+      {
+        name: 'read',
+        description: 'Read',
+        inputSchema: { type: 'object' },
+        annotations: { readOnlyHint: true },
+      },
     ],
     fail: false,
     beforeList: async (): Promise<void> => {},
@@ -100,7 +119,11 @@ async function setup() {
         return Response.json({
           jsonrpc: '2.0',
           id: message.id,
-          result: { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'test', version: '1' } },
+          result: {
+            protocolVersion: '2025-03-26',
+            capabilities: {},
+            serverInfo: { name: 'test', version: '1' },
+          },
         })
       assert.equal(message.method, 'tools/list')
       await remote.beforeList()
@@ -108,7 +131,14 @@ async function setup() {
       return Response.json({ jsonrpc: '2.0', id: message.id, result: { tools: remote.tools } })
     },
   }
-  return { store, credentials, sent, remote, outbound, settings: new McpClientSettings(store, credentials, outbound) }
+  return {
+    store,
+    credentials,
+    sent,
+    remote,
+    outbound,
+    settings: new McpClientSettings(store, credentials, outbound),
+  }
 }
 function saveInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -138,7 +168,10 @@ test('defaults are disabled/untrusted, HTTP secrets are encrypted and only their
   const server = await create(
     fixture.settings,
     saveInput({
-      secret: { headers: { Authorization: 'Bearer sensitive-header' }, query: { token: 'sensitive-query' } },
+      secret: {
+        headers: { Authorization: 'Bearer sensitive-header' },
+        query: { token: 'sensitive-query' },
+      },
     }),
   )
   assert.equal(server.enabled, false)
@@ -160,13 +193,23 @@ test('only enabled and trusted settings enter actor runtime sessions', async () 
   const runtime = fixture.settings.runtime(actor)
   assert.deepEqual((await runtime.session(new AbortController().signal)).tools(), [])
   assert.equal(fixture.sent.length, 0)
-  await call(fixture.settings, 'PUT', `${endpoint}/${idOf(server)}`, saveInput({ enabled: true, trusted: true }))
+  await call(
+    fixture.settings,
+    'PUT',
+    `${endpoint}/${idOf(server)}`,
+    saveInput({ enabled: true, trusted: true }),
+  )
   const session = await runtime.session(new AbortController().signal)
   assert.deepEqual(
     session.tools().map((tool) => [tool.prefixed, tool.approval]),
     [['mcp_remote_read', 'ask']],
   )
-  await call(fixture.settings, 'PUT', `${endpoint}/${idOf(server)}`, saveInput({ enabled: false, trusted: false }))
+  await call(
+    fixture.settings,
+    'PUT',
+    `${endpoint}/${idOf(server)}`,
+    saveInput({ enabled: false, trusted: false }),
+  )
   assert.deepEqual((await runtime.session(new AbortController().signal)).tools(), [])
   assert.deepEqual(
     session.tools().map((tool) => tool.prefixed),
@@ -195,11 +238,17 @@ test('owner, application and tenant isolate configs, mutations and runtime crede
       ['POST', `${endpoint}/${id}/refresh`, undefined],
       ['PUT', `${endpoint}/${id}/tools/read/approval`, { approval: 'auto' }],
     ] as const)
-      await assert.rejects(call(fixture.settings, method, path, input, other), { code: 'not_found' })
+      await assert.rejects(call(fixture.settings, method, path, input, other), {
+        code: 'not_found',
+      })
     const own = await create(
       fixture.settings,
       saveInput({
-        secret: { headers: { Authorization: `value-${other.applicationId}-${other.tenantId}-${other.subjectId}` } },
+        secret: {
+          headers: {
+            Authorization: `value-${other.applicationId}-${other.tenantId}-${other.subjectId}`,
+          },
+        },
       }),
       other,
     )
@@ -210,21 +259,35 @@ test('owner, application and tenant isolate configs, mutations and runtime crede
     )
     assert.notEqual(fixture.settings.runtime(other), fixture.settings.runtime(actor))
   }
-  assert.equal(fixture.settings.runtime({ ...actor, sessionId: 'second-session' }), fixture.settings.runtime(actor))
+  assert.equal(
+    fixture.settings.runtime({ ...actor, sessionId: 'second-session' }),
+    fixture.settings.runtime(actor),
+  )
   assert.equal(serverRecords(await call(fixture.settings, 'GET')).length, 1)
 })
 
 test('secrets keep, replace and clear without leaking old values; seal failure leaves config unchanged', async () => {
   const fixture = await setup()
-  const server = await create(fixture.settings, saveInput({ secret: { headers: { Authorization: 'first-secret' } } }))
+  const server = await create(
+    fixture.settings,
+    saveInput({ secret: { headers: { Authorization: 'first-secret' } } }),
+  )
   const path = `${endpoint}/${idOf(server)}`
   await call(fixture.settings, 'PUT', path, saveInput({ name: 'Renamed' }))
   await call(fixture.settings, 'POST', `${path}/refresh`)
   assert.equal(fixture.sent.at(-1)?.headers.get('Authorization'), 'first-secret')
-  await call(fixture.settings, 'PUT', path, saveInput({ secret: { query: { key: 'replacement-secret' } } }))
+  await call(
+    fixture.settings,
+    'PUT',
+    path,
+    saveInput({ secret: { query: { key: 'replacement-secret' } } }),
+  )
   await call(fixture.settings, 'POST', `${path}/refresh`)
   assert.equal(fixture.sent.at(-1)?.headers.get('Authorization'), null)
-  assert.equal(new URL(fixture.sent.at(-1)?.url ?? '').searchParams.get('key'), 'replacement-secret')
+  assert.equal(
+    new URL(fixture.sent.at(-1)?.url ?? '').searchParams.get('key'),
+    'replacement-secret',
+  )
   const before = JSON.stringify([...fixture.store.rows])
   const broken: CredentialPort = {
     ...fixture.credentials,
@@ -234,7 +297,12 @@ test('secrets keep, replace and clear without leaking old values; seal failure l
   }
   const settings = new McpClientSettings(fixture.store, broken, fixture.outbound)
   await assert.rejects(
-    call(settings, 'PUT', path, saveInput({ secret: { headers: { Authorization: 'never-persisted' } } })),
+    call(
+      settings,
+      'PUT',
+      path,
+      saveInput({ secret: { headers: { Authorization: 'never-persisted' } } }),
+    ),
     { code: 'unsupported' },
   )
   assert.equal(JSON.stringify([...fixture.store.rows]), before)
@@ -255,12 +323,19 @@ test('URL credentials, stdio, invalid headers, duplicate slugs and malformed fla
     'file:///tmp/mcp',
     'http://mcp.example/',
   ]) {
-    await assert.rejects(create(settings, saveInput({ transport: { kind: 'http', url } })), { code: 'bad_request' })
+    await assert.rejects(create(settings, saveInput({ transport: { kind: 'http', url } })), {
+      code: 'bad_request',
+    })
   }
-  await assert.rejects(create(settings, saveInput({ transport: { kind: 'stdio', command: 'mcp', args: [] } })), {
-    code: 'unsupported',
+  await assert.rejects(
+    create(settings, saveInput({ transport: { kind: 'stdio', command: 'mcp', args: [] } })),
+    {
+      code: 'unsupported',
+    },
+  )
+  await assert.rejects(create(settings, saveInput({ secret: { env: { TOKEN: 'value' } } })), {
+    code: 'bad_request',
   })
-  await assert.rejects(create(settings, saveInput({ secret: { env: { TOKEN: 'value' } } })), { code: 'bad_request' })
   await assert.rejects(
     create(settings, saveInput({ secret: { headers: { Authorization: 'bad\r\nInjected: yes' } } })),
     { code: 'bad_request' },
@@ -269,7 +344,10 @@ test('URL credentials, stdio, invalid headers, duplicate slugs and malformed fla
     await assert.rejects(create(settings, saveInput({ slug })), { code: 'bad_request' })
   await assert.rejects(create(settings, saveInput({ enabled: 'yes' })), { code: 'bad_request' })
   await create(settings)
-  await assert.rejects(create(settings), { code: 'conflict', details: { reason: 'duplicate_slug', field: 'slug' } })
+  await assert.rejects(create(settings), {
+    code: 'conflict',
+    details: { reason: 'duplicate_slug', field: 'slug' },
+  })
 })
 
 test('private and loopback targets require explicit allowPrivate for HTTP and HTTPS', async () => {
@@ -283,7 +361,9 @@ test('private and loopback targets require explicit allowPrivate for HTTP and HT
     'https://192.168.1.1/mcp',
     'https://[fd00::1]/mcp',
   ].entries()) {
-    await assert.rejects(create(settings, saveInput({ transport: { kind: 'http', url } })), { code: 'bad_request' })
+    await assert.rejects(create(settings, saveInput({ transport: { kind: 'http', url } })), {
+      code: 'bad_request',
+    })
     const server = await create(
       settings,
       saveInput({ slug: `private_${index}`, transport: { kind: 'http', url }, allowPrivate: true }),
@@ -320,9 +400,12 @@ test('refresh preserves successful cache and approvals, assigns new tools ask an
   fixture.remote.fail = false
   fixture.remote.tools = []
   assert.deepEqual(await call(fixture.settings, 'POST', `${path}/refresh`), [])
-  await assert.rejects(call(fixture.settings, 'PUT', `${path}/tools/read/approval`, { approval: 'auto' }), {
-    code: 'not_found',
-  })
+  await assert.rejects(
+    call(fixture.settings, 'PUT', `${path}/tools/read/approval`, { approval: 'auto' }),
+    {
+      code: 'not_found',
+    },
+  )
 })
 
 test('delete tombstone prevents delayed refresh resurrection', async () => {
@@ -360,7 +443,12 @@ test('CAS prevents concurrent save overwriting another successful mutation', asy
     },
   }
   const other = new McpClientSettings(fixture.store, delayed, fixture.outbound)
-  const saving = call(other, 'PUT', path, saveInput({ name: 'Stale', secret: { query: { token: 'stale-secret' } } }))
+  const saving = call(
+    other,
+    'PUT',
+    path,
+    saveInput({ name: 'Stale', secret: { query: { token: 'stale-secret' } } }),
+  )
   await arrived.promise
   await call(fixture.settings, 'PUT', path, saveInput({ name: 'Winner' }))
   release.resolve()
@@ -400,9 +488,12 @@ test('unreadable ciphertext and transplanted record credentials fail closed with
     { ...actor, tenantId: null },
   ]) {
     await fixture.store.compareAndSet(other, 'mcp-client', 'servers', null, state)
-    await assert.rejects(call(fixture.settings, 'POST', `${endpoint}/${idOf(first)}/refresh`, undefined, other), {
-      code: 'needs_config',
-    })
+    await assert.rejects(
+      call(fixture.settings, 'POST', `${endpoint}/${idOf(first)}/refresh`, undefined, other),
+      {
+        code: 'needs_config',
+      },
+    )
   }
 })
 
@@ -414,5 +505,11 @@ test('stored shapes are strict and unrelated routes are not claimed', async () =
     deleted: [],
   })
   await assert.rejects(call(fixture.settings, 'GET'), { code: 'internal' })
-  assert.equal(await fixture.settings.handle(new Request('https://worker.example/api/v1/mcp/server'), context()), null)
+  assert.equal(
+    await fixture.settings.handle(
+      new Request('https://worker.example/api/v1/mcp/server'),
+      context(),
+    ),
+    null,
+  )
 })

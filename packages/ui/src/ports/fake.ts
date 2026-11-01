@@ -12,7 +12,13 @@ import type {
   ProvidersPort,
   SkillsPort,
 } from './contract'
-import type { Conversation, LogLevel, RunEvent, RunSnapshot, Turn } from '@ouraihub/aether-contracts'
+import type {
+  Conversation,
+  LogLevel,
+  RunEvent,
+  RunSnapshot,
+  Turn,
+} from '@ouraihub/aether-contracts'
 import type { SearchPort } from './search'
 import type { SkillSourcesPort } from './skill-sources'
 
@@ -95,7 +101,11 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
           turn.status = run.status
           if (run.status === 'cancelled') turn.text = ''
           if (select && run.status === 'completed')
-            conversation.summary = { ...conversation.summary, selectedTurnId: turn.id, updatedAt: Date.now() }
+            conversation.summary = {
+              ...conversation.summary,
+              selectedTurnId: turn.id,
+              updatedAt: Date.now(),
+            }
         }
         signal?.removeEventListener('abort', cancel)
         terminals.push(run.runId)
@@ -111,7 +121,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
   const snapshot = (conversation: Conversation): Conversation => structuredClone(conversation)
   const getConversation = (id: string) => {
     const conversation = conversations.get(id)
-    if (!conversation) throw clientError('not_found', `conversation ${id}`, { entity: 'conversation' })
+    if (!conversation)
+      throw clientError('not_found', `conversation ${id}`, { entity: 'conversation' })
     if (conversation.turns.some((turn) => turn.status === 'running'))
       throw clientError('conflict', 'conversation is active', { reason: 'active_run' })
     return conversation
@@ -130,7 +141,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       ),
     get: async (id: string) => {
       const conversation = conversations.get(id)
-      if (!conversation) throw clientError('not_found', `conversation ${id}`, { entity: 'conversation' })
+      if (!conversation)
+        throw clientError('not_found', `conversation ${id}`, { entity: 'conversation' })
       return snapshot(conversation)
     },
     remove: async (id: string) => {
@@ -142,13 +154,23 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       conversation.summary = { ...conversation.summary, title, updatedAt: Date.now() }
       return { ...conversation.summary }
     },
-    editTurn: async (conversationId: string, turnId: string, text: string, expectedText: string) => {
+    editTurn: async (
+      conversationId: string,
+      turnId: string,
+      text: string,
+      expectedText: string,
+    ) => {
       const conversation = getConversation(conversationId)
       const turn = getTurn(conversationId, turnId)
-      if (turn.text !== expectedText) throw clientError('conflict', 'turn changed', { reason: 'text_changed' })
+      if (turn.text !== expectedText)
+        throw clientError('conflict', 'turn changed', { reason: 'text_changed' })
       if (!text.trim() || Array.from(text).length > 24_000)
         throw clientError('bad_request', 'invalid text', { field: 'text' })
-      if (conversation.turns.some((candidate) => candidate.parentId === turnId || candidate.supersedesId === turnId))
+      if (
+        conversation.turns.some(
+          (candidate) => candidate.parentId === turnId || candidate.supersedesId === turnId,
+        )
+      )
         throw clientError('conflict', 'turn has children', { reason: 'has_children' })
       turn.text = text
       turn.reasoningText = null
@@ -160,7 +182,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       // Same rule as both hosts (AutoNote docs/35 §3.3): reparent onto the successor, then delete.
       const conversation = getConversation(conversationId)
       const turn = getTurn(conversationId, turnId)
-      if (turn.status === 'running') throw clientError('conflict', 'turn running', { reason: 'turn_running' })
+      if (turn.status === 'running')
+        throw clientError('conflict', 'turn running', { reason: 'turn_running' })
       // Turns are stored in creation order, which stands in for `seq`.
       const at = conversation.turns.indexOf(turn)
       const group = conversation.turns.filter(
@@ -202,7 +225,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       const seen = new Set<string>()
       let cursor: Turn | undefined = target
       while (cursor) {
-        if (seen.has(cursor.id)) throw clientError('conflict', 'history cycle', { reason: 'history_cycle' })
+        if (seen.has(cursor.id))
+          throw clientError('conflict', 'history cycle', { reason: 'history_cycle' })
         seen.add(cursor.id)
         chain.unshift(cursor)
         if (!cursor.parentId) break
@@ -247,7 +271,11 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     selectTurn: async (conversationId: string, turnId: string) => {
       const conversation = getConversation(conversationId)
       getTurn(conversationId, turnId)
-      conversation.summary = { ...conversation.summary, selectedTurnId: turnId, updatedAt: Date.now() }
+      conversation.summary = {
+        ...conversation.summary,
+        selectedTurnId: turnId,
+        updatedAt: Date.now(),
+      }
       return snapshot(conversation)
     },
   }
@@ -270,7 +298,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     providers: {
       revealNeedsPassword: false,
       keyStrategies: false,
-      revealKey: () => Promise.reject(clientError('internal', 'Configure the fake provider reveal method')),
+      revealKey: () =>
+        Promise.reject(clientError('internal', 'Configure the fake provider reveal method')),
       list: () => Promise.resolve([]),
       setEnabled: () => Promise.resolve([]),
       save: () => Promise.resolve([]),
@@ -278,7 +307,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
       removeKey: () => Promise.resolve([]),
       remove: () => Promise.resolve([]),
       modelOptions: () => Promise.resolve([]),
-      probe: () => Promise.resolve({ probeUrl: '', models: [], error: null, suggestedProtocol: null }),
+      probe: () =>
+        Promise.resolve({ probeUrl: '', models: [], error: null, suggestedProtocol: null }),
       ...options.providers,
     },
     chat: {
@@ -295,10 +325,19 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
         )
           throw clientError('bad_request', 'invalid graph request', { field: 'action' })
         if (request.images?.length && (retry || translation))
-          throw clientError('bad_request', 'images on action', { field: 'images', reason: 'action_conflict' })
-        if (request.purpose === 'writing' && (request.replyToId != null || action || request.targetLanguage != null))
+          throw clientError('bad_request', 'images on action', {
+            field: 'images',
+            reason: 'action_conflict',
+          })
+        if (
+          request.purpose === 'writing' &&
+          (request.replyToId != null || action || request.targetLanguage != null)
+        )
           throw clientError('bad_request', 'writing graph fields', { field: 'action' })
-        if ((retry || translation || request.replyToId != null) && (!request.conversationId || !storesConversations))
+        if (
+          (retry || translation || request.replyToId != null) &&
+          (!request.conversationId || !storesConversations)
+        )
           throw clientError('bad_request', 'conversation required', { field: 'conversationId' })
         const language = request.targetLanguage?.trim() ?? ''
         if (translation && (!language || Array.from(language).length > 80))
@@ -330,18 +369,28 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
           conversation.summary.selectedTurnId ??
           [...conversation.turns].reverse().find((turn) => turn.status === 'completed')?.id ??
           null
-        const sourceId = request.retryTurnId ?? request.translateTurnId ?? (retry ? selectedId : null)
+        const sourceId =
+          request.retryTurnId ?? request.translateTurnId ?? (retry ? selectedId : null)
         const source = sourceId ? getTurn(conversationId, sourceId) : undefined
-        if ((retry || translation) && !source) throw clientError('not_found', 'source turn', { entity: 'turn' })
+        if ((retry || translation) && !source)
+          throw clientError('not_found', 'source turn', { entity: 'turn' })
         if (request.replyToId) getTurn(conversationId, request.replyToId)
-        if (!retry && !translation && selectedId && !request.replyToId) getTurn(conversationId, selectedId)
+        if (!retry && !translation && selectedId && !request.replyToId)
+          getTurn(conversationId, selectedId)
         const model =
           request.model ??
-          (source?.endpointId && source.modelId ? { endpointId: source.endpointId, modelId: source.modelId } : null)
+          (source?.endpointId && source.modelId
+            ? { endpointId: source.endpointId, modelId: source.modelId }
+            : null)
         if (source && !model) throw clientError('needs_config', 'source model unavailable')
         if (source && model && options.providers?.modelOptions) {
           const models = await ports.providers.modelOptions()
-          if (!models.some((option) => option.endpointId === model.endpointId && option.modelId === model.modelId))
+          if (
+            !models.some(
+              (option) =>
+                option.endpointId === model.endpointId && option.modelId === model.modelId,
+            )
+          )
             throw clientError('needs_config', 'source model unavailable')
         }
         if (callOptions?.signal?.aborted) throw clientError('cancelled', 'cancelled')
@@ -412,7 +461,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     skills: {
       list: () => Promise.resolve([]),
       get: (id) => Promise.reject(clientError('not_found', `skill ${id}`, { entity: 'skill' })),
-      preview: () => Promise.reject(clientError('bad_request', 'no package', { field: 'SKILL.md' })),
+      preview: () =>
+        Promise.reject(clientError('bad_request', 'no package', { field: 'SKILL.md' })),
       install: () => Promise.resolve([]),
       save: () => Promise.resolve([]),
       duplicate: () => Promise.resolve([]),
@@ -452,7 +502,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
   }
   const result: KitPorts = { ...ports }
   if (options.search) {
-    const unavailable = () => Promise.reject(clientError('internal', 'Configure the fake search method'))
+    const unavailable = () =>
+      Promise.reject(clientError('internal', 'Configure the fake search method'))
     result.search = {
       settings: unavailable,
       save: unavailable,
@@ -468,7 +519,8 @@ export function createFakePorts(options: FakePortsOptions = {}): KitPorts {
     }
   }
   if (options.skillSources) {
-    const unavailable = () => Promise.reject(clientError('internal', 'Configure the fake skill source method'))
+    const unavailable = () =>
+      Promise.reject(clientError('internal', 'Configure the fake skill source method'))
     result.skillSources = {
       search: unavailable,
       prepare: unavailable,

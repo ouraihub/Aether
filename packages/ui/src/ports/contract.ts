@@ -86,7 +86,12 @@ export interface ConversationClient {
   get(id: string): Promise<Conversation>
   remove(id: string): Promise<void>
   rename(id: string, title: string): Promise<ConversationSummary>
-  editTurn(conversationId: string, turnId: string, text: string, expectedText: string): Promise<Conversation>
+  editTurn(
+    conversationId: string,
+    turnId: string,
+    text: string,
+    expectedText: string,
+  ): Promise<Conversation>
   removeTurn(conversationId: string, turnId: string): Promise<Conversation>
   fork(conversationId: string, turnId: string): Promise<Conversation>
   selectTurn(conversationId: string, turnId: string): Promise<Conversation>
@@ -94,7 +99,11 @@ export interface ConversationClient {
 
 export interface RunClient {
   /** Resolves once accepted; events may arrive before acceptance. */
-  start(request: RunRequest, onEvent: (event: RunEvent) => void, options?: CallOptions): Promise<RunAccepted>
+  start(
+    request: RunRequest,
+    onEvent: (event: RunEvent) => void,
+    options?: CallOptions,
+  ): Promise<RunAccepted>
   cancel(runId: string): Promise<void>
   approve(runId: string, callId: string, allow: boolean): Promise<void>
   getSnapshot(runId: string): Promise<RunSnapshot>

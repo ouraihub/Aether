@@ -121,13 +121,30 @@ export const validateArguments: ArgumentsValidator = (root, args) => {
             schema.type.every((type: unknown) => typeof type === 'string' && TYPES.includes(type)))
       )
         return false
-      for (const key of ['minLength', 'maxLength', 'minItems', 'maxItems', 'minProperties', 'maxProperties'])
+      for (const key of [
+        'minLength',
+        'maxLength',
+        'minItems',
+        'maxItems',
+        'minProperties',
+        'maxProperties',
+      ])
         if (
           schema[key] !== undefined &&
-          !(typeof schema[key] === 'number' && Number.isSafeInteger(schema[key]) && schema[key] >= 0)
+          !(
+            typeof schema[key] === 'number' &&
+            Number.isSafeInteger(schema[key]) &&
+            schema[key] >= 0
+          )
         )
           return false
-      for (const key of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf'])
+      for (const key of [
+        'minimum',
+        'maximum',
+        'exclusiveMinimum',
+        'exclusiveMaximum',
+        'multipleOf',
+      ])
         if (
           schema[key] !== undefined &&
           !(
@@ -146,13 +163,21 @@ export const validateArguments: ArgumentsValidator = (root, args) => {
         )
       )
         return false
-      if (schema.enum !== undefined && !(Array.isArray(schema.enum) && schema.enum.length > 0)) return false
+      if (schema.enum !== undefined && !(Array.isArray(schema.enum) && schema.enum.length > 0))
+        return false
       if (schema.uniqueItems !== undefined && typeof schema.uniqueItems !== 'boolean') return false
       if (schema.pattern !== undefined && !regex(schema.pattern)) return false
-      if (schema.format !== undefined && (typeof schema.format !== 'string' || !Object.hasOwn(format, schema.format)))
+      if (
+        schema.format !== undefined &&
+        (typeof schema.format !== 'string' || !Object.hasOwn(format, schema.format))
+      )
         return false
-      if (schema.contentEncoding !== undefined || schema.contentMediaType !== undefined) return false
-      if (schema.$ref !== undefined && (typeof schema.$ref !== 'string' || !inspect(resolve(schema.$ref), depth + 1)))
+      if (schema.contentEncoding !== undefined || schema.contentMediaType !== undefined)
+        return false
+      if (
+        schema.$ref !== undefined &&
+        (typeof schema.$ref !== 'string' || !inspect(resolve(schema.$ref), depth + 1))
+      )
         return false
       for (const key of ['allOf', 'anyOf', 'oneOf'])
         if (
@@ -187,7 +212,8 @@ export const validateArguments: ArgumentsValidator = (root, args) => {
         if (group === undefined) continue
         if (!isRecord(group)) return false
         for (const [name, child] of Object.entries(group))
-          if ((key === 'patternProperties' && !regex(name)) || !inspect(child, depth + 1)) return false
+          if ((key === 'patternProperties' && !regex(name)) || !inspect(child, depth + 1))
+            return false
       }
       if (schema.dependencies !== undefined) {
         if (!isRecord(schema.dependencies)) return false

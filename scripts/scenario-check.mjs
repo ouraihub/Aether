@@ -13,13 +13,16 @@ const joined = (observation, kind) =>
   ofKind(observation, kind)
     .map((event) => event.text)
     .join('')
-const snapshot = (observation, label) => observation.snapshots.find((entry) => entry.label === label)?.value
+const snapshot = (observation, label) =>
+  observation.snapshots.find((entry) => entry.label === label)?.value
 const reply = (observation, op) => observation.replies.find((entry) => entry.op === op)
 const lastEnd = (observation) => ofKind(observation, 'end').at(-1)
 
 /** `undefined` when equal, otherwise a diagnostic. */
 const equal = (label, actual, expected) =>
-  isDeepStrictEqual(actual, expected) ? undefined : `${label} is ${show(actual)}, expected ${show(expected)}`
+  isDeepStrictEqual(actual, expected)
+    ? undefined
+    : `${label} is ${show(actual)}, expected ${show(expected)}`
 /** Compares only `keys` of a value that must exist. */
 const fields = (label, value, expected) =>
   value === undefined ? `no ${label}` : equal(label, pick(value, Object.keys(expected)), expected)
@@ -35,7 +38,12 @@ const endOnceLast = (observation) => {
 export const ASSERTIONS = {
   'acceptance-response-race': {
     'marks-order': (o) =>
-      equal('marks', o.marks, ['backend-accepted', 'model-released', 'end-received', 'accepted-delivered']),
+      equal('marks', o.marks, [
+        'backend-accepted',
+        'model-released',
+        'end-received',
+        'accepted-delivered',
+      ]),
     'accepted-ids-null': (o) =>
       equal(
         'accepted ids',
@@ -43,8 +51,10 @@ export const ASSERTIONS = {
         [{ conversationId: null, turnId: null }],
       ),
     'text-joined': (o) => equal('joined text_delta', joined(o, 'text_delta'), 'Hello world'),
-    'reasoning-joined': (o) => equal('joined reasoning_delta', joined(o, 'reasoning_delta'), 'Let me think.'),
-    'final-completed': (o) => fields('snapshot final', snapshot(o, 'final'), { status: 'completed' }),
+    'reasoning-joined': (o) =>
+      equal('joined reasoning_delta', joined(o, 'reasoning_delta'), 'Let me think.'),
+    'final-completed': (o) =>
+      fields('snapshot final', snapshot(o, 'final'), { status: 'completed' }),
     'end-once-last': endOnceLast,
     'end-completed': (o) => fields('end', lastEnd(o), { status: 'completed' }),
   },
@@ -52,13 +62,16 @@ export const ASSERTIONS = {
     'tool-call-before-approval': (o) => {
       const call = o.events.findIndex((event) => event.kind === 'tool_call')
       const approval = o.events.findIndex((event) => event.kind === 'approval_required')
-      if (call < 0 || approval < 0) return `tool_call at events[${call}], approval_required at events[${approval}]`
+      if (call < 0 || approval < 0)
+        return `tool_call at events[${call}], approval_required at events[${approval}]`
       return call < approval
         ? undefined
         : `tool_call at events[${call}] follows approval_required at events[${approval}]`
     },
     'args-preview-limit': (o) => {
-      const lengths = ofKind(o, 'approval_required').map((event) => [...String(event.argsPreview)].length)
+      const lengths = ofKind(o, 'approval_required').map(
+        (event) => [...String(event.argsPreview)].length,
+      )
       if (lengths.length === 0) return 'no approval_required event'
       const over = lengths.find((length) => length > 2000)
       return over === undefined ? undefined : `argsPreview has ${over} characters, limit 2000`
@@ -89,10 +102,15 @@ export const ASSERTIONS = {
   },
   'receiver-send-failure': {
     'no-second-delta': (o) =>
-      joined(o, 'text_delta').includes('second') ? 'text_delta "second" reached the closed receiver' : undefined,
+      joined(o, 'text_delta').includes('second')
+        ? 'text_delta "second" reached the closed receiver'
+        : undefined,
     'no-end': (o) => (ofKind(o, 'end').length ? 'end reached the closed receiver' : undefined),
     'final-cancelled': (o) =>
-      fields('snapshot final', snapshot(o, 'final'), { status: 'cancelled', cancelRequested: true }),
+      fields('snapshot final', snapshot(o, 'final'), {
+        status: 'cancelled',
+        cancelRequested: true,
+      }),
     'dispatches-empty': (o) => equal('dispatches', o.dispatches, []),
     'model-requests-1': (o) => equal('modelRequests', o.modelRequests, 1),
   },
@@ -101,7 +119,8 @@ export const ASSERTIONS = {
     dispatches: (o) => equal('dispatches', o.dispatches, ['call-r1', 'call-r2']),
     'end-once-last': endOnceLast,
     'end-completed': (o) => fields('end', lastEnd(o), { status: 'completed', exhausted: true }),
-    'final-completed': (o) => fields('snapshot final', snapshot(o, 'final'), { status: 'completed', exhausted: true }),
+    'final-completed': (o) =>
+      fields('snapshot final', snapshot(o, 'final'), { status: 'completed', exhausted: true }),
   },
 }
 
@@ -109,13 +128,16 @@ export const ASSERTIONS = {
 export function checkExecutable(executable, scenarioIds) {
   if (!Array.isArray(executable) || executable.length === 0)
     throw new Error('scenarios.json executable must be nonempty')
-  if (new Set(executable).size !== executable.length) throw new Error('scenarios.json executable has duplicate ids')
+  if (new Set(executable).size !== executable.length)
+    throw new Error('scenarios.json executable has duplicate ids')
   for (const id of executable)
     if (!scenarioIds.includes(id)) throw new Error(`executable scenario ${id} is not defined`)
   for (const id of Object.keys(ASSERTIONS)) {
-    if (!executable.includes(id)) throw new Error(`assertions exist for non-executable scenario ${id}`)
+    if (!executable.includes(id))
+      throw new Error(`assertions exist for non-executable scenario ${id}`)
   }
-  for (const id of executable) if (!ASSERTIONS[id]) throw new Error(`executable scenario ${id} has no assertions`)
+  for (const id of executable)
+    if (!ASSERTIONS[id]) throw new Error(`executable scenario ${id} has no assertions`)
 }
 
 const OBSERVATION = {
@@ -148,7 +170,10 @@ const OBSERVATION = {
 /** Checks one runner document's envelope; scenario ids must be exactly `executable`. Returns its scenarios. */
 export function checkRunnerOutput(output, backend, executable) {
   const label = `${backend} scenario output`
-  if (!isObject(output) || Object.keys(output).some((key) => !['backend', 'scenarios'].includes(key))) {
+  if (
+    !isObject(output) ||
+    Object.keys(output).some((key) => !['backend', 'scenarios'].includes(key))
+  ) {
     throw new Error(`${label}: expected {backend,scenarios}`)
   }
   if (output.backend !== backend) throw new Error(`${label}: backend is ${show(output.backend)}`)
@@ -199,7 +224,8 @@ const BOUNDARY = /(<<<(?:END_)?TOOL_RESULT_)[0-9a-f]{12}/g
 const unbound = (value) => {
   if (typeof value === 'string') return value.replace(BOUNDARY, '$1<B>')
   if (Array.isArray(value)) return value.map(unbound)
-  if (isObject(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, unbound(item)]))
+  if (isObject(value))
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, unbound(item)]))
   return value
 }
 
@@ -230,14 +256,16 @@ export function normalize(observation) {
   })
 }
 
-const step = (path, key) => (/^[A-Za-z_$][\w$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`)
+const step = (path, key) =>
+  /^[A-Za-z_$][\w$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`
 
 /** First path where two JSON values differ (`$.events[3].text`) with both sides, or `undefined` when equal. */
 export function firstDifference(left, right, path = '$') {
   if (Array.isArray(left) && Array.isArray(right)) {
     for (let index = 0; index < Math.max(left.length, right.length); index++) {
       const at = `${path}[${index}]`
-      if (index >= left.length || index >= right.length) return { path: at, left: left[index], right: right[index] }
+      if (index >= left.length || index >= right.length)
+        return { path: at, left: left[index], right: right[index] }
       const difference = firstDifference(left[index], right[index], at)
       if (difference) return difference
     }
@@ -271,10 +299,13 @@ export function checkKnownDrift(knownDrift, executable) {
     if (keys !== 'backend,check,note,scenario' && keys !== 'note,path,scenario') {
       throw new Error(`${label}: expected {scenario,backend,check,note} or {scenario,path,note}`)
     }
-    if (!executable.includes(entry.scenario)) throw new Error(`${label}: unknown scenario ${show(entry.scenario)}`)
-    if (typeof entry.note !== 'string' || entry.note.trim() === '') throw new Error(`${label}: note is required`)
+    if (!executable.includes(entry.scenario))
+      throw new Error(`${label}: unknown scenario ${show(entry.scenario)}`)
+    if (typeof entry.note !== 'string' || entry.note.trim() === '')
+      throw new Error(`${label}: note is required`)
     if (entry.path === undefined) {
-      if (!BACKENDS.includes(entry.backend)) throw new Error(`${label}: unknown backend ${show(entry.backend)}`)
+      if (!BACKENDS.includes(entry.backend))
+        throw new Error(`${label}: unknown backend ${show(entry.backend)}`)
       if (!Object.hasOwn(ASSERTIONS[entry.scenario], entry.check)) {
         throw new Error(`${label}: unknown check ${show(entry.check)}`)
       }
@@ -315,7 +346,10 @@ export function judgeScenarios({ executable, knownDrift, scenarios }) {
         )
       }
     }
-    const difference = firstDifference(normalize(scenarios.native[id]), normalize(scenarios.worker[id]))
+    const difference = firstDifference(
+      normalize(scenarios.native[id]),
+      normalize(scenarios.worker[id]),
+    )
     if (difference) {
       settle(
         (entry) => entry.scenario === id && entry.path === difference.path,

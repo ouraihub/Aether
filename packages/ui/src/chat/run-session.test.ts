@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createFakePorts, KitClientError } from '../ports'
-import type { ConversationClient, Conversation, RunAccepted, RunEvent, RunRequest, Turn } from '../ports'
+import type {
+  ConversationClient,
+  Conversation,
+  RunAccepted,
+  RunEvent,
+  RunRequest,
+  Turn,
+} from '../ports'
 import { RunSession, type RunBase } from './run-session.svelte'
 
 const sourceModel = { endpointId: 'original-endpoint', modelId: 'original-model' }
@@ -42,7 +49,14 @@ function stored(overrides: Partial<Turn> = {}): Turn {
 
 function conversation(turns: Turn[], selectedTurnId: string | null = 'source'): Conversation {
   return {
-    summary: { id: 'conversation', title: 'Conversation', scope: null, createdAt: 0, updatedAt: 0, selectedTurnId },
+    summary: {
+      id: 'conversation',
+      title: 'Conversation',
+      scope: null,
+      createdAt: 0,
+      updatedAt: 0,
+      selectedTurnId,
+    },
     turns,
   }
 }
@@ -64,7 +78,11 @@ function deferred<T>(): Deferred<T> {
 }
 
 function setup(withHistory = true) {
-  const runs: { request: RunRequest; emit: (event: RunEvent) => void; accepted: Deferred<RunAccepted> }[] = []
+  const runs: {
+    request: RunRequest
+    emit: (event: RunEvent) => void
+    accepted: Deferred<RunAccepted>
+  }[] = []
   const get = vi.fn<ConversationClient['get']>(() => Promise.resolve(conversation([stored()])))
   const cancel = vi.fn(() => Promise.resolve())
   const approve = vi.fn(() => Promise.resolve())
@@ -118,7 +136,12 @@ describe('RunSession candidate replies', () => {
   it('keeps the source and its question when retrying with its original model snapshot', async () => {
     const { session, runs, get } = setup()
     const source = stored({ parentId: 'parent' })
-    const candidate = stored({ id: 'candidate', parentId: 'parent', supersedesId: source.id, text: 'New answer' })
+    const candidate = stored({
+      id: 'candidate',
+      parentId: 'parent',
+      supersedesId: source.id,
+      text: 'New answer',
+    })
     session.show('conversation', [source], source.id)
     get.mockResolvedValue(conversation([source, candidate]))
     const retried = session.retry(base, source.id)
@@ -161,7 +184,11 @@ describe('RunSession candidate replies', () => {
     })
     required(runs[0]).accepted.resolve(accepted)
     await retried
-    expect(session.turns[1]).toMatchObject({ id: 'candidate', questionId: 'question', ...pickedModel })
+    expect(session.turns[1]).toMatchObject({
+      id: 'candidate',
+      questionId: 'question',
+      ...pickedModel,
+    })
   })
 
   it('translates the original reply with the real instruction and original model', async () => {
@@ -202,7 +229,11 @@ describe('RunSession candidate replies', () => {
     const { session, runs } = setup()
     session.show('conversation', [stored({ kind: 'translation' })], 'source')
     const retried = session.retry(base, 'source')
-    expect(session.turns[1]).toMatchObject({ kind: 'translation', questionId: 'question', supersedesId: 'source' })
+    expect(session.turns[1]).toMatchObject({
+      kind: 'translation',
+      questionId: 'question',
+      supersedesId: 'source',
+    })
     required(runs[0]).accepted.resolve(accepted)
     await retried
   })
@@ -260,10 +291,16 @@ describe('RunSession candidate replies', () => {
     const source = stored()
     session.show('conversation', [source], source.id)
     const retry = session.retry(base, source.id)
-    required(runs[0]).accepted.reject(new KitClientError({ code: 'needs_config', message: 'Source model removed' }))
+    required(runs[0]).accepted.reject(
+      new KitClientError({ code: 'needs_config', message: 'Source model removed' }),
+    )
     expect(await retry).toBe(false)
     expect(session.actionError).toBe('needs_config')
-    expect(session.turns[0]).toMatchObject({ id: source.id, text: source.text, questionId: source.questionId })
+    expect(session.turns[0]).toMatchObject({
+      id: source.id,
+      text: source.text,
+      questionId: source.questionId,
+    })
     expect(session.turns).toHaveLength(1)
     expect(session.selectedTurnId).toBe(source.id)
     expect(get).not.toHaveBeenCalled()
@@ -273,11 +310,19 @@ describe('RunSession candidate replies', () => {
     expect(session.actionError).toBeNull()
     required(runs[1]).accepted.resolve(accepted)
     await translation
-    required(runs[1]).emit({ kind: 'end', status: 'failed', error: { code: 'upstream', message: 'Provider failed' } })
+    required(runs[1]).emit({
+      kind: 'end',
+      status: 'failed',
+      error: { code: 'upstream', message: 'Provider failed' },
+    })
     await vi.waitFor(() => expect(session.running).toBe(false))
     expect(session.actionError).toBeNull()
     expect(session.turns[1]).toMatchObject({ status: 'failed', error: 'upstream' })
-    expect(session.turns[0]).toMatchObject({ id: source.id, text: source.text, questionId: source.questionId })
+    expect(session.turns[0]).toMatchObject({
+      id: source.id,
+      text: source.text,
+      questionId: source.questionId,
+    })
     expect(session.selectedTurnId).toBe(source.id)
   })
 
@@ -286,7 +331,9 @@ describe('RunSession candidate replies', () => {
     const source = stored()
     session.show('conversation', [source], source.id)
     const translated = session.translate(base, source.id, 'French')
-    required(runs[0]).accepted.reject(new KitClientError({ code: 'upstream', message: 'Provider unavailable' }))
+    required(runs[0]).accepted.reject(
+      new KitClientError({ code: 'upstream', message: 'Provider unavailable' }),
+    )
     expect(await translated).toBe(false)
     expect(session.actionError).toBe('upstream')
     expect(session.turns).toHaveLength(1)
@@ -313,18 +360,28 @@ describe('RunSession candidate replies', () => {
     const { session, runs } = setup()
     session.show('conversation', [stored()], 'source')
     const sent = session.send(base, 'New question')
-    required(runs[0]).accepted.reject(new KitClientError({ code: 'upstream', message: 'Unavailable' }))
+    required(runs[0]).accepted.reject(
+      new KitClientError({ code: 'upstream', message: 'Unavailable' }),
+    )
     expect(await sent).toBe(false)
     expect(session.turns[1]).toMatchObject({ persisted: false, status: 'failed' })
     expect(session.selectedTurnId).toBe('source')
     expect(session.actionError).toBeNull()
     const localId = required(session.turns[1]).id
     const retry = session.retry(base, localId)
-    expect(required(runs[1]).request).toMatchObject({ replyToId: 'source', input: 'New question', regenerate: false })
+    expect(required(runs[1]).request).toMatchObject({
+      replyToId: 'source',
+      input: 'New question',
+      regenerate: false,
+    })
     expect(required(runs[1]).request.retryTurnId).toBeUndefined()
     required(runs[1]).accepted.resolve(accepted)
     await retry
-    expect(session.turns[2]).toMatchObject({ id: 'candidate', questionId: 'candidate', persisted: true })
+    expect(session.turns[2]).toMatchObject({
+      id: 'candidate',
+      questionId: 'candidate',
+      persisted: true,
+    })
   })
 
   it('ignores delayed acceptance and history refresh when another conversation is shown', async () => {
@@ -397,7 +454,9 @@ describe('RunSession candidate replies', () => {
   it('uses the picked model for an unaccepted local reply without a source model snapshot', async () => {
     const { session, runs } = setup(false)
     const sent = session.send({ ...base, model: null }, 'Question')
-    required(runs[0]).accepted.reject(new KitClientError({ code: 'upstream', message: 'Unavailable' }))
+    required(runs[0]).accepted.reject(
+      new KitClientError({ code: 'upstream', message: 'Unavailable' }),
+    )
     await sent
     const retried = session.retry(base, required(session.turns[0]).id)
     expect(required(runs[1]).request.model).toEqual(pickedModel)
@@ -426,18 +485,26 @@ describe('RunSession candidate replies', () => {
     await vi.waitFor(() => expect(session.running).toBe(false))
     const sent = session.send(base, 'Look', false, [{ mime: 'image/png', data: 'AAAA' }])
     expect(required(runs[1]).request.images).toEqual([{ mime: 'image/png', data: 'AAAA' }])
-    expect(session.turns.at(-1)?.images).toEqual([{ mime: 'image/png', url: 'data:image/png;base64,AAAA' }])
+    expect(session.turns.at(-1)?.images).toEqual([
+      { mime: 'image/png', url: 'data:image/png;base64,AAAA' },
+    ])
     const hosted = { mime: 'image/png', url: '/images/0' }
     get.mockResolvedValue(conversation([stored(), stored({ id: 'candidate', images: [hosted] })]))
     required(runs[1]).accepted.resolve(accepted)
     await sent
     required(runs[1]).emit({ kind: 'end', status: 'completed' })
-    await vi.waitFor(() => expect(session.turns.find((turn) => turn.id === 'candidate')?.images).toEqual([hosted]))
+    await vi.waitFor(() =>
+      expect(session.turns.find((turn) => turn.id === 'candidate')?.images).toEqual([hosted]),
+    )
   })
 
   it('retries a stored source by id only and an unstored one by resending its images', async () => {
     const { session, runs } = setup()
-    session.show('conversation', [stored({ images: [{ mime: 'image/png', url: '/images/0' }] })], 'source')
+    session.show(
+      'conversation',
+      [stored({ images: [{ mime: 'image/png', url: '/images/0' }] })],
+      'source',
+    )
     void session.retry(base, 'source')
     expect(required(runs[0]).request).toMatchObject({ retryTurnId: 'source' })
     expect('images' in required(runs[0]).request).toBe(false)
@@ -445,7 +512,9 @@ describe('RunSession candidate replies', () => {
 
     const local = setup(false)
     const sent = local.session.send(base, 'Look', false, [{ mime: 'image/gif', data: 'R0lG' }])
-    required(local.runs[0]).accepted.reject(new KitClientError({ code: 'upstream', message: 'Unavailable' }))
+    required(local.runs[0]).accepted.reject(
+      new KitClientError({ code: 'upstream', message: 'Unavailable' }),
+    )
     await sent
     void local.session.retry(base, required(local.session.turns[0]).id)
     expect(required(local.runs[1]).request.images).toEqual([{ mime: 'image/gif', data: 'R0lG' }])
@@ -453,12 +522,30 @@ describe('RunSession candidate replies', () => {
 
   it('takes the streamed cost and sums known costs per currency', async () => {
     const { session, runs } = setup(false)
-    session.show(null, [stored({ cost: { amount: 0.5, currency: 'USD' } }), stored({ id: 'b', cost: null })], 'b')
+    session.show(
+      null,
+      [stored({ cost: { amount: 0.5, currency: 'USD' } }), stored({ id: 'b', cost: null })],
+      'b',
+    )
     void session.send(base, 'Priced')
-    const usage = { inputTokens: 10, outputTokens: 2, cacheReadTokens: null, cacheWriteTokens: null }
-    required(runs[0]).emit({ kind: 'usage', ...usage, reasoningTokens: null, cost: { amount: 1, currency: 'CNY' } })
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 2,
+      cacheReadTokens: null,
+      cacheWriteTokens: null,
+    }
+    required(runs[0]).emit({
+      kind: 'usage',
+      ...usage,
+      reasoningTokens: null,
+      cost: { amount: 1, currency: 'CNY' },
+    })
     expect(session.turns.at(-1)?.cost).toEqual({ amount: 1, currency: 'CNY' })
-    session.turns.push({ ...required(session.turns.at(-1)), id: 'c', cost: { amount: 0.25, currency: 'USD' } })
+    session.turns.push({
+      ...required(session.turns.at(-1)),
+      id: 'c',
+      cost: { amount: 0.25, currency: 'USD' },
+    })
     expect(session.cumulativeCost).toEqual([
       { amount: 0.75, currency: 'USD' },
       { amount: 1, currency: 'CNY' },

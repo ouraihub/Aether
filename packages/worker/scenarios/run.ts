@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { isContract } from '@ouraihub/aether-contracts'
-import type { Approval, ModelSave, RunAccepted, RunEvent, RunRequest, RunSnapshot } from '@ouraihub/aether-contracts'
+import type {
+  Approval,
+  ModelSave,
+  RunAccepted,
+  RunEvent,
+  RunRequest,
+  RunSnapshot,
+} from '@ouraihub/aether-contracts'
 import type { OutboundHttp } from '@ouraihub/aether-core/ports'
 import { isRecord } from '@ouraihub/aether-core/guard'
 import { validateArguments } from '@ouraihub/aether-core/schema'
@@ -35,7 +42,12 @@ interface Fixtures {
   model: { protocol: 'openai-chat'; modelId: string; contextWindow: number; maxOutput: number }
   tools: Record<
     string,
-    { description: string; parameters: Record<string, unknown>; effect: ToolSpec['effect']; output: string }
+    {
+      description: string
+      parameters: Record<string, unknown>
+      effect: ToolSpec['effect']
+      output: string
+    }
   >
   scenarios: Record<string, Scenario>
 }
@@ -54,7 +66,8 @@ function assertReplyParts(value: unknown): asserts value is ReplyParts {
   for (const key of ['reasoning', 'text']) {
     const parts: unknown = value[key]
     assert.ok(
-      parts === undefined || (Array.isArray(parts) && parts.every((part: unknown) => typeof part === 'string')),
+      parts === undefined ||
+        (Array.isArray(parts) && parts.every((part: unknown) => typeof part === 'string')),
       `Invalid reply ${key}`,
     )
   }
@@ -62,7 +75,10 @@ function assertReplyParts(value: unknown): asserts value is ReplyParts {
   assert.ok(Array.isArray(value.calls), 'Invalid reply calls')
   for (const call of value.calls) {
     assert.ok(
-      isRecord(call) && typeof call.id === 'string' && typeof call.name === 'string' && isRecord(call.args),
+      isRecord(call) &&
+        typeof call.id === 'string' &&
+        typeof call.name === 'string' &&
+        isRecord(call.args),
       'Invalid model tool call',
     )
     for (const argument of Object.values(call.args)) {
@@ -81,14 +97,22 @@ function assertReplyParts(value: unknown): asserts value is ReplyParts {
 }
 
 function assertFixtures(value: unknown): asserts value is Fixtures {
-  assert.ok(isRecord(value) && typeof value.owner === 'string' && value.owner.length > 0, 'Invalid fixture owner')
   assert.ok(
-    isRecord(value.model) && value.model.protocol === 'openai-chat' && typeof value.model.modelId === 'string',
+    isRecord(value) && typeof value.owner === 'string' && value.owner.length > 0,
+    'Invalid fixture owner',
+  )
+  assert.ok(
+    isRecord(value.model) &&
+      value.model.protocol === 'openai-chat' &&
+      typeof value.model.modelId === 'string',
     'Invalid fixture model',
   )
   for (const key of ['contextWindow', 'maxOutput']) {
     const limit: unknown = value.model[key]
-    assert.ok(typeof limit === 'number' && Number.isSafeInteger(limit) && limit > 0, `Invalid model ${key}`)
+    assert.ok(
+      typeof limit === 'number' && Number.isSafeInteger(limit) && limit > 0,
+      `Invalid model ${key}`,
+    )
   }
   assert.ok(isRecord(value.tools), 'Invalid fixture tools')
   for (const tool of Object.values(value.tools)) {
@@ -112,12 +136,16 @@ function assertFixtures(value: unknown): asserts value is Fixtures {
     )
     assert.ok(
       scenario.maxRounds === undefined ||
-        (typeof scenario.maxRounds === 'number' && Number.isSafeInteger(scenario.maxRounds) && scenario.maxRounds > 0),
+        (typeof scenario.maxRounds === 'number' &&
+          Number.isSafeInteger(scenario.maxRounds) &&
+          scenario.maxRounds > 0),
       'Invalid maxRounds',
     )
     for (const tool of scenario.tools) {
       assert.ok(
-        isRecord(tool) && typeof tool.name === 'string' && ['auto', 'ask', 'deny'].includes(String(tool.approval)),
+        isRecord(tool) &&
+          typeof tool.name === 'string' &&
+          ['auto', 'ask', 'deny'].includes(String(tool.approval)),
         'Invalid scenario tool',
       )
     }
@@ -156,7 +184,9 @@ function deltas(parts: ReplyParts): Record<string, unknown>[] {
               Object.fromEntries(
                 Object.entries(call.args).map(([key, value]) => [
                   key,
-                  typeof value === 'string' ? value : value.prefix + value.repeat.repeat(value.count),
+                  typeof value === 'string'
+                    ? value
+                    : value.prefix + value.repeat.repeat(value.count),
                 ]),
               ),
             ),
@@ -222,7 +252,8 @@ async function run(id: string, scenario: Scenario, fixtures: Fixtures): Promise<
             if (init.signal?.aborted) abort()
           },
           async pull() {
-            if (reply.gate && index === 1) await barrier(`model gate ${reply.gate}`, gates.get(reply.gate)!.promise)
+            if (reply.gate && index === 1)
+              await barrier(`model gate ${reply.gate}`, gates.get(reply.gate)!.promise)
             if (closed) return
             if (index < frames.length) {
               controller.enqueue(
@@ -260,8 +291,14 @@ async function run(id: string, scenario: Scenario, fixtures: Fixtures): Promise<
     scopes: ['*'],
   }
   const documents = new MemoryDocuments()
-  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
-  const credentials = createCredentialPort({ currentKeyId: 'scenario', keys: new Map([['scenario', key]]) })
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+    'encrypt',
+    'decrypt',
+  ])
+  const credentials = createCredentialPort({
+    currentKeyId: 'scenario',
+    keys: new Map([['scenario', key]]),
+  })
   const providers = new ProviderService({
     documents,
     credentials,
@@ -287,7 +324,12 @@ async function run(id: string, scenario: Scenario, fixtures: Fixtures): Promise<
   const saved = await providers.save(actor, {
     name: 'Scenario',
     endpoints: [
-      { slug: 'scenario', protocol: fixtures.model.protocol, baseUrl: 'https://scenario.example/v1', models: [model] },
+      {
+        slug: 'scenario',
+        protocol: fixtures.model.protocol,
+        baseUrl: 'https://scenario.example/v1',
+        models: [model],
+      },
     ],
   })
   const endpoint = saved[0]?.endpoints[0]
@@ -355,7 +397,13 @@ async function run(id: string, scenario: Scenario, fixtures: Fixtures): Promise<
       headers: { 'x-aether-actor': actorHeader, 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
-  const input: RunRequest = { purpose: 'chat', input: scenario.input, skills: [], regenerate: false, language: 'en' }
+  const input: RunRequest = {
+    purpose: 'chat',
+    input: scenario.input,
+    skills: [],
+    regenerate: false,
+    language: 'en',
+  }
   const acceptedResponse = await barrier(
     'backend-accepted',
     coordinator.fetch(
@@ -366,7 +414,8 @@ async function run(id: string, scenario: Scenario, fixtures: Fixtures): Promise<
       }),
     ),
   )
-  if (acceptedResponse.status !== 202) throw new Error(`Acceptance failed: ${await acceptedResponse.text()}`)
+  if (acceptedResponse.status !== 202)
+    throw new Error(`Acceptance failed: ${await acceptedResponse.text()}`)
   const accepted: unknown = await acceptedResponse.json()
   assert.ok(isContract('RunAccepted', accepted), 'Invalid RunAccepted response')
   const normalizedAccepted: RunAccepted = {
@@ -377,7 +426,8 @@ async function run(id: string, scenario: Scenario, fixtures: Fixtures): Promise<
   }
   if (id !== 'acceptance-response-race') observation.accepted.push(normalizedAccepted)
   const response = await barrier('receiver-subscribed', coordinator.fetch(request('/events')))
-  if (!response.ok || !response.body) throw new Error(`Subscription failed: ${await response.text()}`)
+  if (!response.ok || !response.body)
+    throw new Error(`Subscription failed: ${await response.text()}`)
   const reader = response.body.getReader()
   const end = Promise.withResolvers<void>()
   const first = Promise.withResolvers<void>()
@@ -399,7 +449,8 @@ async function run(id: string, scenario: Scenario, fixtures: Fixtures): Promise<
         assert.ok(isContract('RunEvent', event), 'Invalid RunEvent frame')
         observation.events.push(event)
         if (event.kind === 'end') end.resolve()
-        if (event.kind === 'text_delta' && event.text === scenario.replies[0]?.text?.[0]) first.resolve()
+        if (event.kind === 'text_delta' && event.text === scenario.replies[0]?.text?.[0])
+          first.resolve()
         if (event.kind === 'approval_required') approval.resolve(event)
       }
     }
@@ -424,7 +475,10 @@ async function run(id: string, scenario: Scenario, fixtures: Fixtures): Promise<
     observation.marks.push('accepted-delivered')
   } else if (id === 'tool-approval-allow') {
     const event = await barrier('approval-required', approval.promise)
-    observation.marks.push('approval-required', `dispatches-before-approval:${observation.dispatches.length}`)
+    observation.marks.push(
+      'approval-required',
+      `dispatches-before-approval:${observation.dispatches.length}`,
+    )
     for (const op of ['approve', 'approve-again']) {
       const reply = await barrier(
         op,
@@ -435,7 +489,11 @@ async function run(id: string, scenario: Scenario, fixtures: Fixtures): Promise<
         const error: unknown = await reply.json()
         assert.ok(isContract('KitError', error), 'Invalid approval error response')
         const reason = error.details?.reason
-        observation.replies.push({ op, status: error.code, ...(typeof reason === 'string' ? { reason } : {}) })
+        observation.replies.push({
+          op,
+          status: error.code,
+          ...(typeof reason === 'string' ? { reason } : {}),
+        })
       }
     }
     await barrier('end-received', end.promise)
@@ -478,5 +536,7 @@ const fixtures: unknown = JSON.parse(
 )
 assertFixtures(fixtures)
 const scenarios: Record<string, Observation> = {}
-for (const [id, scenario] of Object.entries(fixtures.scenarios)) scenarios[id] = await run(id, scenario, fixtures)
+for (const [id, scenario] of Object.entries(fixtures.scenarios)) {
+  scenarios[id] = await run(id, scenario, fixtures)
+}
 process.stdout.write(`${JSON.stringify({ backend: 'worker', scenarios })}\n`)

@@ -39,7 +39,9 @@ async function call<T>(command: string, args: Record<string, unknown> = {}): Pro
       error !== null &&
       typeof (error as Partial<KitError>).code === 'string' &&
       typeof (error as Partial<KitError>).message === 'string'
-    throw new KitClientError(isKitError ? (error as KitError) : { code: 'internal', message: String(error) })
+    throw new KitClientError(
+      isKitError ? (error as KitError) : { code: 'internal', message: String(error) },
+    )
   }
 }
 
@@ -103,14 +105,19 @@ export function createTauriPorts(
     const search: SearchPort = {
       settings: (capability, o) => searchCall('search_settings', { capability }, o),
       save: (input, o) => searchCall('search_save', { input }, o),
-      setDefault: (capability, provider, o) => searchCall('search_set_default', { capability, provider }, o),
+      setDefault: (capability, provider, o) =>
+        searchCall('search_set_default', { capability, provider }, o),
       savePreferences: (input, o) => searchCall('search_save_preferences', { input }, o),
       saveKey: (capability, provider, value, keyId, o) =>
         searchCall('search_save_key', { capability, provider, value, keyId: keyId ?? null }, o),
       removeKey: (capability, provider, keyId, o) =>
         searchCall('search_remove_key', { capability, provider, keyId }, o),
       reveal: (capability, provider, keyId, currentPassword, o) =>
-        searchCall('search_reveal', { capability, provider, keyId, currentPassword: currentPassword ?? null }, o),
+        searchCall(
+          'search_reveal',
+          { capability, provider, keyId, currentPassword: currentPassword ?? null },
+          o,
+        ),
       check: (capability, provider, o) => searchCall('search_check', { capability, provider }, o),
       search: (query, o) => searchCall('search_query', { query }, o),
       fetch: (url, o) => searchCall('search_fetch', { url }, o),
@@ -183,7 +190,8 @@ export function createTauriPorts(
       get: (id) => call('skills_get', { id }),
       save: (input) => call('skills_save', { input }),
       preview: (source) => call('skills_preview', { source }),
-      install: (source, confirmedDigest, replace) => call('skills_install', { source, confirmedDigest, replace }),
+      install: (source, confirmedDigest, replace) =>
+        call('skills_install', { source, confirmedDigest, replace }),
       duplicate: (id, newName) => call('skills_duplicate', { id, newName }),
       reorder: (ids) => call('skills_reorder', { ids }),
       remove: (id) => call('skills_delete', { id }),
@@ -218,7 +226,9 @@ export function createTauriPorts(
           let ended = false
           const cancel = () => {
             if (accepted && !ended)
-              void call('skills_authoring_cancel', { sessionId, runId: accepted.runId }).catch(() => undefined)
+              void call('skills_authoring_cancel', { sessionId, runId: accepted.runId }).catch(
+                () => undefined,
+              )
           }
           signal?.addEventListener('abort', cancel, { once: true })
           const channel = new Channel<RunEvent>((event) => {
@@ -230,7 +240,12 @@ export function createTauriPorts(
             onEvent(event)
           })
           try {
-            accepted = await call<RunAccepted>('skills_authoring_send', { sessionId, input, model, onEvent: channel })
+            accepted = await call<RunAccepted>('skills_authoring_send', {
+              sessionId,
+              input,
+              model,
+              onEvent: channel,
+            })
             if (signal?.aborted) cancel()
             return accepted
           } catch (error) {
@@ -245,7 +260,8 @@ export function createTauriPorts(
         cancel: async (sessionId, runId) => {
           await call('skills_authoring_cancel', { sessionId, runId })
         },
-        prepare: (sessionId, o) => sourceCall<PreparedSkill>('skills_authoring_prepare', { sessionId }, o),
+        prepare: (sessionId, o) =>
+          sourceCall<PreparedSkill>('skills_authoring_prepare', { sessionId }, o),
         close: async (sessionId) => {
           await call('skills_authoring_close', { sessionId })
         },

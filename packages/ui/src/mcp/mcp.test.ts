@@ -24,7 +24,9 @@ describe('McpClientSettings', () => {
       current = { ...current, enabled: input.enabled, trusted: input.trusted }
       return Promise.resolve([current])
     })
-    const tools = [{ name: 'echo', description: 'Echoes', readOnly: true, approval: 'ask' as const }]
+    const tools = [
+      { name: 'echo', description: 'Echoes', readOnly: true, approval: 'ask' as const },
+    ]
     const refresh = vi.fn(() => {
       current = { ...current, tools }
       return Promise.resolve(tools)
@@ -44,8 +46,12 @@ describe('McpClientSettings', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Add server' }))
     await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Fake' } })
     await fireEvent.input(screen.getByLabelText('Tool prefix'), { target: { value: 'fake' } })
-    await fireEvent.input(screen.getByLabelText('URL'), { target: { value: 'http://127.0.0.1:1/mcp' } })
-    await fireEvent.input(screen.getByLabelText(/Headers/), { target: { value: 'Authorization: Bearer x' } })
+    await fireEvent.input(screen.getByLabelText('URL'), {
+      target: { value: 'http://127.0.0.1:1/mcp' },
+    })
+    await fireEvent.input(screen.getByLabelText(/Headers/), {
+      target: { value: 'Authorization: Bearer x' },
+    })
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
     expect(save.mock.calls[0]?.[0]).toEqual({
@@ -83,7 +89,9 @@ describe('McpClientSettings', () => {
       transport: { kind: 'stdio', command: 'npx', args: ['-y', 'srv'] },
       secretKeys: ['OLD_TOKEN'],
     })
-    const save = vi.fn<(input: ServerSave) => Promise<ServerDto[]>>(() => Promise.resolve([current]))
+    const save = vi.fn<(input: ServerSave) => Promise<ServerDto[]>>(() =>
+      Promise.resolve([current]),
+    )
     const ports = createFakePorts({ mcpClient: { list: () => Promise.resolve([current]), save } })
     const notify = { toast: vi.fn(), confirm: vi.fn(() => Promise.resolve(true)) }
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -95,8 +103,12 @@ describe('McpClientSettings', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
     expect(screen.getByLabelText('Command')).toHaveProperty('value', 'npx')
     expect(screen.queryByLabelText('URL')).toBeNull()
-    await fireEvent.input(screen.getByLabelText(/Arguments/), { target: { value: '-y\n\nsrv\n--port=1' } })
-    await fireEvent.input(screen.getByLabelText('Working directory'), { target: { value: 'C:\\work' } })
+    await fireEvent.input(screen.getByLabelText(/Arguments/), {
+      target: { value: '-y\n\nsrv\n--port=1' },
+    })
+    await fireEvent.input(screen.getByLabelText('Working directory'), {
+      target: { value: 'C:\\work' },
+    })
     await fireEvent.click(screen.getByRole('switch', { name: /Replace credentials/ }))
     expect(screen.queryByLabelText(/Headers/)).toBeNull()
     await fireEvent.input(screen.getByLabelText(/Environment variables/), {
@@ -108,7 +120,12 @@ describe('McpClientSettings', () => {
       id: 'm1',
       slug: 'fake',
       name: 'Fake',
-      transport: { kind: 'stdio', command: 'npx', args: ['-y', 'srv', '--port=1'], cwd: 'C:\\work' },
+      transport: {
+        kind: 'stdio',
+        command: 'npx',
+        args: ['-y', 'srv', '--port=1'],
+        cwd: 'C:\\work',
+      },
       enabled: false,
       trusted: false,
       allowPrivate: false,
@@ -155,8 +172,12 @@ describe('MCP write-only editor sessions', () => {
     const { notify } = mountClient(save)
     const dialog = await openEditor()
     await fireEvent.click(dialog.getByRole('switch', { name: /Replace credentials/ }))
-    await fireEvent.input(dialog.getByLabelText(/Headers/), { target: { value: 'Authorization: old-input' } })
-    await fireEvent.keyDown(dialog.getByRole('button', { name: 'Connection' }), { key: 'ArrowDown' })
+    await fireEvent.input(dialog.getByLabelText(/Headers/), {
+      target: { value: 'Authorization: old-input' },
+    })
+    await fireEvent.keyDown(dialog.getByRole('button', { name: 'Connection' }), {
+      key: 'ArrowDown',
+    })
     await fireEvent.pointerUp(await screen.findByRole('option', { name: 'Local command (stdio)' }))
     await fireEvent.input(dialog.getByLabelText('Command'), { target: { value: ' npx ' } })
     await fireEvent.input(dialog.getByLabelText(/Arguments/), {
@@ -168,7 +189,9 @@ describe('MCP write-only editor sessions', () => {
     expect(notify.toast).toHaveBeenCalledWith('error', expect.any(String))
     await fireEvent.click(dialog.getByRole('switch', { name: /Replace credentials/ }))
     expect(dialog.getByLabelText(/Environment variables/)).toHaveProperty('value', '')
-    await fireEvent.input(dialog.getByLabelText(/Environment variables/), { target: { value: 'TOKEN=new=value' } })
+    await fireEvent.input(dialog.getByLabelText(/Environment variables/), {
+      target: { value: 'TOKEN=new=value' },
+    })
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1))
     expect(save.mock.calls[0]?.[0].transport).toEqual({
@@ -186,17 +209,27 @@ describe('MCP write-only editor sessions', () => {
       const { notify } = mountClient(save)
       let dialog = await openEditor()
       await fireEvent.click(dialog.getByRole('switch', { name: /Replace credentials/ }))
-      await fireEvent.input(dialog.getByLabelText(/Headers/), { target: { value: 'Authorization: old-secret' } })
+      await fireEvent.input(dialog.getByLabelText(/Headers/), {
+        target: { value: 'Authorization: old-secret' },
+      })
       await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
       await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
       dialog = await openEditor()
       await fireEvent.click(dialog.getByRole('switch', { name: /Replace credentials/ }))
       expect(dialog.getByLabelText(/Headers/)).toHaveProperty('value', '')
-      await fireEvent.input(dialog.getByLabelText(/Headers/), { target: { value: 'Authorization: new-secret' } })
-      if (fail) saving.reject(new KitClientError({ code: 'internal', message: 'old failure', details: {} }))
+      await fireEvent.input(dialog.getByLabelText(/Headers/), {
+        target: { value: 'Authorization: new-secret' },
+      })
+      if (fail)
+        saving.reject(new KitClientError({ code: 'internal', message: 'old failure', details: {} }))
       else saving.resolve([server({ name: 'Old response' })])
       await saving.promise.catch(() => {})
-      await waitFor(() => expect(dialog.getByLabelText(/Headers/)).toHaveProperty('value', 'Authorization: new-secret'))
+      await waitFor(() =>
+        expect(dialog.getByLabelText(/Headers/)).toHaveProperty(
+          'value',
+          'Authorization: new-secret',
+        ),
+      )
       expect(screen.getByRole('dialog')).toBeTruthy()
       expect(screen.queryByText('Old response')).toBeNull()
       expect(notify.toast).not.toHaveBeenCalled()
@@ -210,7 +243,9 @@ describe('MCP write-only editor sessions', () => {
     const { notify } = mountClient(save)
     let dialog = await openEditor()
     await fireEvent.click(dialog.getByRole('switch', { name: /Replace credentials/ }))
-    await fireEvent.input(dialog.getByLabelText(/Headers/), { target: { value: 'Authorization: retry-secret' } })
+    await fireEvent.input(dialog.getByLabelText(/Headers/), {
+      target: { value: 'Authorization: retry-secret' },
+    })
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(notify.toast).toHaveBeenCalled())
     expect(dialog.getByLabelText(/Headers/)).toHaveProperty('value', 'Authorization: retry-secret')
@@ -232,7 +267,9 @@ describe('MCP write-only editor sessions', () => {
     await fireEvent.input(input, { target: { value: 'Authorization: same' } })
     saving.resolve([server()])
     await saving.promise
-    await waitFor(() => expect(dialog.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false))
+    await waitFor(() =>
+      expect(dialog.getByRole('button', { name: 'Save' })).toHaveProperty('disabled', false),
+    )
     expect(input).toHaveProperty('value', 'Authorization: same')
   })
 
@@ -241,7 +278,9 @@ describe('MCP write-only editor sessions', () => {
     mountClient(() => saving.promise)
     const dialog = await openEditor()
     await fireEvent.click(dialog.getByRole('switch', { name: /Replace credentials/ }))
-    await fireEvent.input(dialog.getByLabelText(/Headers/), { target: { value: 'Authorization: saved-secret' } })
+    await fireEvent.input(dialog.getByLabelText(/Headers/), {
+      target: { value: 'Authorization: saved-secret' },
+    })
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
     await fireEvent.input(dialog.getByLabelText('Name'), { target: { value: 'New local name' } })
     saving.resolve([server({ secretKeys: ['Authorization'] })])
@@ -254,15 +293,24 @@ describe('MCP write-only editor sessions', () => {
 
   it('does not update a different target or expose old secrets when its save resolves', async () => {
     const saving = Promise.withResolvers<ServerDto[]>()
-    mountClient(() => saving.promise, [server(), server({ id: 'm2', name: 'Other', slug: 'other' })])
+    mountClient(
+      () => saving.promise,
+      [server(), server({ id: 'm2', name: 'Other', slug: 'other' })],
+    )
     await screen.findByRole('listitem', { name: 'Fake' })
-    await fireEvent.click(within(screen.getByRole('listitem', { name: 'Fake' })).getByRole('button', { name: 'Edit' }))
+    await fireEvent.click(
+      within(screen.getByRole('listitem', { name: 'Fake' })).getByRole('button', { name: 'Edit' }),
+    )
     let dialog = within(screen.getByRole('dialog'))
     await fireEvent.click(dialog.getByRole('switch', { name: /Replace credentials/ }))
-    await fireEvent.input(dialog.getByLabelText(/Headers/), { target: { value: 'Authorization: old-secret' } })
+    await fireEvent.input(dialog.getByLabelText(/Headers/), {
+      target: { value: 'Authorization: old-secret' },
+    })
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
     await fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }))
-    await fireEvent.click(within(screen.getByRole('listitem', { name: 'Other' })).getByRole('button', { name: 'Edit' }))
+    await fireEvent.click(
+      within(screen.getByRole('listitem', { name: 'Other' })).getByRole('button', { name: 'Edit' }),
+    )
     dialog = within(screen.getByRole('dialog'))
     await fireEvent.click(dialog.getByRole('switch', { name: /Replace credentials/ }))
     expect(dialog.getByLabelText(/Headers/)).toHaveProperty('value', '')
@@ -277,7 +325,9 @@ describe('MCP write-only editor sessions', () => {
     const h = mountClient(() => saving.promise)
     const dialog = await openEditor()
     await fireEvent.click(dialog.getByRole('switch', { name: /Replace credentials/ }))
-    await fireEvent.input(dialog.getByLabelText(/Headers/), { target: { value: 'Authorization: old-secret' } })
+    await fireEvent.input(dialog.getByLabelText(/Headers/), {
+      target: { value: 'Authorization: old-secret' },
+    })
     await fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
     h.unmount()
     saving.reject(new Error('late save failure'))

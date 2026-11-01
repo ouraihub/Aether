@@ -12,14 +12,21 @@ export function messageChars(message: Message): number {
   )
 }
 /** Drops complete oldest turns; never breaks tool-call/result pairing. */
-export function trimHistory(turns: readonly HistoryTurn[], availableTokens: number, canVision: boolean): Message[] {
+export function trimHistory(
+  turns: readonly HistoryTurn[],
+  availableTokens: number,
+  canVision: boolean,
+): Message[] {
   const groups = turns
     .filter((turn) => turn.status === 'completed')
     .map((turn): Message[] => [
       { user: turn.input, ...(canVision && turn.images?.length ? { images: turn.images } : {}) },
       ...turn.messages,
     ])
-  let size = groups.reduce((total, group) => total + group.reduce((sum, message) => sum + messageChars(message), 0), 0)
+  let size = groups.reduce(
+    (total, group) => total + group.reduce((sum, message) => sum + messageChars(message), 0),
+    0,
+  )
   let start = 0
   while (Math.ceil(size / 3) > Math.max(0, availableTokens) && start < groups.length) {
     const group = groups[start]

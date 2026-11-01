@@ -26,7 +26,8 @@ const ROOTS = [
   { dir: 'plugin', ext: '.rs', pattern: /SystemTime::now|getrandom::/g },
 ]
 const BASELINE = 'scripts/nondet-baseline.json'
-const isTest = (path) => /\.test\.ts$|(^|\/)tests?\/|(^|\/)tests\.rs$|_tests\.rs$|(^|\/)target\//.test(path)
+const isTest = (path) =>
+  /\.test\.ts$|(^|\/)tests?\/|(^|\/)tests\.rs$|_tests\.rs$|(^|\/)target\//.test(path)
 
 const counts = {}
 for (const { dir, ext, pattern } of ROOTS)
@@ -62,4 +63,6 @@ if (problems.length) {
   for (const line of problems) process.stderr.write(`${line}\n`)
   process.exit(1)
 }
-process.stdout.write(`nondet-check: ${Object.keys(counts).length} boundary files match the baseline\n`)
+process.stdout.write(
+  `nondet-check: ${Object.keys(counts).length} boundary files match the baseline\n`,
+)

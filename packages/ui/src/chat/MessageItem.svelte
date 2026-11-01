@@ -156,7 +156,12 @@
 
 <li class="message-turn flex min-w-0 flex-col gap-2">
   {#if showInput}
-    <ChatMessage role="user" text={turn.input} showMoreLabel={t('chat.showMore')} showLessLabel={t('chat.showLess')}>
+    <ChatMessage
+      role="user"
+      text={turn.input}
+      showMoreLabel={t('chat.showMore')}
+      showLessLabel={t('chat.showLess')}
+    >
       {#snippet attachments()}
         {#if turn.images.length > 0}
           <ul class="user-images">
@@ -168,7 +173,8 @@
                     rel="noopener"
                     onclick={(event) => openImage(event, image.url)}
                     aria-label={t('chat.openImage', { index: index + 1 })}
-                    title={t('chat.openImage', { index: index + 1 })}><img src={image.url} alt="" /></a
+                    title={t('chat.openImage', { index: index + 1 })}
+                    ><img src={image.url} alt="" /></a
                   >{:else}<span class="image-expired">{t('chat.imageExpired')}</span>{/if}
               </li>
             {/each}
@@ -191,7 +197,9 @@
       {#if turn.tools.some((tool) => tool.pending === null)}
         <details class="tool-process" open={turn.status === 'running'}>
           <summary>{t('chat.toolProcess')}</summary>
-          {#each turn.tools.filter((tool) => tool.pending === null) as tool (tool.callId)}<ToolCallItem {tool} />{/each}
+          {#each turn.tools.filter((tool) => tool.pending === null) as tool (tool.callId)}<ToolCallItem
+              {tool}
+            />{/each}
         </details>
       {/if}
     {/snippet}
@@ -206,7 +214,8 @@
                   rel="noopener"
                   onclick={(event) => openImage(event, image.url)}
                   aria-label={t('chat.openGeneratedImage', { index: index + 1 })}
-                  title={t('chat.openGeneratedImage', { index: index + 1 })}><img src={image.url} alt="" /></a
+                  title={t('chat.openGeneratedImage', { index: index + 1 })}
+                  ><img src={image.url} alt="" /></a
                 >{:else}<span class="image-expired">{t('chat.imageExpired')}</span>{/if}
             </li>
           {/each}
@@ -228,8 +237,13 @@
         {/if}
         {#if onRetry && turn.status !== 'running'}
           {@const label = t(turn.status === 'failed' ? 'chat.retry' : 'chat.regenerate')}
-          <Button variant="ghost" size="icon-xs" title={label} aria-label={label} disabled={busy} onclick={onRetry}
-            ><RotateCcwIcon /></Button
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            title={label}
+            aria-label={label}
+            disabled={busy}
+            onclick={onRetry}><RotateCcwIcon /></Button
           >
         {/if}
         {#if onSwitchModel}<ModelSelect
@@ -261,7 +275,8 @@
             aria-label={t('chat.useContext')}
             aria-pressed={chosen}
             disabled={busy || turn.status !== 'completed'}
-            onclick={onUseContext}><ThumbsUpIcon class={chosen ? 'fill-primary text-primary' : ''} /></Button
+            onclick={onUseContext}
+            ><ThumbsUpIcon class={chosen ? 'fill-primary text-primary' : ''} /></Button
           >{/if}
         {#if onSaveNote && savable}<Button
             variant="ghost"
@@ -305,20 +320,26 @@
             <DropdownMenu.Content class="w-auto">
               {#if onEdit || onBranch || onCopyConversation}
                 <DropdownMenu.Group>
-                  {#if onEdit}<DropdownMenu.Item disabled={busy || !editable} onSelect={() => onEdit?.()}
+                  {#if onEdit}<DropdownMenu.Item
+                      disabled={busy || !editable}
+                      onSelect={() => onEdit?.()}
                       ><FilePenLineIcon />{t('chat.editReply')}</DropdownMenu.Item
                     >{/if}
                   {#if onBranch}<DropdownMenu.Item disabled={busy} onSelect={() => onBranch?.()}
                       ><SplitIcon />{t('chat.branch')}</DropdownMenu.Item
                     >{/if}
-                  {#if onCopyConversation}<DropdownMenu.Item disabled={busy} onSelect={() => onCopyConversation?.()}
+                  {#if onCopyConversation}<DropdownMenu.Item
+                      disabled={busy}
+                      onSelect={() => onCopyConversation?.()}
                       ><CopyPlusIcon />{t('chat.copyConversation')}</DropdownMenu.Item
                     >{/if}
                 </DropdownMenu.Group>
                 <DropdownMenu.Separator />
               {/if}
               <DropdownMenu.Sub>
-                <DropdownMenu.SubTrigger disabled={!savable}><SaveIcon />{t('chat.save')}</DropdownMenu.SubTrigger>
+                <DropdownMenu.SubTrigger disabled={!savable}
+                  ><SaveIcon />{t('chat.save')}</DropdownMenu.SubTrigger
+                >
                 <DropdownMenu.SubContent>
                   <DropdownMenu.Item disabled={!turn.text} onSelect={() => void download()}
                     >{t('chat.saveFile')}</DropdownMenu.Item
@@ -331,7 +352,8 @@
               </DropdownMenu.Sub>
               <DropdownMenu.Separator />
               <DropdownMenu.Sub>
-                <DropdownMenu.SubTrigger disabled={!turn.text}><UploadIcon />{t('chat.export')}</DropdownMenu.SubTrigger
+                <DropdownMenu.SubTrigger disabled={!turn.text}
+                  ><UploadIcon />{t('chat.export')}</DropdownMenu.SubTrigger
                 >
                 <DropdownMenu.SubContent>
                   <DropdownMenu.Item disabled={!turn.text} onSelect={() => void download()}
@@ -342,7 +364,9 @@
             </DropdownMenu.Content>
           </DropdownMenu.Root>
         {/if}
-        <span class="text-muted-foreground text-kit-sm" role="status">{copied ? t('chat.copied') : ''}</span>
+        <span class="text-muted-foreground text-kit-sm" role="status"
+          >{copied ? t('chat.copied') : ''}</span
+        >
       {/if}
     {/snippet}
     {#if turn.search.status === 'complete'}
@@ -355,7 +379,9 @@
               href={url}
               target="_blank"
               rel="noopener noreferrer"
-              ><ExternalLinkIcon data-icon="inline-start" /><span class="truncate">{hit.title || url}</span></a
+              ><ExternalLinkIcon data-icon="inline-start" /><span class="truncate"
+                >{hit.title || url}</span
+              ></a
             >{/if}
         {/each}
       </section>
@@ -365,7 +391,9 @@
     {:else if turn.status === 'failed'}
       <div class="flex items-center gap-2">
         <p class="text-destructive text-kit-sm" role="alert">
-          {turn.error === 'interrupted' ? t('chat.interrupted') : t(`errors.${turn.error ?? 'internal'}`)}
+          {turn.error === 'interrupted'
+            ? t('chat.interrupted')
+            : t(`errors.${turn.error ?? 'internal'}`)}
         </p>
       </div>
     {:else if turn.exhausted}

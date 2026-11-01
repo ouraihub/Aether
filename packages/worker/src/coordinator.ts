@@ -1,4 +1,10 @@
-import { isContract, type EndStatus, type KitError, type RunEvent, type RunSnapshot } from '@ouraihub/aether-contracts'
+import {
+  isContract,
+  type EndStatus,
+  type KitError,
+  type RunEvent,
+  type RunSnapshot,
+} from '@ouraihub/aether-contracts'
 import { KitFailure, type Approver } from '@ouraihub/aether-core'
 import type { DurableObjectState } from './cloudflare.js'
 import { immutableActor, isActor, ownerKey, type Actor, type WorkerContext } from './context.js'
@@ -25,7 +31,8 @@ interface Pending {
 }
 const storageKey = 'run'
 const encoder = new TextEncoder()
-const conflict = (reason: string): KitFailure => new KitFailure('conflict', 'Run state conflict', { reason })
+const conflict = (reason: string): KitFailure =>
+  new KitFailure('conflict', 'Run state conflict', { reason })
 const missing = (): KitFailure => new KitFailure('not_found', 'Run not found')
 const interrupted = (newId: () => string): KitError => ({
   code: 'internal',
@@ -35,7 +42,12 @@ const interrupted = (newId: () => string): KitError => ({
 
 /** No arbitrary messages/details cross this boundary, even from host KitFailures. */
 function publicError(error: unknown, newId: () => string): KitError {
-  const code = error instanceof KitFailure ? error.code : isContract('KitError', error) ? error.code : 'internal'
+  const code =
+    error instanceof KitFailure
+      ? error.code
+      : isContract('KitError', error)
+        ? error.code
+        : 'internal'
   const messages: Record<KitError['code'], string> = {
     bad_request: 'Invalid request',
     not_found: 'Run not found',
@@ -56,7 +68,9 @@ function publicError(error: unknown, newId: () => string): KitError {
   // Error IDs are generated here, never copied from a potentially secret-bearing host error.
   const reason = error instanceof KitFailure ? error.details?.reason : undefined
   const safeReason =
-    reason === 'event_replay_unavailable' || reason === 'subscriber_already_active' || reason === 'approval_not_pending'
+    reason === 'event_replay_unavailable' ||
+    reason === 'subscriber_already_active' ||
+    reason === 'approval_not_pending'
       ? reason
       : undefined
   return {
@@ -126,7 +140,10 @@ export interface CoordinatorOptions {
 }
 
 /** The router alone constructs this private protocol after authentication. */
-export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime, options: CoordinatorOptions = {}) {
+export function createRunCoordinator<Env>(
+  createRuntime: (env: Env) => Runtime,
+  options: CoordinatorOptions = {},
+) {
   const now = options.now ?? Date.now
   const newId = options.newId ?? (() => crypto.randomUUID())
   return class RunCoordinator {
@@ -156,7 +173,11 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime, 
           try {
             await this.runtime.recover(record.handle, this.context(record.actor))
           } catch (error) {
-            if (!(record.phase === 'creating' && error instanceof KitFailure && error.code === 'not_found'))
+            if (!(
+              record.phase === 'creating' &&
+              error instanceof KitFailure &&
+              error.code === 'not_found'
+            ))
               recoveryFailure = error
           }
         }
@@ -198,9 +219,12 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime, 
       if (!controller) return
       try {
         // Bound an unread subscriber rather than retaining an unbounded transcript in memory.
-        if (controller.desiredSize !== null && controller.desiredSize <= 0) throw new Error('Subscriber stalled')
+        if (controller.desiredSize !== null && controller.desiredSize <= 0)
+          throw new Error('Subscriber stalled')
         controller.enqueue(
-          encoder.encode(`event: run_event\nid: ${++this.sequence}\ndata: ${JSON.stringify(event)}\n\n`),
+          encoder.encode(
+            `event: run_event\nid: ${++this.sequence}\ndata: ${JSON.stringify(event)}\n\n`,
+          ),
         )
       } catch {
         this.close()
@@ -378,7 +402,13 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime, 
           revision: 0,
           pending: null,
           acceptedUntil: null,
-          snapshot: { runId, conversationId: null, turnId: null, status: 'running', cancelRequested: false },
+          snapshot: {
+            runId,
+            conversationId: null,
+            turnId: null,
+            status: 'running',
+            cancelRequested: false,
+          },
         }
         await this.persist()
       })
@@ -392,7 +422,8 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime, 
         try {
           const prepared = await this.runtime.prepare(runId, input, this.context(actor), (handle) =>
             this.serialize(async () => {
-              if (!this.metadata || this.abort.signal.aborted) throw new KitFailure('cancelled', 'Cancelled')
+              if (!this.metadata || this.abort.signal.aborted)
+                throw new KitFailure('cancelled', 'Cancelled')
               this.metadata.handle = handle
               this.metadata.snapshot.conversationId = handle?.conversationId ?? null
               this.metadata.snapshot.turnId = handle?.turnId ?? null
@@ -486,7 +517,8 @@ export function createRunCoordinator<Env>(createRuntime: (env: Env) => Runtime, 
         // A rejected competing subscriber must never cancel the actual owner stream.
         if (
           this.owns(actor) &&
-          ((this.subscribed && !this.operation) || (this.metadata?.phase === 'accepted' && request.signal.aborted))
+          ((this.subscribed && !this.operation) ||
+            (this.metadata?.phase === 'accepted' && request.signal.aborted))
         ) {
           this.close()
           await this.cancelRun()

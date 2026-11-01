@@ -11,10 +11,31 @@
   import * as Select from '#lib/components/ui/select/index.js'
   import CopyInput from '../CopyInput.svelte'
   import { getKitContext } from '../context'
-  import type { Model, ModelType, PricingTier, Protocol, ReasoningDialect, ReasoningEffort } from '../ports'
+  import type {
+    Model,
+    ModelType,
+    PricingTier,
+    Protocol,
+    ReasoningDialect,
+    ReasoningEffort,
+  } from '../ports'
   import { cn } from '../utils'
-  import { idPrefix, purposeOf, validateModel, withPurpose, withType, type ModelField, type Purpose } from './draft'
-  import { REASONING_DIALECTS, REASONING_EFFORTS, allowsAuto, dialectFits, emptyReasoning } from './reasoning'
+  import {
+    idPrefix,
+    purposeOf,
+    validateModel,
+    withPurpose,
+    withType,
+    type ModelField,
+    type Purpose,
+  } from './draft'
+  import {
+    REASONING_DIALECTS,
+    REASONING_EFFORTS,
+    allowsAuto,
+    dialectFits,
+    emptyReasoning,
+  } from './reasoning'
 
   let {
     open = $bindable(false),
@@ -90,7 +111,8 @@
   }
   /** Tri-state: not probed → supported → unsupported → not probed. */
   function cycleTools() {
-    if (edit) edit.supportsTools = edit.supportsTools === null ? true : edit.supportsTools ? false : null
+    if (edit)
+      edit.supportsTools = edit.supportsTools === null ? true : edit.supportsTools ? false : null
   }
   const tier = (minInputTokens: number): PricingTier => ({
     minInputTokens,
@@ -192,17 +214,22 @@
                   size="sm"
                   class={CHIP}
                   aria-pressed={edit.modelType === type}
-                  onclick={() => edit && (edit = withType(edit, type))}>{t(`providers.type.${type}`)}</Button
+                  onclick={() => edit && (edit = withType(edit, type))}
+                  >{t(`providers.type.${type}`)}</Button
                 >
               {/each}
               <Select.Root
                 type="single"
                 value={OTHER_TYPES.includes(edit.modelType) ? edit.modelType : ''}
-                onValueChange={(value) => edit && value && (edit = withType(edit, value as ModelType))}
+                onValueChange={(value) =>
+                  edit && value && (edit = withType(edit, value as ModelType))}
               >
                 <Select.Trigger
                   size="sm"
-                  class={cn(OTHER_TYPES.includes(edit.modelType) && 'border-primary bg-primary/10 text-primary')}
+                  class={cn(
+                    OTHER_TYPES.includes(edit.modelType) &&
+                      'border-primary bg-primary/10 text-primary',
+                  )}
                   aria-label={t('providers.type_other')}
                   >{OTHER_TYPES.includes(edit.modelType)
                     ? t(`providers.type.${edit.modelType}`)
@@ -220,7 +247,9 @@
             </div>
             {#if usedBy.length > 0 && edit.modelType !== model?.modelType}
               <Field.Description class="text-warning text-kit-xs" role="status"
-                >{t('providers.type_in_use', { roles: usedBy.join(t('providers.list_separator')) })}</Field.Description
+                >{t('providers.type_in_use', {
+                  roles: usedBy.join(t('providers.list_separator')),
+                })}</Field.Description
               >
             {/if}
           </Field.Set>
@@ -234,18 +263,25 @@
                   class={CHIP}
                   aria-pressed={edit.reasoning !== null}
                   onclick={() =>
-                    edit && (edit.reasoning = edit.reasoning ? null : emptyReasoning(dialects[0] ?? 'openai'))}
+                    edit &&
+                    (edit.reasoning = edit.reasoning
+                      ? null
+                      : emptyReasoning(dialects[0] ?? 'openai'))}
                   >{t('providers.cap_reasoning')}</Button
                 >
                 <Button
                   variant="outline"
                   size="sm"
-                  class={cn(CHIP, edit.supportsTools === false && 'text-muted-foreground line-through')}
+                  class={cn(
+                    CHIP,
+                    edit.supportsTools === false && 'text-muted-foreground line-through',
+                  )}
                   aria-pressed={edit.supportsTools === true}
                   title={t(`providers.tools_state.${edit.supportsTools ?? 'unknown'}`)}
                   onclick={cycleTools}
                   >{t('providers.cap_tools')}{#if edit.supportsTools === null}<span
-                      class="text-muted-foreground text-kit-xs">{t('providers.tools_state.unknown')}</span
+                      class="text-muted-foreground text-kit-xs"
+                      >{t('providers.tools_state.unknown')}</span
                     >{/if}</Button
                 >
                 {#if protocol !== 'openai-chat'}
@@ -272,7 +308,8 @@
                   size="sm"
                   class={CHIP}
                   aria-pressed={edit.canVision}
-                  onclick={() => edit && (edit.canVision = !edit.canVision)}>{t('providers.cap_vision')}</Button
+                  onclick={() => edit && (edit.canVision = !edit.canVision)}
+                  >{t('providers.cap_vision')}</Button
                 >
               </div>
             </Field.Set>
@@ -299,12 +336,18 @@
     <Select.Root
       type="single"
       value={dialect}
-      onValueChange={(value) => edit && (edit.reasoning = emptyReasoning(value as ReasoningDialect))}
+      onValueChange={(value) =>
+        edit && (edit.reasoning = emptyReasoning(value as ReasoningDialect))}
     >
-      <Select.Trigger id="kit-model-dialect" class="w-full">{t(`providers.dialect.${dialect}`)}</Select.Trigger>
+      <Select.Trigger id="kit-model-dialect" class="w-full"
+        >{t(`providers.dialect.${dialect}`)}</Select.Trigger
+      >
       <Select.Content>
         <Select.Group>
-          {#each dialects as item (item)}<Select.Item value={item} label={t(`providers.dialect.${item}`)} />{/each}
+          {#each dialects as item (item)}<Select.Item
+              value={item}
+              label={t(`providers.dialect.${item}`)}
+            />{/each}
         </Select.Group>
       </Select.Content>
     </Select.Root>
@@ -322,7 +365,9 @@
         >
       {/each}
     </div>
-    {#if dialect !== 'anthropic-budget' && dialect !== 'qwen'}<Field.Error errors={errorFor('reasoning')} />{/if}
+    {#if dialect !== 'anthropic-budget' && dialect !== 'qwen'}<Field.Error
+        errors={errorFor('reasoning')}
+      />{/if}
   </Field.Set>
   {#if dialect === 'anthropic-budget' || dialect === 'qwen'}
     <Field.Field>
@@ -341,7 +386,11 @@
   {/if}
 {/snippet}
 
-{#snippet tokens(field: 'contextWindow' | 'maxOutput', presets: [string, number][], fallback: number)}
+{#snippet tokens(
+  field: 'contextWindow' | 'maxOutput',
+  presets: [string, number][],
+  fallback: number,
+)}
   {@const value = edit?.[field] ?? null}
   <Field.Field>
     <Field.Label for="kit-model-{field}"
@@ -410,7 +459,8 @@
                 step="1"
                 disabled={index === 0}
                 value={item.minInputTokens}
-                oninput={(event) => setPrice(index, 'minInputTokens', event.currentTarget.valueAsNumber)}
+                oninput={(event) =>
+                  setPrice(index, 'minInputTokens', event.currentTarget.valueAsNumber)}
               /></label
             >
             {#each PRICES as key (key)}
@@ -419,7 +469,9 @@
                   type="number"
                   min="0"
                   step="any"
-                  placeholder={key === 'cacheRead' || key === 'cacheWrite' ? t('providers.price_same_as_input') : ''}
+                  placeholder={key === 'cacheRead' || key === 'cacheWrite'
+                    ? t('providers.price_same_as_input')
+                    : ''}
                   value={item[key] ?? ''}
                   oninput={(event) => setPrice(index, key, event.currentTarget.valueAsNumber)}
                 /></label
@@ -433,7 +485,8 @@
         {#if current.tiers.length < 8}<Button
             variant="outline"
             size="sm"
-            onclick={() => current.tiers.push(tier((current.tiers.at(-1)?.minInputTokens ?? 0) + 200000))}
+            onclick={() =>
+              current.tiers.push(tier((current.tiers.at(-1)?.minInputTokens ?? 0) + 200000))}
             ><PlusIcon />{t('providers.tier_add')}</Button
           >{/if}
         <Button variant="ghost" size="sm" onclick={() => edit && (edit.pricing = null)}

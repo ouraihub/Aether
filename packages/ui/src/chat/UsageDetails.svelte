@@ -11,11 +11,25 @@
     /** Session total per currency. */
     totalCost: Cost[]
   }
-  let { context, usage, total, cost, totalCost, modelName = '' }: Props & { modelName?: string } = $props()
+  let {
+    context,
+    usage,
+    total,
+    cost,
+    totalCost,
+    modelName = '',
+  }: Props & { modelName?: string } = $props()
   const { i18n } = getKitContext()
   const { t } = i18n
-  const fields = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const
-  const money = ({ amount, currency }: Cost) => `${currency === 'CNY' ? '¥' : '$'}${amount.toFixed(4)}`
+  const fields = [
+    'inputTokens',
+    'outputTokens',
+    'cacheReadTokens',
+    'cacheWriteTokens',
+    'reasoningTokens',
+  ] as const
+  const money = ({ amount, currency }: Cost) =>
+    `${currency === 'CNY' ? '¥' : '$'}${amount.toFixed(4)}`
 </script>
 
 <UsageControl context={context ? { ...context, modelName } : null} {i18n}>
@@ -23,16 +37,16 @@
     <table>
       <thead
         ><tr
-          ><th scope="col">{t('chat.usage')}</th><th scope="col">{t('chat.currentUsage')}</th><th scope="col"
-            >{t('chat.totalUsage')}</th
+          ><th scope="col">{t('chat.usage')}</th><th scope="col">{t('chat.currentUsage')}</th><th
+            scope="col">{t('chat.totalUsage')}</th
           ></tr
         ></thead
       >
       <tbody
         >{#each fields as field (field)}<tr
-            ><th scope="row">{t(`chat.usage.${field}`)}</th><td>{usage?.[field] ?? t('chat.unknown')}</td><td
-              >{total[field] ?? t('chat.unknown')}</td
-            ></tr
+            ><th scope="row">{t(`chat.usage.${field}`)}</th><td
+              >{usage?.[field] ?? t('chat.unknown')}</td
+            ><td>{total[field] ?? t('chat.unknown')}</td></tr
           >{/each}<tr
           ><th scope="row">{t('chat.cost')}</th><td>{cost ? money(cost) : t('chat.unknown')}</td><td
             >{totalCost.length ? totalCost.map(money).join(' + ') : t('chat.unknown')}</td

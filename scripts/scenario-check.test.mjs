@@ -14,7 +14,16 @@ import {
 const executable = Object.keys(ASSERTIONS)
 const accepted = [{ runId: '<run>', conversationId: null, turnId: null }]
 const snapshot = (fields) => [
-  { label: 'final', value: { runId: '<run>', conversationId: null, turnId: null, cancelRequested: false, ...fields } },
+  {
+    label: 'final',
+    value: {
+      runId: '<run>',
+      conversationId: null,
+      turnId: null,
+      cancelRequested: false,
+      ...fields,
+    },
+  },
 ]
 const usage = {
   kind: 'usage',
@@ -28,7 +37,12 @@ const usage = {
 const text = (value) => ({ kind: 'text_delta', text: value })
 const reasoning = (value) => ({ kind: 'reasoning_delta', text: value })
 const toolCall = (callId) => ({ kind: 'tool_call', callId, name: 'read_note', source: 'host' })
-const toolResult = (callId) => ({ kind: 'tool_result', callId, outcome: 'ok', summary: 'note contents' })
+const toolResult = (callId) => ({
+  kind: 'tool_result',
+  callId,
+  outcome: 'ok',
+  summary: 'note contents',
+})
 
 /** Observations satisfying every assertion, shaped like runner output. */
 const passing = () => ({
@@ -55,7 +69,12 @@ const passing = () => ({
     events: [
       { kind: 'round_start', round: 1 },
       toolCall('call-approve'),
-      { kind: 'approval_required', callId: 'call-approve', name: 'read_note', argsPreview: 'x'.repeat(2000) },
+      {
+        kind: 'approval_required',
+        callId: 'call-approve',
+        name: 'read_note',
+        argsPreview: 'x'.repeat(2000),
+      },
       toolResult('call-approve'),
       { kind: 'round_start', round: 2 },
       text('done'),
@@ -104,7 +123,8 @@ const final = (o) => o.snapshots[0].value
 const violations = {
   'acceptance-response-race': {
     'marks-order': (o) => o.marks.reverse(),
-    'accepted-ids-null': (o) => (o.accepted = [{ ...accepted[0], conversationId: '<conversation>' }]),
+    'accepted-ids-null': (o) =>
+      (o.accepted = [{ ...accepted[0], conversationId: '<conversation>' }]),
     'text-joined': (o) => (o.events[4] = text('LO ')),
     'reasoning-joined': (o) => o.events.splice(2, 1),
     'final-completed': (o) => (final(o).status = 'failed'),
@@ -143,7 +163,8 @@ const judge = (knownDrift, native = passing(), worker = passing()) =>
   judgeScenarios({ executable, knownDrift, scenarios: { native, worker } })
 
 test('passing observations satisfy every assertion and compare equal', () => {
-  for (const [id, observation] of Object.entries(passing())) assert.deepEqual(evaluate(id, observation), [], id)
+  for (const [id, observation] of Object.entries(passing()))
+    assert.deepEqual(evaluate(id, observation), [], id)
   assert.deepEqual(judge([]), { failures: [], drifts: [] })
 })
 
@@ -175,13 +196,21 @@ test('first difference path is exact', () => {
   const left = normalize(passing()['tool-approval-allow'])
   const right = normalize(passing()['tool-approval-allow'])
   right.events[3].summary = 'other'
-  assert.deepEqual(firstDifference(left, right), { path: '$.events[3].summary', left: 'note contents', right: 'other' })
+  assert.deepEqual(firstDifference(left, right), {
+    path: '$.events[3].summary',
+    left: 'note contents',
+    right: 'other',
+  })
   right.events[3].summary = 'note contents'
   right.events[1].callId = 'call-other'
   right.events[3].callId = 'call-other'
   assert.equal(firstDifference(left, right).path, '$.events[1].callId')
   assert.equal(firstDifference(left, normalize(passing()['tool-approval-allow'])), undefined)
-  assert.deepEqual(firstDifference({ a: [1, 2] }, { a: [1] }), { path: '$.a[1]', left: 2, right: undefined })
+  assert.deepEqual(firstDifference({ a: [1, 2] }, { a: [1] }), {
+    path: '$.a[1]',
+    left: 2,
+    right: undefined,
+  })
   assert.deepEqual(firstDifference({ x: 1 }, { x: 1, 'cache-key': 2 }), {
     path: '$["cache-key"]',
     left: undefined,
@@ -229,7 +258,10 @@ test('normalization drops accounting and masks MCP boundaries', () => {
   const other = passing()['round-exhaustion']
   other.events[2].summary = wrap('ba9876543210')
   const trace = normalize(observation)
-  assert.equal(trace.events[2].summary, '<<<TOOL_RESULT_<B> server="docs">>>\nx\n<<<END_TOOL_RESULT_<B>>>>')
+  assert.equal(
+    trace.events[2].summary,
+    '<<<TOOL_RESULT_<B> server="docs">>>\nx\n<<<END_TOOL_RESULT_<B>>>>',
+  )
   assert.ok(trace.events.every((event) => event.kind !== 'usage' && event.kind !== 'context'))
   assert.equal(firstDifference(trace, normalize(other)), undefined)
   assert.deepEqual(Object.keys(trace), [
@@ -244,15 +276,30 @@ test('normalization drops accounting and masks MCP boundaries', () => {
 })
 
 test('runner output must contain exactly the executable scenario ids', () => {
-  assert.deepEqual(Object.keys(checkRunnerOutput(runner('native'), 'native', executable)), executable)
+  assert.deepEqual(
+    Object.keys(checkRunnerOutput(runner('native'), 'native', executable)),
+    executable,
+  )
   const unknown = runner('worker')
   unknown.scenarios['owner-isolation'] = passing()['round-exhaustion']
-  assert.throws(() => checkRunnerOutput(unknown, 'worker', executable), /unknown scenario owner-isolation/)
+  assert.throws(
+    () => checkRunnerOutput(unknown, 'worker', executable),
+    /unknown scenario owner-isolation/,
+  )
   const missing = runner('worker')
   delete missing.scenarios['receiver-send-failure']
-  assert.throws(() => checkRunnerOutput(missing, 'worker', executable), /missing scenario receiver-send-failure/)
-  assert.throws(() => checkRunnerOutput(runner('worker'), 'native', executable), /backend is "worker"/)
-  assert.throws(() => checkRunnerOutput({ ...runner('native'), extra: 1 }, 'native', executable), /expected/)
+  assert.throws(
+    () => checkRunnerOutput(missing, 'worker', executable),
+    /missing scenario receiver-send-failure/,
+  )
+  assert.throws(
+    () => checkRunnerOutput(runner('worker'), 'native', executable),
+    /backend is "worker"/,
+  )
+  assert.throws(
+    () => checkRunnerOutput({ ...runner('native'), extra: 1 }, 'native', executable),
+    /expected/,
+  )
   const field = runner('native')
   field.scenarios['round-exhaustion'].expected = true
   assert.throws(() => checkRunnerOutput(field, 'native', executable), /unknown field expected/)
@@ -264,8 +311,14 @@ test('runner output must contain exactly the executable scenario ids', () => {
 test('executable ids must exist and match the assertions table', () => {
   const defined = [...executable, 'owner-isolation']
   assert.doesNotThrow(() => checkExecutable(executable, defined))
-  assert.throws(() => checkExecutable([...executable, 'no-such-scenario'], defined), /is not defined/)
-  assert.throws(() => checkExecutable([...executable, 'owner-isolation'], defined), /has no assertions/)
+  assert.throws(
+    () => checkExecutable([...executable, 'no-such-scenario'], defined),
+    /is not defined/,
+  )
+  assert.throws(
+    () => checkExecutable([...executable, 'owner-isolation'], defined),
+    /has no assertions/,
+  )
   assert.throws(() => checkExecutable(executable.slice(1), defined), /non-executable scenario/)
   assert.throws(() => checkExecutable([...executable, executable[0]], defined), /duplicate/)
   assert.throws(() => evaluate('no-such-scenario', passing()['round-exhaustion']), /no assertions/)
@@ -293,11 +346,15 @@ test('unlisted failures fail and listed drift is reported while it occurs', () =
 })
 
 test('listed drift that no longer occurs fails', () => {
-  const fixed = judge([{ scenario: 'round-exhaustion', backend: 'native', check: 'dispatches', note: 'tracked' }])
+  const fixed = judge([
+    { scenario: 'round-exhaustion', backend: 'native', check: 'dispatches', note: 'tracked' },
+  ])
   assert.deepEqual(fixed.failures, [
     'round-exhaustion [native] dispatches: listed drift no longer occurs; remove it from knownDrift',
   ])
-  assert.deepEqual(fixed.drifts, [{ drift: 'round-exhaustion [native] dispatches', note: 'tracked', occurs: false }])
+  assert.deepEqual(fixed.drifts, [
+    { drift: 'round-exhaustion [native] dispatches', note: 'tracked', occurs: false },
+  ])
   // A trace drift listed at one path does not cover a difference that moved elsewhere.
   const worker = passing()
   worker['tool-approval-allow'].dispatches = ['call-approve', 'call-approve']

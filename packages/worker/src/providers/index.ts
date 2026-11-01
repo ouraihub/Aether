@@ -27,7 +27,12 @@ import { probe as probeEndpoint } from '@ouraihub/aether-core/providers/probe'
 import type { Connection } from '@ouraihub/aether-core/types'
 import type { OutboundHttp } from '@ouraihub/aether-core/ports'
 import { ownerKey, type Actor, type WorkerContext } from '../context.js'
-import { isSealedCredential, type CredentialPort, type CredentialScope, type SealedCredential } from '../credentials.js'
+import {
+  isSealedCredential,
+  type CredentialPort,
+  type CredentialScope,
+  type SealedCredential,
+} from '../credentials.js'
 import type { DocumentStore, StoredDocument } from '../storage.js'
 
 interface Secret {
@@ -61,7 +66,8 @@ function parseCatalog(value: unknown): Catalog {
   const secrets: Secret[] = []
   const inferred: string[] = []
   for (const item of value.providers) {
-    if (!isContract('Provider', item)) throw new KitFailure('incompatible_db', 'Invalid provider document')
+    if (!isContract('Provider', item))
+      throw new KitFailure('incompatible_db', 'Invalid provider document')
     providers.push(item)
   }
   for (const item of value.secrets) {
@@ -75,7 +81,8 @@ function parseCatalog(value: unknown): Catalog {
     secrets.push({ endpointId: item.endpointId, keyId: item.keyId, sealed: item.sealed })
   }
   for (const item of value.inferred) {
-    if (typeof item !== 'string') throw new KitFailure('incompatible_db', 'Invalid reasoning declaration')
+    if (typeof item !== 'string')
+      throw new KitFailure('incompatible_db', 'Invalid reasoning declaration')
     inferred.push(item)
   }
   const automatic = new Set(inferred)
@@ -89,8 +96,10 @@ function parseCatalog(value: unknown): Catalog {
               : null
   return { providers, secrets, inferred }
 }
-const missing = (entity: string): KitFailure => new KitFailure('not_found', `Unknown ${entity}`, { entity })
-const reasoningKey = (endpointId: string, modelId: string): string => JSON.stringify([endpointId, modelId])
+const missing = (entity: string): KitFailure =>
+  new KitFailure('not_found', `Unknown ${entity}`, { entity })
+const reasoningKey = (endpointId: string, modelId: string): string =>
+  JSON.stringify([endpointId, modelId])
 export class ProviderService {
   private readonly cursors = new Map<string, number>()
   private readonly options: ProviderServiceOptions
@@ -108,13 +117,31 @@ export class ProviderService {
   }
   private async load(actor: Actor): Promise<{ document: StoredDocument | null; catalog: Catalog }> {
     const document = await this.options.documents.get(actor, 'providers', 'catalog')
-    return { document, catalog: document ? parseCatalog(document.value) : { providers: [], secrets: [], inferred: [] } }
+    return {
+      document,
+      catalog: document
+        ? parseCatalog(document.value)
+        : { providers: [], secrets: [], inferred: [] },
+    }
   }
-  private async commit(actor: Actor, document: StoredDocument | null, catalog: Catalog): Promise<Provider[]> {
-    await this.options.documents.compareAndSet(actor, 'providers', 'catalog', document?.revision ?? null, catalog)
+  private async commit(
+    actor: Actor,
+    document: StoredDocument | null,
+    catalog: Catalog,
+  ): Promise<Provider[]> {
+    await this.options.documents.compareAndSet(
+      actor,
+      'providers',
+      'catalog',
+      document?.revision ?? null,
+      catalog,
+    )
     return this.list(actor)
   }
-  private endpoint(catalog: Catalog, endpointId: string): { provider: Provider; endpoint: Endpoint } {
+  private endpoint(
+    catalog: Catalog,
+    endpointId: string,
+  ): { provider: Provider; endpoint: Endpoint } {
     for (const provider of catalog.providers) {
       const endpoint = provider.endpoints.find((item) => item.id === endpointId)
       if (endpoint) return { provider, endpoint }
@@ -122,7 +149,10 @@ export class ProviderService {
     throw missing('endpoint')
   }
   private async open(actor: Actor, secret: Secret): Promise<string> {
-    const bytes = await this.options.credentials.open(this.scope(actor, secret.keyId), secret.sealed)
+    const bytes = await this.options.credentials.open(
+      this.scope(actor, secret.keyId),
+      secret.sealed,
+    )
     try {
       return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
     } finally {
@@ -134,7 +164,9 @@ export class ProviderService {
     for (const provider of catalog.providers)
       for (const endpoint of provider.endpoints)
         for (const key of endpoint.keys) {
-          const secret = catalog.secrets.find((item) => item.endpointId === endpoint.id && item.keyId === key.id)
+          const secret = catalog.secrets.find(
+            (item) => item.endpointId === endpoint.id && item.keyId === key.id,
+          )
           let plain: string | null = null
           if (secret)
             try {
@@ -143,7 +175,12 @@ export class ProviderService {
               /* Unreadable credentials remain visible but cannot execute. */
             }
           key.readable = plain !== null
-          key.masked = plain === null ? null : plain.length > 8 ? `${plain.slice(0, 4)}…${plain.slice(-4)}` : '********'
+          key.masked =
+            plain === null
+              ? null
+              : plain.length > 8
+                ? `${plain.slice(0, 4)}…${plain.slice(-4)}`
+                : '********'
         }
     return catalog.providers
   }
@@ -152,10 +189,12 @@ export class ProviderService {
     const { document, catalog } = await this.load(actor)
     const name = input.name.trim()
     if (!name || charCount(name) > 80) throw badRequest('name', 'invalid')
-    if (input.notes !== undefined && charCount(input.notes) > 10000) throw badRequest('notes', 'too_long', 10000)
+    if (input.notes !== undefined && charCount(input.notes) > 10000)
+      throw badRequest('notes', 'too_long', 10000)
     if (input.endpoints.length > 20) throw badRequest('endpoints', 'too_many', 20)
     if (input.presetId && !input.id) {
-      if (catalog.providers.some((item) => item.presetId === input.presetId)) return this.list(actor)
+      if (catalog.providers.some((item) => item.presetId === input.presetId))
+        return this.list(actor)
       const adopted = catalog.providers.find((item) => item.name === name && item.presetId === null)
       if (adopted) {
         adopted.presetId = input.presetId
@@ -164,7 +203,8 @@ export class ProviderService {
     }
     const old = input.id ? catalog.providers.find((item) => item.id === input.id) : undefined
     if (input.id && !old) throw missing('provider')
-    if (input.presetId && old && input.presetId !== old.presetId) throw badRequest('presetId', 'immutable')
+    if (input.presetId && old && input.presetId !== old.presetId)
+      throw badRequest('presetId', 'immutable')
     const provider: Provider = {
       id: old?.id ?? crypto.randomUUID(),
       name,
@@ -178,7 +218,8 @@ export class ProviderService {
     const endpointIds = new Set<string>()
     const inferred = new Set(catalog.inferred)
     for (const saved of input.endpoints) {
-      if (!/^[a-z0-9-]{1,40}$/.test(saved.slug) || slugs.has(saved.slug)) throw badRequest('slug', 'invalid')
+      if (!/^[a-z0-9-]{1,40}$/.test(saved.slug) || slugs.has(saved.slug))
+        throw badRequest('slug', 'invalid')
       slugs.add(saved.slug)
       const previous = saved.id ? old?.endpoints.find((item) => item.id === saved.id) : undefined
       if (saved.id && !previous) throw missing('endpoint')
@@ -237,11 +278,15 @@ export class ProviderService {
     catalog.providers = old
       ? catalog.providers.map((item) => (item.id === old.id ? provider : item))
       : [...catalog.providers, provider]
-    const allEndpoints = new Set(catalog.providers.flatMap((item) => item.endpoints.map((endpoint) => endpoint.id)))
+    const allEndpoints = new Set(
+      catalog.providers.flatMap((item) => item.endpoints.map((endpoint) => endpoint.id)),
+    )
     catalog.secrets = catalog.secrets.filter((item) => allEndpoints.has(item.endpointId))
     catalog.inferred = [...inferred].filter((key) =>
       catalog.providers.some((item) =>
-        item.endpoints.some((endpoint) => endpoint.models.some((model) => reasoningKey(endpoint.id, model.id) === key)),
+        item.endpoints.some((endpoint) =>
+          endpoint.models.some((model) => reasoningKey(endpoint.id, model.id) === key),
+        ),
       ),
     )
     return this.commit(actor, document, catalog)
@@ -285,7 +330,9 @@ export class ProviderService {
       if (!plain) throw badRequest('apiKey', 'empty')
       if (
         new TextEncoder().encode(plain).length > 4096 ||
-        [...plain].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+        [...plain].some(
+          (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+        )
       )
         throw badRequest('apiKey', 'too_long', 4096)
       for (const secret of catalog.secrets)
@@ -294,7 +341,9 @@ export class ProviderService {
           try {
             existing = await this.open(actor, secret)
           } catch {
-            throw new KitFailure('needs_config', 'Credential cannot be read', { reason: 'key_unreadable' })
+            throw new KitFailure('needs_config', 'Credential cannot be read', {
+              reason: 'key_unreadable',
+            })
           }
           if (existing === plain) throw badRequest('apiKey', 'duplicate')
         }
@@ -317,7 +366,9 @@ export class ProviderService {
       exhaustedUntil: input.restore ? null : (old?.exhaustedUntil ?? null),
       exhaustedReason: input.restore ? null : (old?.exhaustedReason ?? null),
     }
-    endpoint.keys = old ? endpoint.keys.map((item) => (item.id === id ? key : item)) : [...endpoint.keys, key]
+    endpoint.keys = old
+      ? endpoint.keys.map((item) => (item.id === id ? key : item))
+      : [...endpoint.keys, key]
     return this.commit(actor, document, catalog)
   }
   async removeKey(actor: Actor, endpointId: string, keyId: string): Promise<Provider[]> {
@@ -325,7 +376,9 @@ export class ProviderService {
     const { endpoint } = this.endpoint(catalog, endpointId)
     if (!endpoint.keys.some((item) => item.id === keyId)) throw missing('key')
     endpoint.keys = endpoint.keys.filter((item) => item.id !== keyId)
-    catalog.secrets = catalog.secrets.filter((item) => !(item.keyId === keyId && item.endpointId === endpointId))
+    catalog.secrets = catalog.secrets.filter(
+      (item) => !(item.keyId === keyId && item.endpointId === endpointId),
+    )
     return this.commit(actor, document, catalog)
   }
   async revealKey(actor: Actor, keyId: string): Promise<string> {
@@ -335,7 +388,9 @@ export class ProviderService {
     try {
       return await this.open(actor, secret)
     } catch {
-      throw new KitFailure('needs_config', 'Credential cannot be read', { reason: 'key_unreadable' })
+      throw new KitFailure('needs_config', 'Credential cannot be read', {
+        reason: 'key_unreadable',
+      })
     }
   }
   private async snapshotFrom(
@@ -346,16 +401,25 @@ export class ProviderService {
   ): Promise<EndpointSnapshot> {
     const { endpoint } = this.endpoint(catalog, endpointId)
     const chosen =
-      keyId === undefined ? endpoint.keys.filter((key) => key.enabled) : endpoint.keys.filter((key) => key.id === keyId)
+      keyId === undefined
+        ? endpoint.keys.filter((key) => key.enabled)
+        : endpoint.keys.filter((key) => key.id === keyId)
     if (keyId !== undefined && !chosen.length) throw missing('key')
     const keys: string[] = []
     for (const key of chosen) {
-      const secret = catalog.secrets.find((item) => item.keyId === key.id && item.endpointId === endpoint.id)
-      if (!secret) throw new KitFailure('needs_config', 'Credential cannot be read', { reason: 'key_unreadable' })
+      const secret = catalog.secrets.find(
+        (item) => item.keyId === key.id && item.endpointId === endpoint.id,
+      )
+      if (!secret)
+        throw new KitFailure('needs_config', 'Credential cannot be read', {
+          reason: 'key_unreadable',
+        })
       try {
         keys.push(await this.open(actor, secret))
       } catch {
-        throw new KitFailure('needs_config', 'Credential cannot be read', { reason: 'key_unreadable' })
+        throw new KitFailure('needs_config', 'Credential cannot be read', {
+          reason: 'key_unreadable',
+        })
       }
     }
     if (keyId === undefined && keys.length) {
@@ -381,12 +445,14 @@ export class ProviderService {
   async resolve(actor: Actor, reference: ModelRef, requiredType?: ModelType): Promise<Connection> {
     const { catalog } = await this.load(actor)
     const provider = catalog.providers.find(
-      (item) => item.enabled && item.endpoints.some((endpoint) => endpoint.id === reference.endpointId),
+      (item) =>
+        item.enabled && item.endpoints.some((endpoint) => endpoint.id === reference.endpointId),
     )
     const endpoint = provider?.endpoints.find((item) => item.id === reference.endpointId)
     const model = endpoint?.models.find((item) => item.id === reference.modelId)
     if (!endpoint || !model) throw missing('model')
-    if (requiredType !== undefined && model.modelType !== requiredType) throw badRequest('model', 'unsupported_type')
+    if (requiredType !== undefined && model.modelType !== requiredType)
+      throw badRequest('model', 'unsupported_type')
     prepare({
       endpoint: {
         endpointId: endpoint.id,
@@ -411,7 +477,8 @@ export class ProviderService {
             .filter(
               (model) =>
                 (filter.modelType === undefined || model.modelType === filter.modelType) &&
-                (filter.supportsTools === undefined || model.supportsTools === filter.supportsTools),
+                (filter.supportsTools === undefined ||
+                  model.supportsTools === filter.supportsTools),
             )
             .map((model) => ({
               endpointId: endpoint.id,
@@ -431,7 +498,8 @@ export class ProviderService {
     if (!isContract('ProbeTarget', target)) throw badRequest('target', 'invalid')
     const { catalog } = await this.load(actor)
     let endpoint: EndpointSnapshot
-    if (target.kind === 'saved') endpoint = await this.snapshotFrom(actor, catalog, target.endpointId)
+    if (target.kind === 'saved')
+      endpoint = await this.snapshotFrom(actor, catalog, target.endpointId)
     else {
       if (target.keyId !== undefined && target.endpointId === undefined) throw missing('key')
       endpoint = target.endpointId
@@ -440,7 +508,13 @@ export class ProviderService {
             baseUrl: target.baseUrl,
             protocol: target.protocol,
           }
-        : { endpointId: null, baseUrl: target.baseUrl, protocol: target.protocol, keys: [], headers: {} }
+        : {
+            endpointId: null,
+            baseUrl: target.baseUrl,
+            protocol: target.protocol,
+            keys: [],
+            headers: {},
+          }
     }
     return probeEndpoint(this.options.outbound, { endpoint, signal })
   }
@@ -459,7 +533,9 @@ export class ProviderService {
     }
     if (path === `${root}/model-options` && request.method === 'GET') {
       const value: unknown = {
-        ...(url.searchParams.has('modelType') ? { modelType: url.searchParams.get('modelType') } : {}),
+        ...(url.searchParams.has('modelType')
+          ? { modelType: url.searchParams.get('modelType') }
+          : {}),
         ...(url.searchParams.has('supportsTools')
           ? { supportsTools: url.searchParams.get('supportsTools') === 'true' }
           : {}),
@@ -489,7 +565,13 @@ export class ProviderService {
     }
     const key = path.match(/^\/api\/v1\/providers\/([^/]+)\/keys\/([^/]+)$/)
     if (key && request.method === 'DELETE')
-      return json(await this.removeKey(actor, decodeURIComponent(key[1] ?? ''), decodeURIComponent(key[2] ?? '')))
+      return json(
+        await this.removeKey(
+          actor,
+          decodeURIComponent(key[1] ?? ''),
+          decodeURIComponent(key[2] ?? ''),
+        ),
+      )
     const enabled = path.match(/^\/api\/v1\/providers\/([^/]+)\/enabled$/)
     if (enabled && request.method === 'POST') {
       const value: unknown = await request.json()

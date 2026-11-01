@@ -1,7 +1,10 @@
 import type { KitErrorCode } from '../ports'
 
 /** Every `errors.<code>` must exist, so a new KitErrorCode fails typecheck until it is translated; other keys are free-form (`pnpm kit:i18n` checks them). */
-export type Messages = Record<`errors.${KitErrorCode}` | 'common.confirm' | 'common.cancel', string> &
+export type Messages = Record<
+  `errors.${KitErrorCode}` | 'common.confirm' | 'common.cancel',
+  string
+> &
   Record<string, string>
 
 export const en: Messages = {
@@ -83,10 +86,13 @@ export const en: Messages = {
   'chat.useContext': 'Set as context',
   'chat.deleteReply': 'Delete',
   'chat.deleteReplyTitle': 'Delete this message?',
-  'chat.deleteReparentBody': 'Later turns will attach to the previous reply. This cannot be undone.',
+  'chat.deleteReparentBody':
+    'Later turns will attach to the previous reply. This cannot be undone.',
   'chat.sourceModelUnavailable': 'The source model is unavailable. Use @ to pick another model.',
-  'chat.candidateHint': 'The original reply is retained. Click 👍 to set a candidate as context and continue from it.',
-  'chat.editReplyHint': 'Edits only replace this reply. A concurrent change will reject the edit and keep your draft.',
+  'chat.candidateHint':
+    'The original reply is retained. Click 👍 to set a candidate as context and continue from it.',
+  'chat.editReplyHint':
+    'Edits only replace this reply. A concurrent change will reject the edit and keep your draft.',
   'chat.replyRefreshFailed': 'Could not reload the saved replies.',
   'chat.delete': 'Delete conversation',
   'chat.deleteTitle': 'Delete this conversation?',
@@ -126,7 +132,8 @@ export const en: Messages = {
   'chat.expandInput': 'Expand input',
   'chat.collapseInput': 'Collapse input',
   'chat.backToBottom': 'Back to bottom',
-  'chat.draftRecoverable': 'Your unsent message is available to restore after clearing the current draft.',
+  'chat.draftRecoverable':
+    'Your unsent message is available to restore after clearing the current draft.',
   'chat.restoreDraft': 'Restore unsent message',
   'chat.tools': 'More tools',
   'chat.uploadAttachment': 'Upload attachment',
@@ -181,7 +188,8 @@ export const en: Messages = {
   'chat.mode.fullAccessTitle': 'Allow full access for this run?',
   'chat.mode.fullAccessBody':
     'For this run only, tools may change data and execute commands without asking. Blocked tools stay blocked. This choice is not saved.',
-  'chat.mode.ruleNotice': 'Rules can miss risks and are not a sandbox. MCP tools keep their approval settings.',
+  'chat.mode.ruleNotice':
+    'Rules can miss risks and are not a sandbox. MCP tools keep their approval settings.',
   'chat.mode.navigate': 'Select',
   'chat.mode.confirm': 'Confirm',
   'chat.mode.close': 'Close',
@@ -382,7 +390,8 @@ export const en: Messages = {
   'providers.price.cacheRead': 'Cache read',
   'providers.price.cacheWrite': 'Cache write',
   'providers.price_same_as_input': 'Same as input',
-  'providers.applies_next': 'Takes effect from the next message; a reply in progress is not affected.',
+  'providers.applies_next':
+    'Takes effect from the next message; a reply in progress is not affected.',
   'providers.save_model_invalid': 'Settings for model {model} are invalid: {error}',
   'providers.error.name.too_long': 'At most 80 characters',
   'providers.error.groupName.too_long': 'At most 80 characters',
@@ -390,8 +399,10 @@ export const en: Messages = {
   'providers.error.maxOutput.invalid': 'Enter a positive whole number',
   'providers.error.maxOutput.exceeds_context': 'Max output must be smaller than the context window',
   'providers.error.reasoning.invalid_efforts': 'Select at least one effort',
-  'providers.error.reasoning.protocol_mismatch': 'The reasoning dialect does not match the endpoint protocol',
-  'providers.error.reasoning.invalid_budget': 'Budget must be at least 1024 and below max output (default 4096)',
+  'providers.error.reasoning.protocol_mismatch':
+    'The reasoning dialect does not match the endpoint protocol',
+  'providers.error.reasoning.invalid_budget':
+    'Budget must be at least 1024 and below max output (default 4096)',
   'providers.error.reasoning.unexpected_budget': 'This reasoning dialect takes no budget',
   'providers.error.pricing.invalid':
     'Prices must be 0 to 1,000,000; the first tier starts at 0, starts increase, at most 8 tiers',
@@ -461,7 +472,8 @@ export const en: Messages = {
   'providers.keys_desc': 'A key that is rejected or out of quota falls through to the next',
   'providers.key_strategy': 'Key use',
   'providers.key_strategy_round_robin': 'Rotate',
-  'providers.key_strategy_round_robin_desc': 'Each request starts at the next key; spreads rate limits across keys',
+  'providers.key_strategy_round_robin_desc':
+    'Each request starts at the next key; spreads rate limits across keys',
   'providers.key_strategy_fill_first': 'Use up, then next',
   'providers.key_strategy_fill_first_desc':
     'Always start at the first key; a key that ran out is skipped until it recovers',
@@ -489,9 +501,11 @@ export const en: Messages = {
   'mcp.server.port': 'Port',
   'mcp.server.savePort': 'Save port',
   'mcp.server.scopes': 'Enabled scopes',
-  'mcp.server.scopesHint': 'A token can only call tools whose scope is both granted to it and enabled here.',
+  'mcp.server.scopesHint':
+    'A token can only call tools whose scope is both granted to it and enabled here.',
   'mcp.server.destructiveTitle': 'Enable a destructive scope?',
-  'mcp.server.destructiveBody': 'External AI clients will be able to change data through “{scope}”.',
+  'mcp.server.destructiveBody':
+    'External AI clients will be able to change data through “{scope}”.',
   'mcp.server.newToken': 'New token',
   'mcp.server.tokenName': 'Name',
   'mcp.server.issue': 'Issue token',
@@ -514,7 +528,8 @@ export const en: Messages = {
   'mcp.client.add': 'Add server',
   'mcp.client.editTitle': 'Edit server',
   'mcp.client.empty': 'No MCP servers yet',
-  'mcp.client.emptyHint': 'Add a remote (HTTP) server or a local command (stdio), test the connection, then trust it.',
+  'mcp.client.emptyHint':
+    'Add a remote (HTTP) server or a local command (stdio), test the connection, then trust it.',
   'mcp.client.secretKeys': 'Credentials: {keys}',
   'mcp.client.test': 'Test connection',
   'mcp.client.testFailed': 'Connection failed: {error}',
@@ -529,7 +544,8 @@ export const en: Messages = {
   'mcp.client.trustBody':
     'The AI will see the tools of “{name}” and may call them; calls still follow each tool’s approval.',
   'mcp.client.privateTitle': 'Allow a private-network address?',
-  'mcp.client.privateBody': 'Requests to {url} will be allowed even though it is on the local network.',
+  'mcp.client.privateBody':
+    'Requests to {url} will be allowed even though it is on the local network.',
   'mcp.client.tools': 'Tools',
   'mcp.client.noTools': 'No tools discovered yet: test the connection.',
   'mcp.client.readOnlyHint': 'read-only, can be set to auto',
@@ -544,11 +560,13 @@ export const en: Messages = {
   'mcp.client.transport.stdio': 'Local command (stdio)',
   'mcp.client.command': 'Command',
   'mcp.client.args': 'Arguments, one per line',
-  'mcp.client.argsHint': 'Passed as is, without a shell. Put tokens in the environment variables below.',
+  'mcp.client.argsHint':
+    'Passed as is, without a shell. Put tokens in the environment variables below.',
   'mcp.client.cwd': 'Working directory',
   'mcp.client.cwdHint': 'Absolute path; leave empty to inherit the app’s directory.',
   'mcp.client.env': 'Environment variables, one “NAME=value” per line',
-  'mcp.client.envHint': 'Stored encrypted and never shown again. The app’s own keys and tokens are not passed on.',
+  'mcp.client.envHint':
+    'Stored encrypted and never shown again. The app’s own keys and tokens are not passed on.',
   'mcp.client.url': 'URL',
   'mcp.client.urlHint': 'Without credentials: put keys in the headers or query below.',
   'mcp.client.replaceSecret': 'Replace credentials (now: {keys})',
@@ -556,10 +574,12 @@ export const en: Messages = {
   'mcp.client.query': 'Query parameters, one “name=value” per line',
   'mcp.client.secretHint': 'Stored encrypted and never shown again. Leave both empty to send none.',
   'mcp.client.save': 'Save',
-  'mcp.client.err.credentialQuery': 'The URL carries a credential: move it to the query parameters below',
+  'mcp.client.err.credentialQuery':
+    'The URL carries a credential: move it to the query parameters below',
   'mcp.client.err.duplicateSlug': 'Another server already uses this prefix',
   'mcp.client.err.secretLine': 'Each credential line needs a name and a value',
-  'mcp.client.err.credentialArg': 'An argument looks like a credential: move it to the environment variables',
+  'mcp.client.err.credentialArg':
+    'An argument looks like a credential: move it to the environment variables',
   'mcp.client.err.transportChanged': 'The connection type changed: replace the credentials too',
   'skills.title': 'Skills',
   'skills.list': 'Installed skills',
@@ -588,11 +608,13 @@ export const en: Messages = {
   'skills.up': 'Move {name} up',
   'skills.down': 'Move {name} down',
   'skills.preview_title': 'Review before installing',
-  'skills.preview_desc': 'Read the full text. A skill only guides the model; it grants no tools or access.',
+  'skills.preview_desc':
+    'Read the full text. A skill only guides the model; it grants no tools or access.',
   'skills.replace': 'Replace the installed version ({version}, rev {revision})',
   'skills.install': 'Install',
   'skills.installed': 'Installed {name}',
-  'skills.content_changed': 'The file changed after the preview. Review the new text and confirm again.',
+  'skills.content_changed':
+    'The file changed after the preview. Review the new text and confirm again.',
   'skills.picker': 'Skills for this message',
   'skills.picker_none': 'No skills',
   'skills.picker_count': '{count} skills',
@@ -607,7 +629,8 @@ export const en: Messages = {
   'skills.err.unsupported_files': 'Unsupported files in the package: {field}',
   'skills.err.too_large': '{field} is too large (limit {limit})',
   'skills.err.frontmatter': 'Unsupported frontmatter at line {field}',
-  'skills.err.invalid_name': 'Invalid file name in the package: {field} (letters, digits, ".", "_", "-" only)',
+  'skills.err.invalid_name':
+    'Invalid file name in the package: {field} (letters, digits, ".", "_", "-" only)',
   'skills.err.too_deep': '{field} is nested too deep (at most {limit} levels)',
   'skills.err.not_utf8': '{field} is not UTF-8 text',
   'skills.has_scripts': 'Has scripts',

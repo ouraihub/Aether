@@ -89,7 +89,13 @@ export class RunSession {
   historyRefreshError = $state<string | null>(null)
   running = $state(false)
   contextUsage = $state<ContextUsage | null>(null)
-  search = $state<SearchState>({ status: 'idle', query: null, provider: null, hits: [], error: null })
+  search = $state<SearchState>({
+    status: 'idle',
+    query: null,
+    provider: null,
+    hits: [],
+    error: null,
+  })
   /** Id of a selected skill the backend rejected as `skill_changed`; the user has to confirm it again. */
   skillChanged = $state<string | null>(null)
   #abort: AbortController | null = null
@@ -135,9 +141,22 @@ export class RunSession {
     return totals
   }
 
-  send(base: RunBase, input: string, webSearch = false, images: ImagePart[] = []): Promise<boolean> {
+  send(
+    base: RunBase,
+    input: string,
+    webSearch = false,
+    images: ImagePart[] = [],
+  ): Promise<boolean> {
     if (this.running || input.trim() === '') return Promise.resolve(false)
-    return this.#append(base, input, this.selectedTurnId, null, 'reply', images.length ? { images } : {}, webSearch)
+    return this.#append(
+      base,
+      input,
+      this.selectedTurnId,
+      null,
+      'reply',
+      images.length ? { images } : {},
+      webSearch,
+    )
   }
 
   retry(base: RunBase, turnId: string, model?: ModelRef | null): Promise<boolean> {
@@ -161,7 +180,9 @@ export class RunSession {
     const storedSource = this.#stored && source.persisted
     // Without stored history the host cannot read the source images back, so resend the local data URLs.
     const images = source.images.flatMap((image) =>
-      image.url?.startsWith('data:') ? [{ mime: image.mime, data: image.url.slice(image.url.indexOf(',') + 1) }] : [],
+      image.url?.startsWith('data:')
+        ? [{ mime: image.mime, data: image.url.slice(image.url.indexOf(',') + 1) }]
+        : [],
     )
     return this.#append(
       snapshot,
@@ -190,7 +211,9 @@ export class RunSession {
       reasoningEffort: source.reasoningEffort,
       model:
         base.model ??
-        (source.endpointId && source.modelId ? { endpointId: source.endpointId, modelId: source.modelId } : null),
+        (source.endpointId && source.modelId
+          ? { endpointId: source.endpointId, modelId: source.modelId }
+          : null),
     }
     return this.#append(
       snapshot,
@@ -198,7 +221,9 @@ export class RunSession {
       source.id,
       null,
       'translation',
-      this.#stored && source.persisted ? { translateTurnId: source.id, targetLanguage: language.trim() } : {},
+      this.#stored && source.persisted
+        ? { translateTurnId: source.id, targetLanguage: language.trim() }
+        : {},
     )
   }
 
@@ -236,7 +261,10 @@ export class RunSession {
       modelId: base.model?.modelId ?? null,
       input,
       images:
-        action.images?.map((image) => ({ mime: image.mime, url: `data:${image.mime};base64,${image.data}` })) ??
+        action.images?.map((image) => ({
+          mime: image.mime,
+          url: `data:${image.mime};base64,${image.data}`,
+        })) ??
         source?.images ??
         [],
       generated: [],
@@ -262,7 +290,8 @@ export class RunSession {
     if (this.#runId && !this.#ended) {
       const abort = this.#abort
       void this.#port.cancel(this.#runId).catch((error: unknown) => {
-        if (this.#abort === abort && this.running) this.actionError = isKitClientError(error) ? error.code : 'internal'
+        if (this.#abort === abort && this.running)
+          this.actionError = isKitClientError(error) ? error.code : 'internal'
       })
     }
   }
@@ -291,7 +320,9 @@ export class RunSession {
 
   show(conversationId: string | null, turns: readonly Turn[] = [], selectedTurnId?: string | null) {
     const previous =
-      conversationId === this.conversationId ? new SvelteMap(this.turns.map((turn) => [turn.id, turn])) : null
+      conversationId === this.conversationId
+        ? new SvelteMap(this.turns.map((turn) => [turn.id, turn]))
+        : null
     this.stop()
     this.#abort = null
     this.#runId = null
@@ -349,7 +380,12 @@ export class RunSession {
     }
   }
 
-  async #start(base: RunBase, input: string, action: Partial<RunRequest>, webSearch: boolean): Promise<boolean> {
+  async #start(
+    base: RunBase,
+    input: string,
+    action: Partial<RunRequest>,
+    webSearch: boolean,
+  ): Promise<boolean> {
     // The proxied element, so streamed writes are reactive.
     const turn = this.turns[this.turns.length - 1]
     if (!turn) return Promise.resolve(false)
@@ -383,13 +419,20 @@ export class RunSession {
             return {
               ...this.#fromHistory(stored),
               tools: current?.tools ?? [],
-              search: current?.search ?? { status: 'idle', query: null, provider: null, hits: [], error: null },
+              search: current?.search ?? {
+                status: 'idle',
+                query: null,
+                provider: null,
+                hits: [],
+                error: null,
+              },
               exhausted: current?.exhausted ?? false,
             }
           })
           this.turns.push(...live.values())
           this.selectedTurnId = conversation.summary.selectedTurnId
-          this.contextUsage = this.turns.find((item) => item.id === this.selectedTurnId)?.contextUsage ?? null
+          this.contextUsage =
+            this.turns.find((item) => item.id === this.selectedTurnId)?.contextUsage ?? null
         }
       } catch (error: unknown) {
         if (this.#abort !== abort) return
@@ -476,7 +519,8 @@ export class RunSession {
         }
         case 'tool_result': {
           const item = tool(event.callId)
-          if (item) Object.assign(item, { pending: null, outcome: event.outcome, summary: event.summary })
+          if (item)
+            Object.assign(item, { pending: null, outcome: event.outcome, summary: event.summary })
           const painted = (event.payload as { images?: ImageRef[] } | undefined)?.images
           if (event.outcome === 'ok' && Array.isArray(painted)) turn.generated.push(...painted)
           break
@@ -520,7 +564,8 @@ export class RunSession {
         if (!ended) void this.#port.cancel(result.runId).catch(() => undefined)
         return true
       }
-      if (abort.signal.aborted && !ended) void this.#port.cancel(result.runId).catch(() => undefined)
+      if (abort.signal.aborted && !ended)
+        void this.#port.cancel(result.runId).catch(() => undefined)
       accepted = true
       this.#runId = result.runId
       if (result.conversationId) this.conversationId = result.conversationId
@@ -538,7 +583,8 @@ export class RunSession {
       const code = isKitClientError(error) ? error.code : 'internal'
       if (isKitClientError(error)) this.#checkSkill(error)
       finish(code === 'cancelled' ? 'cancelled' : 'failed', code === 'cancelled' ? null : code)
-      if ((turn.supersedesId !== null || turn.kind === 'translation') && code !== 'cancelled') this.actionError = code
+      if ((turn.supersedesId !== null || turn.kind === 'translation') && code !== 'cancelled')
+        this.actionError = code
       if (turn.supersedesId !== null || turn.kind === 'translation')
         this.turns = this.turns.filter((item) => item !== turn)
       this.#abort = null

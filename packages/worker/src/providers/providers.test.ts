@@ -27,7 +27,12 @@ class TestDocuments implements DocumentStore {
   async list(owner: Actor, collection: string): Promise<readonly StoredDocument[]> {
     return [...this.documents.entries()]
       .filter(([key]) =>
-        key.startsWith(JSON.stringify([owner.applicationId, owner.tenantId, owner.subjectId, collection]).slice(0, -1)),
+        key.startsWith(
+          JSON.stringify([owner.applicationId, owner.tenantId, owner.subjectId, collection]).slice(
+            0,
+            -1,
+          ),
+        ),
       )
       .map(([, value]) => structuredClone(value))
   }
@@ -40,14 +45,21 @@ class TestDocuments implements DocumentStore {
   ): Promise<StoredDocument> {
     const id = this.id(owner, collection, key)
     const old = this.documents.get(id)
-    if (this.fail || (old?.revision ?? null) !== expectedRevision) throw new KitFailure('conflict', 'CAS conflict')
+    if (this.fail || (old?.revision ?? null) !== expectedRevision)
+      throw new KitFailure('conflict', 'CAS conflict')
     const saved = { key, revision: (old?.revision ?? 0) + 1, value: structuredClone(value) }
     this.documents.set(id, saved)
     return structuredClone(saved)
   }
-  async remove(owner: Actor, collection: string, key: string, expectedRevision: number): Promise<void> {
+  async remove(
+    owner: Actor,
+    collection: string,
+    key: string,
+    expectedRevision: number,
+  ): Promise<void> {
     const id = this.id(owner, collection, key)
-    if (this.documents.get(id)?.revision !== expectedRevision) throw new KitFailure('conflict', 'CAS conflict')
+    if (this.documents.get(id)?.revision !== expectedRevision)
+      throw new KitFailure('conflict', 'CAS conflict')
     this.documents.delete(id)
   }
 }
@@ -65,7 +77,10 @@ const model: ModelSave = {
   pricing: null,
 }
 async function setup() {
-  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+    'encrypt',
+    'decrypt',
+  ])
   const documents = new TestDocuments()
   const credentials = createCredentialPort({ currentKeyId: 'test', keys: new Map([['test', key]]) })
   let reveals = 0
@@ -84,7 +99,14 @@ async function setup() {
   })
   const input: ProviderSave = {
     name: 'Provider',
-    endpoints: [{ slug: 'primary', baseUrl: 'https://models.example', protocol: 'openai-chat', models: [model] }],
+    endpoints: [
+      {
+        slug: 'primary',
+        baseUrl: 'https://models.example',
+        protocol: 'openai-chat',
+        models: [model],
+      },
+    ],
   }
   const providers = await service.save(actor, input)
   const provider = providers[0]
@@ -97,7 +119,10 @@ test('provider CRUD encrypts credentials and reserves one round-robin start per 
   const { service, documents, endpoint } = await setup()
   await service.saveKey(actor, { endpointId: endpoint.id, key: 'alpha-secret-value' })
   await service.saveKey(actor, { endpointId: endpoint.id, key: 'bravo-secret-value' })
-  assert.equal(JSON.stringify([...documents.documents.values()]).includes('alpha-secret-value'), false)
+  assert.equal(
+    JSON.stringify([...documents.documents.values()]).includes('alpha-secret-value'),
+    false,
+  )
   const one = await service.resolve(actor, { endpointId: endpoint.id, modelId: model.id })
   const two = await service.resolve(actor, { endpointId: endpoint.id, modelId: model.id })
   assert.deepEqual(one.keys, ['alpha-secret-value', 'bravo-secret-value'])
@@ -108,7 +133,10 @@ test('provider CRUD encrypts credentials and reserves one round-robin start per 
   assert.ok(savedKey)
   assert.equal(savedKey.masked, 'alph…alue')
   assert.equal(savedKey.readable, true)
-  await assert.rejects(service.saveKey(actor, { endpointId: endpoint.id, key: 'alpha-secret-value' }), /duplicate/)
+  await assert.rejects(
+    service.saveKey(actor, { endpointId: endpoint.id, key: 'alpha-secret-value' }),
+    /duplicate/,
+  )
   const other: Actor = { ...actor, subjectId: 'other' }
   assert.deepEqual(await service.list(other), [])
   await assert.rejects(service.revealKey(other, savedKey.id), /Unknown key/)
@@ -149,18 +177,34 @@ test('whole-provider replacement preserves tri-state configuration, manual reaso
     id: provider.id,
     name: provider.name,
     endpoints: [
-      { id: endpoint.id, slug: endpoint.slug, baseUrl: endpoint.baseUrl, protocol: endpoint.protocol, models: [model] },
+      {
+        id: endpoint.id,
+        slug: endpoint.slug,
+        baseUrl: endpoint.baseUrl,
+        protocol: endpoint.protocol,
+        models: [model],
+      },
     ],
   })
   assert.equal(keep[0]?.endpoints[0]?.imageBaseUrl, 'https://images.example')
   assert.deepEqual(keep[0]?.endpoints[0]?.headers, { 'x-team': 'a' })
-  assert.equal((await service.resolve(actor, { endpointId: endpoint.id, modelId: model.id })).reasoning, null)
+  assert.equal(
+    (await service.resolve(actor, { endpointId: endpoint.id, modelId: model.id })).reasoning,
+    null,
+  )
   await service.save(actor, { id: provider.id, name: provider.name, endpoints: [] })
-  await assert.rejects(service.resolve(actor, { endpointId: endpoint.id, modelId: model.id }), /Unknown model/)
+  await assert.rejects(
+    service.resolve(actor, { endpointId: endpoint.id, modelId: model.id }),
+    /Unknown model/,
+  )
 })
 test('preset adoption preserves user data and reveal HTTP requires fresh authentication', async () => {
   const { service, provider, endpoint, reveals } = await setup()
-  const adopted = await service.save(actor, { presetId: 'public-preset', name: provider.name, endpoints: [] })
+  const adopted = await service.save(actor, {
+    presetId: 'public-preset',
+    name: provider.name,
+    endpoints: [],
+  })
   assert.equal(adopted.length, 1)
   assert.equal(adopted[0]?.presetId, 'public-preset')
   assert.equal(adopted[0]?.endpoints.length, 1)
@@ -168,10 +212,18 @@ test('preset adoption preserves user data and reveal HTTP requires fresh authent
   const saved = await service.saveKey(actor, { endpointId: endpoint.id, key: 'secret-value' })
   const keyId = saved[0]?.endpoints[0]?.keys[0]?.id
   assert.ok(keyId)
-  const context: WorkerContext = { actor, signal: new AbortController().signal, requestId: 'request', now: Date.now() }
+  const context: WorkerContext = {
+    actor,
+    signal: new AbortController().signal,
+    requestId: 'request',
+    now: Date.now(),
+  }
   await assert.rejects(
     service.handle(
-      new Request(`https://worker.example/api/v1/providers/keys/${keyId}/reveal`, { method: 'POST', body: '{}' }),
+      new Request(`https://worker.example/api/v1/providers/keys/${keyId}/reveal`, {
+        method: 'POST',
+        body: '{}',
+      }),
       context,
     ),
     /Fresh authentication/,

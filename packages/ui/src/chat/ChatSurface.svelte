@@ -41,7 +41,8 @@
   function onscroll() {
     if (!scroller) return
     follow =
-      scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 48 && scroller.scrollTop >= lastScrollTop
+      scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= 48 &&
+      scroller.scrollTop >= lastScrollTop
     lastScrollTop = scroller.scrollTop
   }
   $effect.pre(() => {

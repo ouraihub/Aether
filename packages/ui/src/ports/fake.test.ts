@@ -8,7 +8,14 @@ function required<T>(value: T | null | undefined): T {
 }
 
 const model = { endpointId: 'endpoint', modelId: 'model' }
-const request: RunRequest = { purpose: 'chat', skills: [], input: 'Question', regenerate: false, language: 'en', model }
+const request: RunRequest = {
+  purpose: 'chat',
+  skills: [],
+  input: 'Question',
+  regenerate: false,
+  language: 'en',
+  model,
+}
 const turn = (id: string, overrides: Partial<Turn> = {}): Turn => ({
   id,
   parentId: null,
@@ -23,12 +30,28 @@ const turn = (id: string, overrides: Partial<Turn> = {}): Turn => ({
   reasoningText: 'Thinking',
   images: [],
   generated: [],
-  usage: { inputTokens: 100, outputTokens: 60, cacheReadTokens: 20, cacheWriteTokens: null, reasoningTokens: 4 },
+  usage: {
+    inputTokens: 100,
+    outputTokens: 60,
+    cacheReadTokens: 20,
+    cacheWriteTokens: null,
+    reasoningTokens: 4,
+  },
   contextUsage: { tokens: 160, contextWindow: 1000, source: 'reported', ...model },
   ...overrides,
 })
-const stored = (turns: Turn[], selectedTurnId: string | null = turns[0]?.id ?? null): Conversation => ({
-  summary: { id: 'stored', title: 'Stored', scope: 'scope', createdAt: 1, updatedAt: 2, selectedTurnId },
+const stored = (
+  turns: Turn[],
+  selectedTurnId: string | null = turns[0]?.id ?? null,
+): Conversation => ({
+  summary: {
+    id: 'stored',
+    title: 'Stored',
+    scope: 'scope',
+    createdAt: 1,
+    updatedAt: 2,
+    selectedTurnId,
+  },
   turns,
 })
 
@@ -40,7 +63,16 @@ async function code(promise: Promise<unknown>) {
 describe('createFakePorts', () => {
   it('declares every port by default', () => {
     expect(Object.keys(createFakePorts()).sort()).toEqual(
-      ['chat', 'conversations', 'desktop', 'logs', 'mcpClient', 'mcpServer', 'providers', 'skills'].sort(),
+      [
+        'chat',
+        'conversations',
+        'desktop',
+        'logs',
+        'mcpClient',
+        'mcpServer',
+        'providers',
+        'skills',
+      ].sort(),
     )
   })
 
@@ -56,7 +88,10 @@ describe('createFakePorts', () => {
   it('overrides single methods and keeps the rest', async () => {
     const ports = createFakePorts({
       providers: {
-        list: () => Promise.resolve([{ id: 'p', name: 'P', enabled: true, notes: '', presetId: null, endpoints: [] }]),
+        list: () =>
+          Promise.resolve([
+            { id: 'p', name: 'P', enabled: true, notes: '', presetId: null, endpoints: [] },
+          ]),
       },
     })
     expect(await ports.providers?.list()).toEqual([
@@ -100,8 +135,14 @@ describe('createFakePorts', () => {
     expect(await requested).toEqual({ ...accepted, status: 'running', cancelRequested: true })
     await cancellation
     expect(events).toEqual([{ kind: 'end', status: 'cancelled' }])
-    expect(await chat.getSnapshot(accepted.runId)).toEqual({ ...accepted, status: 'cancelled', cancelRequested: true })
-    expect((await required(ports.conversations).get(required(accepted.conversationId))).turns[0]).toMatchObject({
+    expect(await chat.getSnapshot(accepted.runId)).toEqual({
+      ...accepted,
+      status: 'cancelled',
+      cancelRequested: true,
+    })
+    expect(
+      (await required(ports.conversations).get(required(accepted.conversationId))).turns[0],
+    ).toMatchObject({
       status: 'cancelled',
       text: '',
     })
@@ -122,25 +163,39 @@ describe('createFakePorts', () => {
     expect(snapshot).toEqual({ ...accepted, status: 'completed', cancelRequested: false })
     snapshot.status = 'failed'
     await chat.cancel(accepted.runId)
-    expect(await chat.getSnapshot(accepted.runId)).toEqual({ ...accepted, status: 'completed', cancelRequested: false })
-    expect(events.filter((event) => event.kind === 'end')).toEqual([{ kind: 'end', status: 'completed' }])
+    expect(await chat.getSnapshot(accepted.runId)).toEqual({
+      ...accepted,
+      status: 'completed',
+      cancelRequested: false,
+    })
+    expect(events.filter((event) => event.kind === 'end')).toEqual([
+      { kind: 'end', status: 'completed' },
+    ])
   })
 
   it('routes an accepted abort through cancellation and removes the listener at completion', async () => {
     const chat = required(createFakePorts().chat)
     const controller = new AbortController()
     const events: RunEvent[] = []
-    const accepted = await chat.start(request, (event) => events.push(event), { signal: controller.signal })
+    const accepted = await chat.start(request, (event) => events.push(event), {
+      signal: controller.signal,
+    })
     controller.abort()
     await Promise.resolve()
     expect(events).toEqual([{ kind: 'end', status: 'cancelled' }])
-    expect(await chat.getSnapshot(accepted.runId)).toMatchObject({ status: 'cancelled', cancelRequested: true })
+    expect(await chat.getSnapshot(accepted.runId)).toMatchObject({
+      status: 'cancelled',
+      cancelRequested: true,
+    })
 
     const finished = new AbortController()
     const completed = await chat.start(request, () => undefined, { signal: finished.signal })
     await Promise.resolve()
     finished.abort()
-    expect(await chat.getSnapshot(completed.runId)).toMatchObject({ status: 'completed', cancelRequested: false })
+    expect(await chat.getSnapshot(completed.runId)).toMatchObject({
+      status: 'completed',
+      cancelRequested: false,
+    })
   })
 
   it('retains only the last 128 terminal snapshots and uses unique no-store run IDs', async () => {
@@ -157,7 +212,11 @@ describe('createFakePorts', () => {
     expect(await code(chat.approve(required(ids[0]), 'call', false))).toBe('not_found')
     await chat.cancel(required(ids[0]))
     for (const id of ids.slice(1))
-      expect(await chat.getSnapshot(id)).toMatchObject({ runId: id, status: 'completed', cancelRequested: false })
+      expect(await chat.getSnapshot(id)).toMatchObject({
+        runId: id,
+        status: 'completed',
+        cancelRequested: false,
+      })
     const active = await chat.start(request, () => undefined)
     const retained = chat.getSnapshot(required(ids[1]))
     const running = chat.getSnapshot(active.runId)
@@ -192,7 +251,9 @@ describe('createFakePorts', () => {
     expect((await required(ports.conversations).list())[0]?.selectedTurnId).toBe(accepted.turnId)
   })
   it('lists scoped storage, renames and removes real conversations', async () => {
-    const conversations = required(createFakePorts({ initialConversations: [stored([turn('source')])] }).conversations)
+    const conversations = required(
+      createFakePorts({ initialConversations: [stored([turn('source')])] }).conversations,
+    )
     expect(await conversations.list('other')).toEqual([])
     expect((await conversations.list('scope'))[0]?.id).toBe('stored')
     expect((await conversations.rename('stored', 'Renamed')).title).toBe('Renamed')
@@ -207,9 +268,12 @@ describe('createFakePorts', () => {
   it('rejects cyclic and missing fork ancestors without creating partial conversations', async () => {
     for (const parentId of ['source', 'missing']) {
       const conversations = required(
-        createFakePorts({ initialConversations: [stored([turn('source', { parentId })])] }).conversations,
+        createFakePorts({ initialConversations: [stored([turn('source', { parentId })])] })
+          .conversations,
       )
-      expect(await code(conversations.fork('stored', 'source'))).toBe(parentId === 'source' ? 'conflict' : 'not_found')
+      expect(await code(conversations.fork('stored', 'source'))).toBe(
+        parentId === 'source' ? 'conflict' : 'not_found',
+      )
       expect(await conversations.list()).toHaveLength(1)
     }
   })
@@ -223,27 +287,41 @@ describe('createFakePorts', () => {
     expect(accepted).toMatchObject({ conversationId: null, turnId: null })
     await Promise.resolve()
     expect(events).toEqual([{ kind: 'end', status: 'completed' }])
-    expect(await code(chat.start(request, () => undefined, { signal: AbortSignal.abort() }))).toBe('cancelled')
+    expect(await code(chat.start(request, () => undefined, { signal: AbortSignal.abort() }))).toBe(
+      'cancelled',
+    )
   })
 
   it('keeps writing runs temporary even when conversations are available', async () => {
     const ports = createFakePorts()
     const events: RunEvent[] = []
-    const accepted = await required(ports.chat).start({ ...request, purpose: 'writing' }, (event) => events.push(event))
+    const accepted = await required(ports.chat).start({ ...request, purpose: 'writing' }, (event) =>
+      events.push(event),
+    )
     expect(accepted).toMatchObject({ conversationId: null, turnId: null })
     await Promise.resolve()
     expect(events).toEqual([{ kind: 'end', status: 'completed' }])
     expect(await required(ports.conversations).list()).toEqual([])
-    expect(await required(ports.chat).getSnapshot(accepted.runId)).toMatchObject({ status: 'completed' })
+    expect(await required(ports.chat).getSnapshot(accepted.runId)).toMatchObject({
+      status: 'completed',
+    })
   })
 
   it('preserves candidate question, parent and source model without selecting retry', async () => {
     const ports = createFakePorts({
-      initialConversations: [stored([turn('parent'), turn('source', { parentId: 'parent' })], 'source')],
+      initialConversations: [
+        stored([turn('parent'), turn('source', { parentId: 'parent' })], 'source'),
+      ],
     })
     const chat = required(ports.chat)
     const accepted = await chat.start(
-      { ...request, model: null, conversationId: 'stored', retryTurnId: 'source', input: 'Ignored' },
+      {
+        ...request,
+        model: null,
+        conversationId: 'stored',
+        retryTurnId: 'source',
+        input: 'Ignored',
+      },
       () => undefined,
     )
     const saved = await required(ports.conversations).get('stored')
@@ -272,7 +350,13 @@ describe('createFakePorts', () => {
     const ports = createFakePorts({ initialConversations: [stored([turn('source')])] })
     const chat = required(ports.chat)
     const accepted = await chat.start(
-      { ...request, conversationId: 'stored', translateTurnId: 'source', targetLanguage: ' French ', input: 'Ignored' },
+      {
+        ...request,
+        conversationId: 'stored',
+        translateTurnId: 'source',
+        targetLanguage: ' French ',
+        input: 'Ignored',
+      },
       () => undefined,
     )
     const saved = await required(ports.conversations).get('stored')
@@ -303,8 +387,13 @@ describe('createFakePorts', () => {
     const first = await chat.start({ ...request, images }, () => undefined)
     const conversationId = required(first.conversationId)
     const shown = [{ mime: 'image/png', url: 'data:image/png;base64,AAAA' }]
-    expect((await required(ports.conversations).get(conversationId)).turns[0]?.images).toEqual(shown)
-    const retried = await chat.start({ ...request, conversationId, retryTurnId: first.turnId }, () => undefined)
+    expect((await required(ports.conversations).get(conversationId)).turns[0]?.images).toEqual(
+      shown,
+    )
+    const retried = await chat.start(
+      { ...request, conversationId, retryTurnId: first.turnId },
+      () => undefined,
+    )
     await Promise.resolve()
     const translated = await chat.start(
       { ...request, conversationId, translateTurnId: first.turnId, targetLanguage: 'French' },
@@ -325,15 +414,22 @@ describe('createFakePorts', () => {
   it('selects within one conversation and normal continuation uses that parent', async () => {
     const ports = createFakePorts({
       initialConversations: [
-        stored([turn('source'), turn('candidate', { questionId: 'source', supersedesId: 'source' })]),
+        stored([
+          turn('source'),
+          turn('candidate', { questionId: 'source', supersedesId: 'source' }),
+        ]),
       ],
     })
     const chat = required(ports.chat)
-    expect((await required(ports.conversations).selectTurn('stored', 'candidate')).summary.id).toBe('stored')
+    expect((await required(ports.conversations).selectTurn('stored', 'candidate')).summary.id).toBe(
+      'stored',
+    )
     await chat.start({ ...request, conversationId: 'stored', input: 'Next' }, () => undefined)
     expect((await required(ports.conversations).get('stored')).turns[2]?.parentId).toBe('candidate')
     const other = await chat.start(request, () => undefined)
-    expect(await code(required(ports.conversations).selectTurn('stored', required(other.turnId)))).toBe('not_found')
+    expect(
+      await code(required(ports.conversations).selectTurn('stored', required(other.turnId))),
+    ).toBe('not_found')
     expect((await required(ports.conversations).list()).length).toBe(2)
   })
 
@@ -349,9 +445,15 @@ describe('createFakePorts', () => {
       contextUsage: null,
       reasoningText: null,
     })
-    expect(await code(conversations.editTurn('stored', 'source', 'lost', 'Original answer'))).toBe('conflict')
-    expect(await code(conversations.editTurn('stored', 'source', ' ', '**Edited**'))).toBe('bad_request')
-    expect(await code(conversations.editTurn('stored', 'source', 'x'.repeat(24_001), '**Edited**'))).toBe('bad_request')
+    expect(await code(conversations.editTurn('stored', 'source', 'lost', 'Original answer'))).toBe(
+      'conflict',
+    )
+    expect(await code(conversations.editTurn('stored', 'source', ' ', '**Edited**'))).toBe(
+      'bad_request',
+    )
+    expect(
+      await code(conversations.editTurn('stored', 'source', 'x'.repeat(24_001), '**Edited**')),
+    ).toBe('bad_request')
     required(saved.turns[0]).text = 'External mutation'
     required(required(saved.turns[0]).usage).inputTokens = 0
     expect((await conversations.get('stored')).turns[0]?.text).toBe('**Edited**')
@@ -374,7 +476,9 @@ describe('createFakePorts', () => {
         ],
       }).conversations,
     )
-    expect(await code(conversations.editTurn('stored', 'source', 'changed', 'Original answer'))).toBe('conflict')
+    expect(
+      await code(conversations.editTurn('stored', 'source', 'changed', 'Original answer')),
+    ).toBe('conflict')
     const afterCandidate = await conversations.removeTurn('stored', 'candidate')
     expect(afterCandidate.turns.map(({ id }) => id)).toEqual(['source', 'child'])
     expect(afterCandidate.turns.find(({ id }) => id === 'child')?.parentId).toBe('source')
@@ -402,11 +506,18 @@ describe('createFakePorts', () => {
     expect(fork.turns[1]?.parentId).toBe(fork.turns[0]?.id)
     expect(fork.summary.selectedTurnId).toBe(fork.turns[1]?.id)
     for (const copied of fork.turns) {
-      expect(seed.turns.some((source) => source.id === copied.id || source.questionId === copied.questionId)).toBe(
-        false,
-      )
+      expect(
+        seed.turns.some(
+          (source) => source.id === copied.id || source.questionId === copied.questionId,
+        ),
+      ).toBe(false)
     }
-    await conversations.editTurn(fork.summary.id, required(fork.turns[1]).id, 'Fork only', 'Original answer')
+    await conversations.editTurn(
+      fork.summary.id,
+      required(fork.turns[1]).id,
+      'Fork only',
+      'Original answer',
+    )
     expect((await conversations.get('stored')).turns[2]?.text).toBe('Original answer')
   })
 
@@ -416,7 +527,9 @@ describe('createFakePorts', () => {
         initialConversations: [stored([turn('source'), turn('running', { status: 'running' })])],
       }).conversations,
     )
-    expect(await code(conversations.editTurn('stored', 'source', 'changed', 'Original answer'))).toBe('conflict')
+    expect(
+      await code(conversations.editTurn('stored', 'source', 'changed', 'Original answer')),
+    ).toBe('conflict')
     expect(await code(conversations.removeTurn('stored', 'source'))).toBe('conflict')
     expect(await code(conversations.selectTurn('stored', 'source'))).toBe('conflict')
     expect(await code(conversations.fork('stored', 'source'))).toBe('conflict')
@@ -438,9 +551,11 @@ describe('createFakePorts', () => {
       { purpose: 'writing', translateTurnId: 'source', targetLanguage: 'French' },
     ]
     for (const fields of invalid)
-      expect(await code(chat.start({ ...request, conversationId: 'stored', ...fields }, () => undefined))).toBe(
-        'bad_request',
-      )
+      expect(
+        await code(
+          chat.start({ ...request, conversationId: 'stored', ...fields }, () => undefined),
+        ),
+      ).toBe('bad_request')
     const removed = required(
       createFakePorts({
         initialConversations: [stored([turn('source')])],
@@ -449,24 +564,41 @@ describe('createFakePorts', () => {
     )
     expect(
       await code(
-        removed.start({ ...request, model: null, conversationId: 'stored', retryTurnId: 'source' }, () => undefined),
+        removed.start(
+          { ...request, model: null, conversationId: 'stored', retryTurnId: 'source' },
+          () => undefined,
+        ),
       ),
     ).toBe('needs_config')
     expect(
-      await code(chat.start({ ...request, conversationId: 'stored', retryTurnId: 'missing' }, () => undefined)),
+      await code(
+        chat.start(
+          { ...request, conversationId: 'stored', retryTurnId: 'missing' },
+          () => undefined,
+        ),
+      ),
     ).toBe('not_found')
     expect(
-      await code(chat.start({ ...request, conversationId: 'stored', replyToId: 'missing' }, () => undefined)),
+      await code(
+        chat.start({ ...request, conversationId: 'stored', replyToId: 'missing' }, () => undefined),
+      ),
     ).toBe('not_found')
-    expect(await code(chat.start({ ...request, conversationId: 'missing' }, () => undefined))).toBe('not_found')
+    expect(await code(chat.start({ ...request, conversationId: 'missing' }, () => undefined))).toBe(
+      'not_found',
+    )
     expect((await required(ports.conversations).get('stored')).turns).toHaveLength(1)
-    expect(await code(chat.start({ ...request, retryTurnId: 'source' }, () => undefined))).toBe('bad_request')
+    expect(await code(chat.start({ ...request, retryTurnId: 'source' }, () => undefined))).toBe(
+      'bad_request',
+    )
   })
 
   it('skills.get rejects with not_found and its details', async () => {
     const error: unknown = await createFakePorts()
       .skills?.get('s1')
       .catch((caught: unknown) => caught)
-    expect(isKitClientError(error) && [error.code, error.details.entity]).toEqual(['not_found', 'skill'])
+    expect(isKitClientError(error) && [error.code, error.details.entity]).toEqual([
+      'not_found',
+      'skill',
+    ])
   })
 })

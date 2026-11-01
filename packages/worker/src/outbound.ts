@@ -48,7 +48,12 @@ function privateLiteral(host: string): boolean {
     )
   }
   if (!/^\d+(?:\.\d+){3}$/u.test(host))
-    return host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || !host.includes('.')
+    return (
+      host === 'localhost' ||
+      host.endsWith('.localhost') ||
+      host.endsWith('.local') ||
+      !host.includes('.')
+    )
   const parts = host.split('.').map(Number)
   const a = parts[0],
     b = parts[1],
@@ -81,11 +86,13 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
       } catch {
         throw badRequest('allowedOrigins', 'invalid')
       }
-      if (url.origin !== origin || url.username || url.password) throw badRequest('allowedOrigins', 'invalid')
+      if (url.origin !== origin || url.username || url.password)
+        throw badRequest('allowedOrigins', 'invalid')
       return origin
     }),
   )
-  if (origins.size === 0) throw new KitFailure('needs_config', 'Outbound origins must be explicitly configured')
+  if (origins.size === 0)
+    throw new KitFailure('needs_config', 'Outbound origins must be explicitly configured')
   const privateOrigins = new Set(options.privateGateway?.allowedOrigins ?? [])
   for (const origin of privateOrigins) {
     let target: URL
@@ -126,7 +133,9 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
         !local &&
         (!gateway ||
           gateway.security !==
-            (privateTarget ? 'explicit-private-targets-at-connect-time' : 'public-addresses-at-connect-time'))
+            (privateTarget
+              ? 'explicit-private-targets-at-connect-time'
+              : 'public-addresses-at-connect-time'))
       )
         throw new KitFailure('needs_config', 'Trusted connect-time outbound gateway is required')
       const abort = new AbortController()
@@ -169,7 +178,8 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
       init.signal?.addEventListener('abort', callerAbort, { once: true })
       abort.signal.addEventListener('abort', onAbort, { once: true })
       if (init.signal?.aborted) callerAbort()
-      if (abort.signal.aborted) throw failure ?? new KitFailure('cancelled', 'Outbound request cancelled')
+      if (abort.signal.aborted)
+        throw failure ?? new KitFailure('cancelled', 'Outbound request cancelled')
       try {
         const headers = new Headers(init.headers)
         headers.set('User-Agent', 'Aether-Worker/1')
@@ -184,7 +194,8 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
         const pending = local
           ? (options.localFetch ?? fetch)(target.href, request)
           : gateway?.binding.fetch(target.href, request)
-        if (!pending) throw new KitFailure('needs_config', 'Trusted connect-time outbound gateway is required')
+        if (!pending)
+          throw new KitFailure('needs_config', 'Trusted connect-time outbound gateway is required')
         void pending.then(
           (response) => {
             if (abort.signal.aborted) void response.body?.cancel().catch(() => {})
@@ -192,7 +203,8 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
           () => {},
         )
         const aborted = Promise.withResolvers<never>()
-        const rejectAbort = () => aborted.reject(failure ?? new KitFailure('cancelled', 'Outbound request cancelled'))
+        const rejectAbort = () =>
+          aborted.reject(failure ?? new KitFailure('cancelled', 'Outbound request cancelled'))
         abort.signal.addEventListener('abort', rejectAbort, { once: true })
         let response: Response
         try {
@@ -209,7 +221,10 @@ export function createWorkerOutbound(options: WorkerOutboundOptions): OutboundHt
           throw badRequest('url', 'redirect_forbidden')
         }
         const length = response.headers.get('content-length')
-        if (length !== null && (!/^\d+$/u.test(length) || Number(length) > limits.maxResponseBytes)) {
+        if (
+          length !== null &&
+          (!/^\d+$/u.test(length) || Number(length) > limits.maxResponseBytes)
+        ) {
           void response.body?.cancel().catch(() => {})
           throw badRequest('response', 'too_large', limits.maxResponseBytes)
         }

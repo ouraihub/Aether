@@ -32,7 +32,9 @@ describe('createLogger', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(batches).toEqual([
       {
-        entries: [{ level: 'info', event: 'ui.panel.opened', fields: { count: 1, ok: true, name: 'x' } }],
+        entries: [
+          { level: 'info', event: 'ui.panel.opened', fields: { count: 1, ok: true, name: 'x' } },
+        ],
         droppedCount: 0,
       },
     ])

@@ -130,7 +130,9 @@
 
   /** One-line location shown in the list: the URL, or the command line. */
   function location(transport: McpTransport): string {
-    return transport.kind === 'http' ? transport.url : [transport.command, ...transport.args].join(' ')
+    return transport.kind === 'http'
+      ? transport.url
+      : [transport.command, ...transport.args].join(' ')
   }
 
   const update = (next: ServerSave) => act(async () => void (servers = await need().save(next)))
@@ -277,7 +279,9 @@
                 >{server.name} <span class="text-muted-foreground">({server.slug})</span></span
               >
               <span class="text-muted-foreground truncate font-mono text-xs"
-                >{t(`mcp.client.transport.${server.transport.kind}`)} · {location(server.transport)}</span
+                >{t(`mcp.client.transport.${server.transport.kind}`)} · {location(
+                  server.transport,
+                )}</span
               >
               {#if server.secretKeys.length}
                 <span class="text-muted-foreground text-xs">
@@ -291,7 +295,12 @@
             <Button size="sm" variant="outline" disabled={busy} onclick={() => edit(server)}>
               {t('mcp.client.edit')}
             </Button>
-            <Button size="sm" variant="destructive" disabled={busy} onclick={() => void remove(server)}>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={busy}
+              onclick={() => void remove(server)}
+            >
               {t('mcp.client.delete')}
             </Button>
           </div>
@@ -303,7 +312,9 @@
                 disabled={busy}
                 onCheckedChange={(on) => void update({ ...base(server), enabled: on })}
               />
-              <Field.Label for={`kit-mcp-enabled-${server.id}`}>{t('mcp.client.enabled')}</Field.Label>
+              <Field.Label for={`kit-mcp-enabled-${server.id}`}
+                >{t('mcp.client.enabled')}</Field.Label
+              >
             </Field.Field>
             <Field.Field orientation="horizontal" class="w-auto">
               <Switch
@@ -312,7 +323,9 @@
                 disabled={busy}
                 onCheckedChange={(on) => void setTrusted(server, on)}
               />
-              <Field.Label for={`kit-mcp-trusted-${server.id}`}>{t('mcp.client.trusted')}</Field.Label>
+              <Field.Label for={`kit-mcp-trusted-${server.id}`}
+                >{t('mcp.client.trusted')}</Field.Label
+              >
             </Field.Field>
             {#if server.transport.kind === 'http'}
               <Field.Field orientation="horizontal" class="w-auto">
@@ -322,13 +335,19 @@
                   disabled={busy}
                   onCheckedChange={(on) => void setPrivate(server, on)}
                 />
-                <Field.Label for={`kit-mcp-private-${server.id}`}>{t('mcp.client.allowPrivate')}</Field.Label>
+                <Field.Label for={`kit-mcp-private-${server.id}`}
+                  >{t('mcp.client.allowPrivate')}</Field.Label
+                >
               </Field.Field>
             {/if}
           </div>
           {#if testErrors[server.id]}
             <Alert variant="destructive">
-              <AlertDescription>{t('mcp.client.testFailed', { error: testErrors[server.id] ?? '' })}</AlertDescription>
+              <AlertDescription
+                >{t('mcp.client.testFailed', {
+                  error: testErrors[server.id] ?? '',
+                })}</AlertDescription
+              >
             </Alert>
           {/if}
           {#if server.tools.length}
@@ -345,7 +364,8 @@
                   <Select.Root
                     type="single"
                     value={tool.approval}
-                    onValueChange={(value) => void setApproval(server, tool.name, value as Approval)}
+                    onValueChange={(value) =>
+                      void setApproval(server, tool.name, value as Approval)}
                   >
                     <Select.Trigger
                       size="sm"
@@ -357,7 +377,10 @@
                     <Select.Content>
                       <Select.Group>
                         {#each APPROVALS as approval (approval)}
-                          <Select.Item value={approval} label={t(`mcp.client.approval.${approval}`)} />
+                          <Select.Item
+                            value={approval}
+                            label={t(`mcp.client.approval.${approval}`)}
+                          />
                         {/each}
                       </Select.Group>
                     </Select.Content>
@@ -396,7 +419,11 @@
         </div>
         <Field.Field>
           <Field.Label for="kit-mcp-transport">{t('mcp.client.transport')}</Field.Label>
-          <Select.Root type="single" value={kind} onValueChange={(value) => changeKind(value as McpTransport['kind'])}>
+          <Select.Root
+            type="single"
+            value={kind}
+            onValueChange={(value) => changeKind(value as McpTransport['kind'])}
+          >
             <Select.Trigger id="kit-mcp-transport" class="w-full">
               {t(`mcp.client.transport.${kind}`)}
             </Select.Trigger>
@@ -412,17 +439,33 @@
         {#if kind === 'http'}
           <Field.Field>
             <Field.Label for="kit-mcp-url">{t('mcp.client.url')}</Field.Label>
-            <CopyInput id="kit-mcp-url" class="font-mono" placeholder="https://example.com/mcp" bind:value={url} />
+            <CopyInput
+              id="kit-mcp-url"
+              class="font-mono"
+              placeholder="https://example.com/mcp"
+              bind:value={url}
+            />
             <Field.Description>{t('mcp.client.urlHint')}</Field.Description>
           </Field.Field>
         {:else}
           <Field.Field>
             <Field.Label for="kit-mcp-command">{t('mcp.client.command')}</Field.Label>
-            <Input id="kit-mcp-command" class="font-mono" maxlength={1024} placeholder="npx" bind:value={command} />
+            <Input
+              id="kit-mcp-command"
+              class="font-mono"
+              maxlength={1024}
+              placeholder="npx"
+              bind:value={command}
+            />
           </Field.Field>
           <Field.Field>
             <Field.Label for="kit-mcp-args">{t('mcp.client.args')}</Field.Label>
-            <Textarea id="kit-mcp-args" class="font-mono text-xs" placeholder={ARGS_PLACEHOLDER} bind:value={args} />
+            <Textarea
+              id="kit-mcp-args"
+              class="font-mono text-xs"
+              placeholder={ARGS_PLACEHOLDER}
+              bind:value={args}
+            />
             <Field.Description>{t('mcp.client.argsHint')}</Field.Description>
           </Field.Field>
           <Field.Field>
@@ -433,7 +476,11 @@
         {/if}
         {#if editId}
           <Field.Field orientation="horizontal">
-            <Switch id="kit-mcp-replace" checked={replaceSecret} onCheckedChange={changeReplacement} />
+            <Switch
+              id="kit-mcp-replace"
+              checked={replaceSecret}
+              onCheckedChange={changeReplacement}
+            />
             <Field.Label for="kit-mcp-replace">
               {t('mcp.client.replaceSecret', { keys: currentKeys.join(', ') || '—' })}
             </Field.Label>

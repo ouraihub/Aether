@@ -2,7 +2,14 @@ import type { SearchPage, SearchResult } from '@ouraihub/aether-contracts'
 import { KitFailure } from '../error.js'
 import type { OutboundHttp } from '../ports.js'
 import { execute, type CheckTarget, type ResolvedSearchConfig } from './execution.js'
-import { checkBlacklist, cutoff, processHits, validatePreferences, validateQuery, validateTarget } from './policy.js'
+import {
+  checkBlacklist,
+  cutoff,
+  processHits,
+  validatePreferences,
+  validateQuery,
+  validateTarget,
+} from './policy.js'
 import { fetchRequest, parsePage, parseSearchResponse, searchRequest } from './vendor.js'
 
 export type { CheckTarget, ResolvedSearchConfig } from './execution.js'
@@ -33,7 +40,9 @@ export async function search(
     const response = await execution.request(url, init)
     if (response.status >= 300 && response.status < 400) {
       await response.body?.cancel().catch(() => {})
-      throw new KitFailure('upstream', 'Search provider redirects are forbidden', { status: response.status })
+      throw new KitFailure('upstream', 'Search provider redirects are forbidden', {
+        status: response.status,
+      })
     }
     const body = await execution.body(response)
     return {

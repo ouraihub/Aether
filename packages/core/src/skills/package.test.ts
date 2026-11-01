@@ -15,7 +15,15 @@ function crc32(bytes: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0
 }
 /** Deterministic in-memory ZIP fixture; no filesystem operations. */
-function zip(entries: readonly { path: string; body: string; mode?: number; flags?: number; deflate?: boolean }[]) {
+function zip(
+  entries: readonly {
+    path: string
+    body: string
+    mode?: number
+    flags?: number
+    deflate?: boolean
+  }[],
+) {
   const chunks: Uint8Array[] = []
   const central: Uint8Array[] = []
   let offset = 0
@@ -76,7 +84,9 @@ function zip(entries: readonly { path: string; body: string; mode?: number; flag
 
 describe('bounded ZIP skill packages', () => {
   it('reads deflated files and caps actual inflated bytes', async () => {
-    const content = await readSkillSource(zip([{ path: 'SKILL.md', body: markdown, deflate: true }]))
+    const content = await readSkillSource(
+      zip([{ path: 'SKILL.md', body: markdown, deflate: true }]),
+    )
     assert.equal(content.name, 'packed')
     await assert.rejects(
       readSkillSource(
@@ -115,7 +125,10 @@ describe('bounded ZIP skill packages', () => {
     catalog = await skills.duplicate(catalog, 'one', 'copy', 'two', 3)
     assert.equal(skills.get(catalog, 'two').license, 'MIT')
     assert.equal(skills.get(catalog, 'two').hasScripts, true)
-    assert.equal(new TextDecoder().decode(skills.file(catalog, 'two', 1, 'scripts/z.sh')), 'echo safe')
+    assert.equal(
+      new TextDecoder().decode(skills.file(catalog, 'two', 1, 'scripts/z.sh')),
+      'echo safe',
+    )
     assert.throws(() => skills.files(catalog, 'one', 1))
     assert.throws(() => skills.file(catalog, 'two', 1, 'missing'))
     const changed = { ...content, files: content.files.filter((file) => file.kind !== 'script') }
@@ -142,9 +155,12 @@ describe('bounded ZIP skill packages', () => {
       ),
       { details: { field: 'zip', reason: 'duplicate_path' } },
     )
-    await assert.rejects(readSkillSource(zip([{ path: 'SKILL.md', body: markdown, mode: 0xa1ff }])), {
-      details: { field: 'zip', reason: 'link' },
-    })
+    await assert.rejects(
+      readSkillSource(zip([{ path: 'SKILL.md', body: markdown, mode: 0xa1ff }])),
+      {
+        details: { field: 'zip', reason: 'link' },
+      },
+    )
     await assert.rejects(readSkillSource(zip([{ path: 'SKILL.md', body: markdown, flags: 1 }])), {
       details: { field: 'zip', reason: 'encrypted' },
     })

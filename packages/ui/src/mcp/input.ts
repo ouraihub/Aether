@@ -15,7 +15,8 @@ export interface McpInput {
   env: string
 }
 
-export type McpInputResult = { ok: true; value: ServerSave } | { ok: false; error: 'secretLine' | 'transportChanged' }
+export type McpInputResult =
+  { ok: true; value: ServerSave } | { ok: false; error: 'secretLine' | 'transportChanged' }
 
 /** Split only at the first separator; values may themselves contain separators. */
 function pairs(text: string, separator: string): Record<string, string> | null {

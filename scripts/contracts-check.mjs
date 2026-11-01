@@ -7,7 +7,13 @@ import { fileURLToPath } from 'node:url'
 import Ajv from 'ajv'
 import ts from 'typescript'
 import * as standalone from '../packages/contracts/src/validators.js'
-import { BACKENDS, checkExecutable, checkRunnerOutput, judgeScenarios, publicValues } from './scenario-check.mjs'
+import {
+  BACKENDS,
+  checkExecutable,
+  checkRunnerOutput,
+  judgeScenarios,
+  publicValues,
+} from './scenario-check.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const directory = join(root, 'contracts')
@@ -44,7 +50,10 @@ function runRustExamples(names) {
   for (const name of names) cargo.push('--example', name)
   const [command, cargoArgs] =
     process.platform === 'win32'
-      ? ['cmd.exe', ['/d', '/c', 'node_modules\\@ouraihub\\desktop-kit\\msvc\\cargo-msvc.bat', ...cargo]]
+      ? [
+          'cmd.exe',
+          ['/d', '/c', 'node_modules\\@ouraihub\\desktop-kit\\msvc\\cargo-msvc.bat', ...cargo],
+        ]
       : ['cargo', cargo]
   execFileSync(command, cargoArgs, { cwd: root, stdio: 'inherit' })
   const outputs = {}
@@ -67,7 +76,8 @@ function runRustExamples(names) {
 
 function runWorkerScenarios() {
   const pnpm = ['--filter', '@ouraihub/aether-worker', 'run', '--silent', 'scenarios']
-  const [command, pnpmArgs] = process.platform === 'win32' ? ['cmd.exe', ['/d', '/c', 'pnpm', ...pnpm]] : ['pnpm', pnpm]
+  const [command, pnpmArgs] =
+    process.platform === 'win32' ? ['cmd.exe', ['/d', '/c', 'pnpm', ...pnpm]] : ['pnpm', pnpm]
   return execFileSync(command, pnpmArgs, {
     cwd: root,
     encoding: 'utf8',
@@ -110,7 +120,9 @@ function main() {
       if (typeof compiled !== 'function' || Boolean(compiled(value)) !== actual)
         throw new Error(`${label}: standalone ${contract} differs from the schema validator`)
     } catch (error) {
-      throw new Error(`${label}: ${contract} validator threw ${error.name}: ${error.message}`, { cause: error })
+      throw new Error(`${label}: ${contract} validator threw ${error.name}: ${error.message}`, {
+        cause: error,
+      })
     }
     if (actual !== expected) {
       throw new Error(
@@ -172,7 +184,8 @@ function main() {
   // TypeScript itself checks fresh object literal assignments (including excess fields).
   // Numeric ranges, string lengths, provenance and dependent states remain schema/behavior rules.
   const imports = [...validators.keys()].map(
-    (name) => `import type { ${name} } from ${JSON.stringify(`./packages/contracts/src/generated/${name}.js`)};`,
+    (name) =>
+      `import type { ${name} } from ${JSON.stringify(`./packages/contracts/src/generated/${name}.js`)};`,
   )
   let text = `${imports.join('\n')}\n`
   const bindingRanges = []
@@ -216,12 +229,16 @@ function main() {
   for (const diagnostic of diagnostics) {
     const range =
       diagnostic.file && isVirtual(diagnostic.file.fileName) && diagnostic.start !== undefined
-        ? bindingRanges.find((entry) => diagnostic.start >= entry.start && diagnostic.start < entry.end)
+        ? bindingRanges.find(
+            (entry) => diagnostic.start >= entry.start && diagnostic.start < entry.end,
+          )
         : undefined
     if (range && range.fixture.tsReject) range.diagnostics.push(diagnostic)
     else unexpected.push(diagnostic)
   }
-  const wronglyAccepted = bindingRanges.filter((entry) => entry.fixture.tsReject && entry.diagnostics.length === 0)
+  const wronglyAccepted = bindingRanges.filter(
+    (entry) => entry.fixture.tsReject && entry.diagnostics.length === 0,
+  )
   if (unexpected.length || wronglyAccepted.length) {
     const formatted = ts.formatDiagnosticsWithColorAndContext(unexpected, {
       getCanonicalFileName: canonicalPath,
@@ -248,7 +265,10 @@ function main() {
   const built = rustExamples.length ? runRustExamples(rustExamples) : {}
   const scenarioDocuments = options.scenarios
     ? Object.fromEntries(
-        BACKENDS.map((backend) => [backend, readFileSync(resolve(options.scenarios[backend]), 'utf8')]),
+        BACKENDS.map((backend) => [
+          backend,
+          readFileSync(resolve(options.scenarios[backend]), 'utf8'),
+        ]),
       )
     : { native: built['scenario-output'], worker: runWorkerScenarios() }
 
@@ -259,7 +279,8 @@ function main() {
         ? built['contract-output']
         : readFileSync(options.rust === '-' ? 0 : resolve(options.rust), 'utf8')
     const output = JSON.parse(serialized)
-    if (!Array.isArray(output) || output.length === 0) throw new Error('Rust output must be a nonempty JSON array')
+    if (!Array.isArray(output) || output.length === 0)
+      throw new Error('Rust output must be a nonempty JSON array')
     const contracts = new Set()
     const kinds = new Set()
     const statuses = new Set()
@@ -283,7 +304,8 @@ function main() {
       ['event kind', manifest.rustOutput.requiredEventKinds, kinds],
       ['snapshot status', manifest.rustOutput.requiredSnapshotStatuses, statuses],
     ]) {
-      for (const value of expected) if (!actual.has(value)) throw new Error(`Rust output missing ${label}: ${value}`)
+      for (const value of expected)
+        if (!actual.has(value)) throw new Error(`Rust output missing ${label}: ${value}`)
     }
   }
 
@@ -304,9 +326,15 @@ function main() {
       }
     }
   }
-  const { failures, drifts } = judgeScenarios({ executable, knownDrift: scenarioFixtures.knownDrift, scenarios })
+  const { failures, drifts } = judgeScenarios({
+    executable,
+    knownDrift: scenarioFixtures.knownDrift,
+    scenarios,
+  })
   for (const { drift, note, occurs } of drifts) {
-    process.stdout.write(`contracts-check: known drift ${drift}${occurs ? '' : ' (no longer occurs)'}: ${note}\n`)
+    process.stdout.write(
+      `contracts-check: known drift ${drift}${occurs ? '' : ' (no longer occurs)'}: ${note}\n`,
+    )
   }
   if (failures.length) throw new Error(`scenario runs failed:\n${failures.join('\n')}`)
 

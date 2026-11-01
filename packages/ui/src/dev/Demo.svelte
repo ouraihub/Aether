@@ -14,7 +14,9 @@
   let answer = $state('none')
 
   async function ask() {
-    answer = String(await notify.confirm({ title: 'Delete?', body: 'This cannot be undone.', danger: true }))
+    answer = String(
+      await notify.confirm({ title: 'Delete?', body: 'This cannot be undone.', danger: true }),
+    )
   }
 </script>
 

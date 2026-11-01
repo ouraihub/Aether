@@ -28,8 +28,18 @@ export class ImageService {
     this.options = options
   }
 
-  async generate(connection: ImageConnection, input: ImageRequest, context: WorkerContext): Promise<GeneratedImage> {
-    const result = await generateImage(this.options.outbound, connection, input, context.signal, this.options.limits)
+  async generate(
+    connection: ImageConnection,
+    input: ImageRequest,
+    context: WorkerContext,
+  ): Promise<GeneratedImage> {
+    const result = await generateImage(
+      this.options.outbound,
+      connection,
+      input,
+      context.signal,
+      this.options.limits,
+    )
     const { image } = result
     if (!this.options.persist) {
       return {
@@ -40,15 +50,24 @@ export class ImageService {
     }
     try {
       if (context.signal.aborted)
-        throw new ImageFailure('cancelled', 'Image generated; persistence was cancelled', 'generated')
+        throw new ImageFailure(
+          'cancelled',
+          'Image generated; persistence was cancelled',
+          'generated',
+        )
       const reference = await this.options.persist(image, context)
       return { ...result, reference, persisted: true }
     } catch {
       // Generation succeeded. Do not claim the provider did nothing or that saving succeeded.
-      throw new ImageFailure('internal', 'Image generated but persistence could not be confirmed', 'generated', {
-        field: 'images',
-        reason: 'generated_save_failed',
-      })
+      throw new ImageFailure(
+        'internal',
+        'Image generated but persistence could not be confirmed',
+        'generated',
+        {
+          field: 'images',
+          reason: 'generated_save_failed',
+        },
+      )
     }
   }
 }

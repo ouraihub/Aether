@@ -50,7 +50,8 @@
 
   const key = (r: ModelRef) => `${r.endpointId}\n${r.modelId}`
   // label is `{provider} · {slug} · {modelId}`; a model's display name never enters it.
-  const group = (o: ModelOption) => o.label.slice(0, Math.max(0, o.label.lastIndexOf(' · '))) || o.label
+  const group = (o: ModelOption) =>
+    o.label.slice(0, Math.max(0, o.label.lastIndexOf(' · '))) || o.label
   type Cap = 'vision' | 'reasoning' | 'tools' | 'web'
   const CAPS = [
     { cap: 'vision', icon: EyeIcon, has: (o: ModelOption) => o.canVision },
@@ -105,7 +106,9 @@
   {#if failed}
     <div class="model-error" role="alert">
       <span>{t('chat.modelsFailed')}</span>
-      <Button variant="outline" size="sm" {disabled} onclick={() => reload++}>{t('chat.retry')}</Button>
+      <Button variant="outline" size="sm" {disabled} onclick={() => reload++}
+        >{t('chat.retry')}</Button
+      >
     </div>
   {:else}
     <Popover.Root
@@ -132,7 +135,9 @@
                 <span class="model-group">| {group(current)}</span>
               {:else}
                 <span class="model-name muted"
-                  >{invalid ? t('providers.model_invalid') : (placeholder ?? t('providers.model_placeholder'))}</span
+                  >{invalid
+                    ? t('providers.model_invalid')
+                    : (placeholder ?? t('providers.model_placeholder'))}</span
                 >
               {/if}
               <ChevronDownIcon class="model-chevron" />
@@ -150,7 +155,11 @@
           if (event.isComposing) event.preventDefault()
         }}
       >
-        <Command.Root bind:value={highlighted} filter={match} label={t('providers.model_placeholder')}>
+        <Command.Root
+          bind:value={highlighted}
+          filter={match}
+          label={t('providers.model_placeholder')}
+        >
           <div class="model-search">
             <SearchIcon class="model-search-icon" />
             <Command.Input class="model-search-input" placeholder={t('providers.model_search')} />
@@ -163,8 +172,9 @@
                   class="cap-chip cap-{c.cap}"
                   aria-pressed={active.includes(c.cap)}
                   onclick={() =>
-                    (active = active.includes(c.cap) ? active.filter((x) => x !== c.cap) : [...active, c.cap])}
-                  ><c.icon />{t(`providers.cap_${c.cap}`)}</button
+                    (active = active.includes(c.cap)
+                      ? active.filter((x) => x !== c.cap)
+                      : [...active, c.cap])}><c.icon />{t(`providers.cap_${c.cap}`)}</button
                 >
               {/each}
             </div>
@@ -180,13 +190,17 @@
                       class="model-item"
                       value={key(option)}
                       keywords={[option.modelId, option.name ?? '', name]}
-                      aria-current={value !== null && key(option) === key(value) ? 'true' : undefined}
+                      aria-current={value !== null && key(option) === key(value)
+                        ? 'true'
+                        : undefined}
                       onSelect={() => pick(option)}
                     >
                       <span class="model-avatar" aria-hidden="true"
                         >{(option.name ?? option.modelId).charAt(0).toUpperCase()}</span
                       >
-                      <span class="model-name" title={option.label}>{option.name ?? option.modelId}</span>
+                      <span class="model-name" title={option.label}
+                        >{option.name ?? option.modelId}</span
+                      >
                       <span class="model-tags">
                         {#each CAPS.filter((c) => c.has(option)) as c (c.cap)}
                           <span class="cap-tag cap-{c.cap}" title={t(`providers.cap_${c.cap}`)}

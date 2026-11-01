@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,9 +18,22 @@ import { classifyPaths } from './ci-scope.mjs'
 const script = fileURLToPath(new URL('./ci-scope.mjs', import.meta.url))
 
 test('classifies ordinary documentation and frontend mixtures conservatively', () => {
-  assert.equal(classifyPaths(['README.md', 'CHANGELOG.md', 'LICENSE', 'docs/guide.md', 'docs/nested/setup.md']), 'docs')
   assert.equal(
-    classifyPaths(['packages/ui/src/main.ts', 'packages/ui/src/App.svelte', 'packages/ui/src/theme.css']),
+    classifyPaths([
+      'README.md',
+      'CHANGELOG.md',
+      'LICENSE',
+      'docs/guide.md',
+      'docs/nested/setup.md',
+    ]),
+    'docs',
+  )
+  assert.equal(
+    classifyPaths([
+      'packages/ui/src/main.ts',
+      'packages/ui/src/App.svelte',
+      'packages/ui/src/theme.css',
+    ]),
     'frontend',
   )
   assert.equal(classifyPaths(['docs/guide.md', 'packages/ui/src/main.ts']), 'frontend')
@@ -151,7 +172,10 @@ function repository(t, objectFormat) {
     const output = readFileSync(outputPath, 'utf8')
     assert.match(output, /^existing=value\nscope=(docs|frontend|full)\n$/)
     assert.equal(stdout, output.slice('existing=value\n'.length))
-    return { scope: stdout.trim().slice('scope='.length), summary: readFileSync(summaryPath, 'utf8') }
+    return {
+      scope: stdout.trim().slice('scope='.length),
+      summary: readFileSync(summaryPath, 'utf8'),
+    }
   }
   return { root, cwd, git, put, commit, run }
 }
@@ -159,7 +183,10 @@ function repository(t, objectFormat) {
 test('push binds the actual checkout and summarizes categories without filenames', (t) => {
   const repo = repository(t)
   const before = repo.commit({ 'Cargo.toml': 'base\n' })
-  const after = repo.commit({ 'docs/guide.md': 'guide\n', 'packages/ui/src/main.ts': 'export {}\n' })
+  const after = repo.commit({
+    'docs/guide.md': 'guide\n',
+    'packages/ui/src/main.ts': 'export {}\n',
+  })
   const result = repo.run('push', { before, after })
   assert.equal(result.scope, 'frontend')
   assert.match(result.summary, /docs=1, frontend=1, full=0/)
@@ -170,7 +197,11 @@ test('push binds the actual checkout and summarizes categories without filenames
 
 test('deletions and both sides of a rename stay visible', (t) => {
   const repo = repository(t)
-  const before = repo.commit({ 'src/lib.rs': 'same content\n', 'docs/old.md': 'guide\n', 'Cargo.toml': 'base\n' })
+  const before = repo.commit({
+    'src/lib.rs': 'same content\n',
+    'docs/old.md': 'guide\n',
+    'Cargo.toml': 'base\n',
+  })
   repo.put('docs/new.md', readFileSync(join(repo.cwd, 'src/lib.rs'), 'utf8'))
   rmSync(join(repo.cwd, 'src/lib.rs'))
   const after = repo.commit()
@@ -198,7 +229,10 @@ test(
   (t) => {
     const repo = repository(t)
     const before = repo.commit({ 'README.md': 'base\n' })
-    const after = repo.commit({ 'docs/guide\n::warning::scope=docs\t.md': 'guide\n', 'src/unknown\nname.rs': 'code\n' })
+    const after = repo.commit({
+      'docs/guide\n::warning::scope=docs\t.md': 'guide\n',
+      'src/unknown\nname.rs': 'code\n',
+    })
     const result = repo.run('push', { before, after })
     assert.equal(result.scope, 'full')
     assert.match(result.summary, /docs=1, frontend=0, full=1/)
@@ -236,11 +270,13 @@ test('PR synthetic merges must contain the event head and base', (t) => {
   const unrelated = repo.commit({ 'docs/unrelated.md': 'unrelated\n' })
   repo.git('checkout', '--detach', merge)
   assert.equal(
-    repo.run('pull_request', { pull_request: { base: { sha: base }, head: { sha: unrelated } } }).scope,
+    repo.run('pull_request', { pull_request: { base: { sha: base }, head: { sha: unrelated } } })
+      .scope,
     'full',
   )
   assert.equal(
-    repo.run('pull_request', { pull_request: { base: { sha: unrelated }, head: { sha: head } } }).scope,
+    repo.run('pull_request', { pull_request: { base: { sha: unrelated }, head: { sha: head } } })
+      .scope,
     'full',
   )
 })
@@ -270,7 +306,10 @@ test('unknown events, malformed event shapes and unavailable commits fail closed
   assert.equal(repo.run('push', '{broken', { raw: true }).scope, 'full')
   assert.equal(repo.run('pull_request', { pull_request: { base: { sha: before } } }).scope, 'full')
   assert.equal(repo.run('push', { before: after, after }).scope, 'full')
-  assert.equal(repo.run('push', { before: before.toUpperCase(), after: after.toUpperCase() }).scope, 'docs')
+  assert.equal(
+    repo.run('push', { before: before.toUpperCase(), after: after.toUpperCase() }).scope,
+    'docs',
+  )
 })
 
 test('supports full SHA-256 commit identities', (t) => {

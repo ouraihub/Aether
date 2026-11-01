@@ -33,8 +33,12 @@ export interface SkillRecord extends SkillPackage {
 }
 export type SkillCatalog = readonly SkillRecord[]
 export const conflict = (reason: string, entity?: string): KitFailure =>
-  new KitFailure('conflict', 'Skill conflict', { reason, ...(entity === undefined ? {} : { entity }) })
-const missing = (entity: string): KitFailure => new KitFailure('not_found', 'Skill not found', { entity })
+  new KitFailure('conflict', 'Skill conflict', {
+    reason,
+    ...(entity === undefined ? {} : { entity }),
+  })
+const missing = (entity: string): KitFailure =>
+  new KitFailure('not_found', 'Skill not found', { entity })
 export function fileMetas(skill: SkillPackage): SkillFileMeta[] {
   return skill.files.map((file) => ({ path: file.path, kind: file.kind, size: file.bytes.length }))
 }
@@ -79,7 +83,12 @@ function pinned(catalog: SkillCatalog, id: string, expected: number): SkillRecor
 export function files(catalog: SkillCatalog, id: string, expected: number): SkillFileMeta[] {
   return fileMetas(pinned(catalog, id, expected))
 }
-export function file(catalog: SkillCatalog, id: string, expected: number, path: string): Uint8Array<ArrayBuffer> {
+export function file(
+  catalog: SkillCatalog,
+  id: string,
+  expected: number,
+  path: string,
+): Uint8Array<ArrayBuffer> {
   const found = pinned(catalog, id, expected).files.find((entry) => entry.path === path)
   if (!found) throw missing('skill_file')
   return new Uint8Array(found.bytes)
@@ -97,8 +106,20 @@ function ensureFree(catalog: SkillCatalog, name: string, except?: string): void 
 function mutable(skill: SkillRecord): void {
   if (skill.origin === 'builtin') throw badRequest('id', 'builtin')
 }
-async function create(content: SkillPackage, id: string, origin: SkillOrigin, now: number): Promise<SkillRecord> {
-  return { ...content, id, origin, revision: 1, digest: await digest(content, content.files), updatedAt: now }
+async function create(
+  content: SkillPackage,
+  id: string,
+  origin: SkillOrigin,
+  now: number,
+): Promise<SkillRecord> {
+  return {
+    ...content,
+    id,
+    origin,
+    revision: 1,
+    digest: await digest(content, content.files),
+    updatedAt: now,
+  }
 }
 async function update(
   previous: SkillRecord,
@@ -157,12 +178,20 @@ export async function save(
   newId: string,
   now: number,
 ): Promise<SkillCatalog> {
-  const fields = { name: input.name, description: input.description, version: input.version ?? null, body: input.body }
+  const fields = {
+    name: input.name,
+    description: input.description,
+    version: input.version ?? null,
+    body: input.body,
+  }
   validateSkillContent(fields)
   if (input.id === undefined) {
     ensureFree(catalog, input.name)
     ensureId(catalog, newId)
-    return [...catalog, await create({ ...fields, license: null, extra: {}, files: [] }, newId, 'manual', now)]
+    return [
+      ...catalog,
+      await create({ ...fields, license: null, extra: {}, files: [] }, newId, 'manual', now),
+    ]
   }
   if (input.expectedRevision === undefined) throw badRequest('expectedRevision', 'missing')
   const current = record(catalog, input.id)
@@ -231,7 +260,10 @@ export async function syncBuiltins(
       result = [...result, await create(content, id, 'builtin', now)]
     }
   }
-  return result.length === catalog.length && result.every((skill, index) => skill === catalog[index]) ? catalog : result
+  return result.length === catalog.length &&
+    result.every((skill, index) => skill === catalog[index])
+    ? catalog
+    : result
 }
 
 /** Strictly narrows persisted documents before exposing their contents to services. */
@@ -260,16 +292,20 @@ export function parseCatalog(value: unknown): SkillCatalog {
       'skill',
     )
     const origin = entry.origin
-    if (origin !== 'builtin' && origin !== 'manual' && origin !== 'imported') throw badRequest('origin', 'invalid')
+    if (origin !== 'builtin' && origin !== 'manual' && origin !== 'imported')
+      throw badRequest('origin', 'invalid')
     const extras = object(entry.extra, 'extra')
-    const extra = Object.fromEntries(Object.entries(extras).map(([key, value]) => [key, text(value, 'extra')]))
+    const extra = Object.fromEntries(
+      Object.entries(extras).map(([key, value]) => [key, text(value, 'extra')]),
+    )
     const fileValues: unknown = entry.files
     if (!Array.isArray(fileValues)) throw badRequest('files', 'invalid')
     const parsedFiles: PackageFile[] = fileValues.map((rawFile: unknown) => {
       const file = object(rawFile, 'file')
       exact(file, ['path', 'kind', 'sha256', 'bytes'], 'file')
       const kind = file.kind
-      if (kind !== 'script' && kind !== 'reference' && kind !== 'asset') throw badRequest('kind', 'invalid')
+      if (kind !== 'script' && kind !== 'reference' && kind !== 'asset')
+        throw badRequest('kind', 'invalid')
       const bytes: unknown = file.bytes
       if (!Array.isArray(bytes)) throw badRequest('bytes', 'invalid')
       const content = bytes.map((byte: unknown) => {
@@ -281,10 +317,15 @@ export function parseCatalog(value: unknown): SkillCatalog {
       if (!/^[0-9a-f]{64}$/u.test(hash)) throw badRequest('sha256', 'invalid')
       return { path: text(file.path, 'path'), kind, sha256: hash, bytes: content }
     })
-    if (parsedFiles.some((file, index) => index > 0 && file.path <= (parsedFiles[index - 1]?.path ?? '')))
+    if (
+      parsedFiles.some(
+        (file, index) => index > 0 && file.path <= (parsedFiles[index - 1]?.path ?? ''),
+      )
+    )
       throw badRequest('files', 'invalid')
     const updatedAt = entry.updatedAt
-    if (typeof updatedAt !== 'number' || !Number.isSafeInteger(updatedAt)) throw badRequest('updatedAt', 'invalid')
+    if (typeof updatedAt !== 'number' || !Number.isSafeInteger(updatedAt))
+      throw badRequest('updatedAt', 'invalid')
     const skill: SkillRecord = {
       id: text(entry.id, 'id'),
       name: text(entry.name, 'name'),

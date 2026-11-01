@@ -85,7 +85,8 @@ export function decodeImage(image: ImagePart, maxBytes = MAX_IMAGE_BYTES): Uint8
   if (!IMAGE_MIMES.some((mime) => mime === image.mime)) throw badRequest('images', 'mime')
   const data = image.data
   if (data.length > Math.ceil(maxBytes / 3) * 4) throw badRequest('images', 'size', maxBytes)
-  if (data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(data)) throw badRequest('images', 'encoding')
+  if (data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(data))
+    throw badRequest('images', 'encoding')
   let binary: string
   try {
     binary = atob(data)
@@ -123,7 +124,11 @@ function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   return promise
 }
 
-async function bounded(response: Response, limit: number, signal: AbortSignal): Promise<Uint8Array> {
+async function bounded(
+  response: Response,
+  limit: number,
+  signal: AbortSignal,
+): Promise<Uint8Array> {
   const length = response.headers.get('content-length')
   if (length !== null && (!/^\d+$/u.test(length) || Number(length) > limit)) {
     void response.body?.cancel().catch(() => {})
@@ -165,7 +170,13 @@ function endpoint(base: string, edit: boolean): string {
   } catch {
     throw badRequest('url', 'invalid')
   }
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)
+  if (
+    !['https:', 'http:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  )
     throw badRequest('url', 'invalid')
   return url.href
 }
@@ -189,10 +200,13 @@ export function imageCapabilities(connection: ImageConnection, limits: ImageLimi
     limits.profile ??
     (['api.siliconflow.cn', 'api.siliconflow.com'].includes(host)
       ? 'siliconflow'
-      : ['gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2'].includes(connection.modelId)
+      : ['gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2'].includes(
+            connection.modelId,
+          )
         ? 'gpt-image'
         : 'generic')
-  if (!['generic', 'gpt-image', 'siliconflow'].includes(profile)) throw badRequest('profile', 'invalid')
+  if (!['generic', 'gpt-image', 'siliconflow'].includes(profile))
+    throw badRequest('profile', 'invalid')
   return {
     profile,
     edit: connection.canVision && profile !== 'siliconflow',
@@ -228,7 +242,10 @@ export async function generateImage(
     maxImageBytes > 0 &&
     maxImageBytes <= MAX_GENERATED_IMAGE_BYTES
   const timer = validLimits
-    ? setTimeout(() => controller.abort(new DOMException('Image request deadline exceeded', 'TimeoutError')), timeoutMs)
+    ? setTimeout(
+        () => controller.abort(new DOMException('Image request deadline exceeded', 'TimeoutError')),
+        timeoutMs,
+      )
     : undefined
   const active = controller.signal
   try {
@@ -260,12 +277,21 @@ export async function generateImage(
       const firstBytes = decoded[0]
       if (firstBytes === undefined) throw badRequest('mask', 'requires_image')
       const first = validateImageBytes(firstBytes, undefined, maxImageBytes)
-      if (input.mask.mime !== 'image/png' || !mask.alpha || mask.width !== first.width || mask.height !== first.height)
+      if (
+        input.mask.mime !== 'image/png' ||
+        !mask.alpha ||
+        mask.width !== first.width ||
+        mask.height !== first.height
+      )
         throw badRequest('mask', 'invalid')
       inputBytes += maskBytes.length
     }
-    if (inputBytes > MAX_IMAGE_INPUT_BYTES) throw badRequest('images', 'size', MAX_IMAGE_INPUT_BYTES)
-    const target = endpoint((edit ? connection.imageEditBaseUrl : connection.imageBaseUrl) ?? connection.baseUrl, edit)
+    if (inputBytes > MAX_IMAGE_INPUT_BYTES)
+      throw badRequest('images', 'size', MAX_IMAGE_INPUT_BYTES)
+    const target = endpoint(
+      (edit ? connection.imageEditBaseUrl : connection.imageBaseUrl) ?? connection.baseUrl,
+      edit,
+    )
     let payload: BodyInit
     if (edit) {
       const form = new FormData()
@@ -300,7 +326,9 @@ export async function generateImage(
               prompt,
               size: input.size,
               n: 1,
-              ...(capabilities.profile === 'gpt-image' ? { output_format: 'png', background: 'opaque' } : {}),
+              ...(capabilities.profile === 'gpt-image'
+                ? { output_format: 'png', background: 'opaque' }
+                : {}),
               ...(input.quality === undefined ? {} : { quality: input.quality }),
             },
       )
@@ -317,7 +345,13 @@ export async function generateImage(
       if (key !== undefined) headers.set('authorization', `Bearer ${key}`)
       dispatch = 'unknown'
       const response = await abortable(
-        http.fetch(target, { method: 'POST', headers, body: payload, redirect: 'manual', signal: active }),
+        http.fetch(target, {
+          method: 'POST',
+          headers,
+          body: payload,
+          redirect: 'manual',
+          signal: active,
+        }),
         active,
       )
       if (response.redirected || (response.status >= 300 && response.status < 400)) {
@@ -325,7 +359,11 @@ export async function generateImage(
         throw new KitFailure('upstream', 'Image redirect refused', { status: response.status })
       }
       if (response.status >= 400 && response.status < 500) dispatch = 'rejected'
-      const bytes = await bounded(response, response.ok ? Math.ceil(maxImageBytes / 3) * 4 + 64 * 1024 : 8192, active)
+      const bytes = await bounded(
+        response,
+        response.ok ? Math.ceil(maxImageBytes / 3) * 4 + 64 * 1024 : 8192,
+        active,
+      )
       if (!response.ok) {
         if ([401, 403, 429].includes(response.status) && attempt + 1 < attempts) continue
         // Deliberately never surface provider bodies: they can contain credentials.
@@ -348,9 +386,13 @@ export async function generateImage(
           ? body.images
           : body.data
         : undefined
-      if (!Array.isArray(images) || images.length !== 1) throw new KitFailure('upstream', 'Expected exactly one image')
+      if (!Array.isArray(images) || images.length !== 1)
+        throw new KitFailure('upstream', 'Expected exactly one image')
       const first: unknown = images[0]
-      if (!record(first) || (typeof first.b64_json === 'string') === (typeof first.url === 'string'))
+      if (
+        !record(first) ||
+        (typeof first.b64_json === 'string') === (typeof first.url === 'string')
+      )
         throw new KitFailure('upstream', 'Invalid image response')
       let imageBytes: Uint8Array
       let expectedMime: string | undefined
@@ -358,7 +400,11 @@ export async function generateImage(
         imageBytes = decodeImage({ mime: 'image/png', data: first.b64_json }, maxImageBytes)
       } else if (typeof first.url === 'string') {
         const image = await abortable(
-          http.fetch(downloadTarget(first.url), { method: 'GET', redirect: 'manual', signal: active }),
+          http.fetch(downloadTarget(first.url), {
+            method: 'GET',
+            redirect: 'manual',
+            signal: active,
+          }),
           active,
         )
         if (image.redirected || !image.ok) {
@@ -366,7 +412,11 @@ export async function generateImage(
           throw new KitFailure('upstream', 'Image download failed', { status: image.status })
         }
         const mime = image.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase()
-        if (mime && mime !== 'application/octet-stream' && !IMAGE_MIMES.some((allowed) => allowed === mime)) {
+        if (
+          mime &&
+          mime !== 'application/octet-stream' &&
+          !IMAGE_MIMES.some((allowed) => allowed === mime)
+        ) {
           void image.body?.cancel().catch(() => {})
           throw badRequest('images', 'mime')
         }
@@ -383,12 +433,16 @@ export async function generateImage(
         usage.inputTokens = count(body.usage.input_tokens ?? body.usage.prompt_tokens)
         usage.outputTokens = count(body.usage.output_tokens ?? body.usage.completion_tokens)
         const inputDetails = body.usage.input_tokens_details ?? body.usage.prompt_tokens_details
-        const outputDetails = body.usage.output_tokens_details ?? body.usage.completion_tokens_details
+        const outputDetails =
+          body.usage.output_tokens_details ?? body.usage.completion_tokens_details
         if (record(inputDetails)) {
           usage.cacheReadTokens = count(inputDetails.cached_tokens)
-          usage.cacheWriteTokens = count(inputDetails.cache_creation_tokens ?? body.usage.cache_creation_input_tokens)
+          usage.cacheWriteTokens = count(
+            inputDetails.cache_creation_tokens ?? body.usage.cache_creation_input_tokens,
+          )
         }
-        if (!record(inputDetails)) usage.cacheWriteTokens = count(body.usage.cache_creation_input_tokens)
+        if (!record(inputDetails))
+          usage.cacheWriteTokens = count(body.usage.cache_creation_input_tokens)
         if (record(outputDetails)) usage.reasoningTokens = count(outputDetails.reasoning_tokens)
       }
       return {

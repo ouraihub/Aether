@@ -22,21 +22,29 @@ function mount(over: Partial<McpServerPort> = {}, serverName = 'aether') {
   const ports = createFakePorts({
     mcpServer: {
       status: async () => status,
-      scopes: async () => [{ id: 'read', labelKey: 'read-scope', destructive: false, enabled: true }],
+      scopes: async () => [
+        { id: 'read', labelKey: 'read-scope', destructive: false, enabled: true },
+      ],
       tokens: async () => [],
       issueToken: async () => issued(),
       ...over,
     },
   })
   return {
-    ...render(Harness, { mode: 'server', serverName, kit: { ports, i18n: createI18n('en'), notify, logger } }),
+    ...render(Harness, {
+      mode: 'server',
+      serverName,
+      kit: { ports, i18n: createI18n('en'), notify, logger },
+    }),
     notify,
   }
 }
 
 async function grantAndIssue(name = 'Example') {
   await screen.findByRole('button', { name: 'Issue token' })
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toHaveProperty('disabled', false))
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Stop' })).toHaveProperty('disabled', false),
+  )
   await fireEvent.input(screen.getByLabelText('Name'), { target: { value: name } })
   const grants = screen.getAllByRole('switch', { name: 'read-scope (read)' })
   const grant = grants[1]
@@ -53,7 +61,9 @@ describe('MCP server configuration and token display', () => {
     await grantAndIssue()
     await screen.findByText('example-token')
     const input = { serverName: 'aether', url: status.url, token: 'example-token' }
-    await fireEvent.click(screen.getByRole('button', { name: 'Copy Claude Code command (POSIX shell)' }))
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Copy Claude Code command (POSIX shell)' }),
+    )
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(buildClaudePosixCommand(input)))
     await fireEvent.click(screen.getByRole('button', { name: 'Copy JSON config' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(buildMcpJsonConfig(input)))
@@ -66,31 +76,44 @@ describe('MCP server configuration and token display', () => {
     { serverName: 'aether', url: '', token: 'example-token' },
     { serverName: '', url: status.url, token: 'example-token' },
     { serverName: 'aether', url: status.url, token: '' },
-  ])('disables configuration actions without actual inputs: %o', async ({ serverName, url, token }) => {
-    mount({ status: async () => ({ ...status, url }), issueToken: async () => issued('Example', token) }, serverName)
-    await grantAndIssue()
-    const json = await screen.findByRole('button', { name: 'Copy JSON config' })
-    expect(json).toHaveProperty('disabled', true)
-    expect(screen.getByRole('button', { name: 'Copy Claude Code command (POSIX shell)' })).toHaveProperty(
-      'disabled',
-      true,
-    )
-  })
+  ])(
+    'disables configuration actions without actual inputs: %o',
+    async ({ serverName, url, token }) => {
+      mount(
+        {
+          status: async () => ({ ...status, url }),
+          issueToken: async () => issued('Example', token),
+        },
+        serverName,
+      )
+      await grantAndIssue()
+      const json = await screen.findByRole('button', { name: 'Copy JSON config' })
+      expect(json).toHaveProperty('disabled', true)
+      expect(
+        screen.getByRole('button', { name: 'Copy Claude Code command (POSIX shell)' }),
+      ).toHaveProperty('disabled', true)
+    },
+  )
 
   it('does not present an invalid Claude CLI name as a runnable POSIX command', async () => {
     mount({}, 'not a cli name')
     await grantAndIssue()
-    expect(await screen.findByRole('button', { name: 'Copy Claude Code command (POSIX shell)' })).toHaveProperty(
+    expect(
+      await screen.findByRole('button', { name: 'Copy Claude Code command (POSIX shell)' }),
+    ).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: 'Copy JSON config' })).toHaveProperty(
       'disabled',
-      true,
+      false,
     )
-    expect(screen.getByRole('button', { name: 'Copy JSON config' })).toHaveProperty('disabled', false)
   })
 
   for (const fail of [false, true]) {
     it(`ignores late issuance ${fail ? 'failure' : 'success'} after changing target`, async () => {
       const pending = Promise.withResolvers<IssuedToken>()
-      const issueToken = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValueOnce(issued('New', 'new-token'))
+      const issueToken = vi
+        .fn()
+        .mockReturnValueOnce(pending.promise)
+        .mockResolvedValueOnce(issued('New', 'new-token'))
       const h = mount({ issueToken })
       await grantAndIssue('Old')
       await h.rerender({ serverName: 'other-server' })
@@ -138,7 +161,10 @@ describe('MCP server configuration and token display', () => {
     const copying = Promise.withResolvers<void>()
     const writeText = vi.fn(() => copying.promise)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
-    const issueToken = vi.fn().mockResolvedValueOnce(issued()).mockResolvedValueOnce(issued('Next', 'next-token'))
+    const issueToken = vi
+      .fn()
+      .mockResolvedValueOnce(issued())
+      .mockResolvedValueOnce(issued('Next', 'next-token'))
     const h = mount({ issueToken })
     await grantAndIssue()
     await screen.findByText('example-token')
@@ -153,9 +179,13 @@ describe('MCP server configuration and token display', () => {
   })
 
   it('keeps destructive-scope confirmation before changing enabled scopes', async () => {
-    const setScopes = vi.fn(async () => [{ id: 'write', labelKey: 'write-scope', destructive: true, enabled: true }])
+    const setScopes = vi.fn(async () => [
+      { id: 'write', labelKey: 'write-scope', destructive: true, enabled: true },
+    ])
     const h = mount({
-      scopes: async () => [{ id: 'write', labelKey: 'write-scope', destructive: true, enabled: false }],
+      scopes: async () => [
+        { id: 'write', labelKey: 'write-scope', destructive: true, enabled: false },
+      ],
       setScopes,
     })
     const switches = await screen.findAllByRole('switch', { name: 'write-scope (write)' })
@@ -176,11 +206,13 @@ describe('MCP server configuration and token display', () => {
     async (url) => {
       mount({ status: async () => ({ ...status, url }) })
       await grantAndIssue()
-      expect(await screen.findByRole('button', { name: 'Copy JSON config' })).toHaveProperty('disabled', true)
-      expect(screen.getByRole('button', { name: 'Copy Claude Code command (POSIX shell)' })).toHaveProperty(
+      expect(await screen.findByRole('button', { name: 'Copy JSON config' })).toHaveProperty(
         'disabled',
         true,
       )
+      expect(
+        screen.getByRole('button', { name: 'Copy Claude Code command (POSIX shell)' }),
+      ).toHaveProperty('disabled', true)
     },
   )
 
