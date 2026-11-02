@@ -19,6 +19,7 @@
 
 {#if refs}
   <ChatPanel
+    purpose="agent"
     model={{ endpointId: 'e1', modelId: 'm1' }}
     skills={refs}
     onSkillsChange={(next) => {

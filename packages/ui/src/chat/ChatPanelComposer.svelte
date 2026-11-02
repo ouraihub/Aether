@@ -42,7 +42,6 @@
     recovery,
     webSearch = $bindable(false),
     generateImage = $bindable(false),
-    panelWidth,
     toolbar,
     onToolbarChange,
     paintingModel,
@@ -86,7 +85,6 @@
     recovery: Recovery | null
     webSearch?: boolean
     generateImage?: boolean
-    panelWidth: number
     toolbar?: string[] | undefined
     onToolbarChange?: ((ids: string[]) => void) | undefined
     paintingModel: boolean
@@ -201,7 +199,6 @@
       {paintingModel}
       {capability}
       {purpose}
-      {panelWidth}
       {toolbar}
       {onToolbarChange}
       {hasSearch}

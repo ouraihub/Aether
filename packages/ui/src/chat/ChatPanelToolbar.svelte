@@ -23,7 +23,6 @@
     paintingModel,
     capability,
     purpose,
-    panelWidth,
     toolbar,
     hasSearch,
     onToolbarChange,
@@ -40,7 +39,6 @@
     capability: ModelOption | null
     purpose: string
     hasSearch: boolean
-    panelWidth: number
     toolbar?: string[] | undefined
     onToolbarChange?: ((ids: string[]) => void) | undefined
     newConversation: () => void
@@ -57,11 +55,7 @@
   const DEFAULT_TOOLBAR = ['new-conversation', 'web-search']
   // svelte-ignore state_referenced_locally
   let pinned = $state<string[]>(toolbar ?? DEFAULT_TOOLBAR)
-  const visiblePinned = $derived(
-    pinned
-      .filter((id) => tools.includes(id))
-      .slice(0, panelWidth > 0 && panelWidth < 480 ? 1 : pinned.length),
-  )
+  const visiblePinned = $derived(pinned.filter((id) => tools.includes(id)))
   /** Tools usable here; unavailable pinned ids stay stored but hidden (docs/38 §3.2). */
   const tools = $derived(
     ['new-conversation', 'web-search', 'attachment', 'generate-image'].filter(
@@ -184,7 +178,8 @@
         title={t('chat.tools')}><PlusIcon /></Button
       >{/snippet}
   </Popover.Trigger>
-  <Popover.Content class="tools-menu" side="top" align="start" sideOffset={6} collisionPadding={8}>
+  <Popover.Portal>
+    <Popover.Content class="tools-menu" side="top" align="start" sideOffset={6} collisionPadding={8}>
     {#if customizing}
       <p class="tools-title" id="{reasoningId}-toolbar">{t('chat.toolbarCustomize')}</p>
       <ul class="tools-order" aria-labelledby="{reasoningId}-toolbar">
@@ -282,7 +277,8 @@
         ><span>{t('chat.quickPanel')}</span><Settings2Icon /></button
       >
     {/if}
-  </Popover.Content>
+    </Popover.Content>
+  </Popover.Portal>
 </Popover.Root>
 {#if generateImage && paintingModel && purpose === 'chat' && !pinned.includes('generate-image')}<Button
     type="button"
