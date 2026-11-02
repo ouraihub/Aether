@@ -10,6 +10,14 @@ Native `aether-mcp-server`只监听回环；非回环Native listener不在范围
 
 Web公开入口为`createMcpService`（`packages/worker/src/mcp`），组合D1 CAS、CredentialPort、OutboundHttp与显式工具/scope注册。`handlePublic`提供HTTPS `/mcp`、metadata、动态注册、OAuth PKCE/S256、一次性code/CSRF consent与refresh轮换；API keys仅hash存储、一次显示、可撤销，grant与application/tenant/subject/audience隔离。宿主仍必须实现resolveIdentity/authorizeConsent/authorizeTool；token scope不等于业务资源授权，内部Chat目录不自动公开。管理路由见23，密钥/可信egress边界见29。真实HTTPS OAuth/MCP scope冒烟已执行，其余完整验证统一记90；local HTTP即使能跑AI也不启用MCP/OAuth，不充当HTTPS证据。
 
+### 1.1 Worker 客户端兼容边界
+
+- 复用 `createMcpService`，不新增远程 MCP 包或第二套设置端口。Native listener、宿主业务授权及产品迁移不变。
+- 未认证的 `/mcp` POST 返回 401，并用 `WWW-Authenticate` 指向 `/.well-known/oauth-protected-resource/mcp`；该路径和根发现路径返回同一规范 resource 与 issuer。部署注册了 `mcp:access` 时，challenge 仅提示这个最低 scope，不自动请求全部工具权限。
+- 有效令牌缺少已注册的 `mcp:access` 时返回 403、`error="insufficient_scope"` 和相同 scope/metadata challenge，供客户端重新授权；宿主业务拒绝不转换成扩权提示。未注册基础 scope 的部署保持原有权限模型。
+- `initialize` 对已支持的版本原样应答，对非空但未支持的版本协商回服务端实际支持的 `2025-03-26`；缺失或非字符串版本仍拒绝。后续请求必须使用支持的协议版本，不宣称已实现更新版协议特性。
+- 按 [MCP 版本协商](https://modelcontextprotocol.io/specification/2025-03-26/basic/lifecycle#version-negotiation) 与 [授权发现及 scope 提示](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization#protected-resource-metadata-discovery-requirements) 验收：401→PRM→AS、缺 scope→403→重新授权恢复，以及 initialize→initialized→目录→调用。保持既有 PKCE、撤销与隔离回归。
+
 ```mermaid
 flowchart TD
   A[宿主：显式注册工具 / 管理服务] --> B[McpServer：公开入口与生命周期]
