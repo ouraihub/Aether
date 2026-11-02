@@ -23,7 +23,6 @@
     paintingModel,
     capability,
     purpose,
-    panelWidth,
     toolbar,
     hasSearch,
     onToolbarChange,
@@ -40,7 +39,6 @@
     capability: ModelOption | null
     purpose: string
     hasSearch: boolean
-    panelWidth: number
     toolbar?: string[] | undefined
     onToolbarChange?: ((ids: string[]) => void) | undefined
     newConversation: () => void
@@ -57,11 +55,7 @@
   const DEFAULT_TOOLBAR = ['new-conversation', 'web-search']
   // svelte-ignore state_referenced_locally
   let pinned = $state<string[]>(toolbar ?? DEFAULT_TOOLBAR)
-  const visiblePinned = $derived(
-    pinned
-      .filter((id) => tools.includes(id))
-      .slice(0, panelWidth > 0 && panelWidth < 480 ? 1 : pinned.length),
-  )
+  const visiblePinned = $derived(pinned.filter((id) => tools.includes(id)))
   /** Tools usable here; unavailable pinned ids stay stored but hidden (docs/38 §3.2). */
   const tools = $derived(
     ['new-conversation', 'web-search', 'attachment', 'generate-image'].filter(
@@ -184,105 +178,113 @@
         title={t('chat.tools')}><PlusIcon /></Button
       >{/snippet}
   </Popover.Trigger>
-  <Popover.Content class="tools-menu" side="top" align="start" sideOffset={6} collisionPadding={8}>
-    {#if customizing}
-      <p class="tools-title" id="{reasoningId}-toolbar">{t('chat.toolbarCustomize')}</p>
-      <ul class="tools-order" aria-labelledby="{reasoningId}-toolbar">
-        {#each toolOrder as id, index (id)}
-          <li class="tools-row">
-            <button
+  <Popover.Portal>
+    <Popover.Content
+      class="tools-menu"
+      side="top"
+      align="start"
+      sideOffset={6}
+      collisionPadding={8}
+    >
+      {#if customizing}
+        <p class="tools-title" id="{reasoningId}-toolbar">{t('chat.toolbarCustomize')}</p>
+        <ul class="tools-order" aria-labelledby="{reasoningId}-toolbar">
+          {#each toolOrder as id, index (id)}
+            <li class="tools-row">
+              <button
+                type="button"
+                class="tools-grip"
+                aria-label={t('chat.toolbarDrag', { name: t(TOOL_LABEL[id] ?? id) })}
+                onpointerdown={(e) => dragTool(e, id)}
+                onkeydown={(e) => {
+                  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+                  e.preventDefault()
+                  const button = e.currentTarget
+                  moveTool(id, index + (e.key === 'ArrowUp' ? -1 : 1))
+                  void tick().then(() => button.focus())
+                }}><GripVerticalIcon /></button
+              >
+              {@render toolIcon(id)}<span>{t(TOOL_LABEL[id] ?? id)}</span>
+              <Switch
+                size="sm"
+                aria-label={t(TOOL_LABEL[id] ?? id)}
+                checked={pinned.includes(id)}
+                onCheckedChange={(on) =>
+                  setPinned(toolOrder.filter((item) => (item === id ? on : pinned.includes(item))))}
+              />
+            </li>
+          {/each}
+        </ul>
+        <button
+          type="button"
+          class="tools-item tools-footer"
+          disabled={pinned.join() === DEFAULT_TOOLBAR.join()}
+          onclick={() => {
+            pinned = [...DEFAULT_TOOLBAR]
+            onToolbarChange?.(pinned)
+          }}><RotateCcwIcon /><span>{t('chat.toolbarRestore')}</span></button
+        >
+      {:else}
+        {#each toolOrder.filter((id) => !visiblePinned.includes(id)) as id (id)}
+          {#if id === 'new-conversation'}<button
               type="button"
-              class="tools-grip"
-              aria-label={t('chat.toolbarDrag', { name: t(TOOL_LABEL[id] ?? id) })}
-              onpointerdown={(e) => dragTool(e, id)}
-              onkeydown={(e) => {
-                if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
-                e.preventDefault()
-                const button = e.currentTarget
-                moveTool(id, index + (e.key === 'ArrowUp' ? -1 : 1))
-                void tick().then(() => button.focus())
-              }}><GripVerticalIcon /></button
-            >
-            {@render toolIcon(id)}<span>{t(TOOL_LABEL[id] ?? id)}</span>
-            <Switch
-              size="sm"
-              aria-label={t(TOOL_LABEL[id] ?? id)}
-              checked={pinned.includes(id)}
-              onCheckedChange={(on) =>
-                setPinned(toolOrder.filter((item) => (item === id ? on : pinned.includes(item))))}
-            />
-          </li>
+              class="tools-item"
+              disabled={historyBusy}
+              onclick={() => {
+                toolsOpen = false
+                newConversation()
+              }}>{@render toolIcon(id)}<span>{t('chat.newConversation')}</span></button
+            >{:else if id === 'web-search'}<button
+              type="button"
+              class="tools-item"
+              aria-pressed={webSearch}
+              onclick={() => {
+                toolsOpen = false
+                webSearch = !webSearch
+              }}
+              >{@render toolIcon(id)}<span>{t('chat.network')}</span>{#if webSearch}<CheckIcon
+                />{/if}</button
+            >{:else if id === 'attachment'}<button
+              type="button"
+              class="tools-item"
+              disabled={!vision}
+              title={vision ? undefined : t('chat.visionUnsupported')}
+              onclick={() => {
+                toolsOpen = false
+                fileInput?.click()
+              }}
+              >{@render toolIcon(id)}<span>{t('chat.uploadAttachment')}</span>{#if !vision}<small
+                  >{t('chat.visionUnsupported')}</small
+                >{/if}</button
+            >{:else}<button
+              type="button"
+              class="tools-item"
+              aria-pressed={generateImage}
+              disabled={!paintingModel || capability?.supportsTools === false}
+              title={!paintingModel
+                ? t('chat.paintingUnconfigured')
+                : capability?.supportsTools === false
+                  ? t('chat.toolsUnsupported')
+                  : undefined}
+              onclick={() => {
+                toolsOpen = false
+                generateImage = !generateImage
+              }}
+              >{@render toolIcon(id)}<span>{t('chat.generateImage')}</span
+              >{#if !paintingModel}<small>{t('chat.paintingUnconfigured')}</small
+                >{:else if generateImage}<CheckIcon />{/if}</button
+            >{/if}
         {/each}
-      </ul>
-      <button
-        type="button"
-        class="tools-item tools-footer"
-        disabled={pinned.join() === DEFAULT_TOOLBAR.join()}
-        onclick={() => {
-          pinned = [...DEFAULT_TOOLBAR]
-          onToolbarChange?.(pinned)
-        }}><RotateCcwIcon /><span>{t('chat.toolbarRestore')}</span></button
-      >
-    {:else}
-      {#each toolOrder.filter((id) => !visiblePinned.includes(id)) as id (id)}
-        {#if id === 'new-conversation'}<button
-            type="button"
-            class="tools-item"
-            disabled={historyBusy}
-            onclick={() => {
-              toolsOpen = false
-              newConversation()
-            }}>{@render toolIcon(id)}<span>{t('chat.newConversation')}</span></button
-          >{:else if id === 'web-search'}<button
-            type="button"
-            class="tools-item"
-            aria-pressed={webSearch}
-            onclick={() => {
-              toolsOpen = false
-              webSearch = !webSearch
-            }}
-            >{@render toolIcon(id)}<span>{t('chat.network')}</span>{#if webSearch}<CheckIcon
-              />{/if}</button
-          >{:else if id === 'attachment'}<button
-            type="button"
-            class="tools-item"
-            disabled={!vision}
-            title={vision ? undefined : t('chat.visionUnsupported')}
-            onclick={() => {
-              toolsOpen = false
-              fileInput?.click()
-            }}
-            >{@render toolIcon(id)}<span>{t('chat.uploadAttachment')}</span>{#if !vision}<small
-                >{t('chat.visionUnsupported')}</small
-              >{/if}</button
-          >{:else}<button
-            type="button"
-            class="tools-item"
-            aria-pressed={generateImage}
-            disabled={!paintingModel || capability?.supportsTools === false}
-            title={!paintingModel
-              ? t('chat.paintingUnconfigured')
-              : capability?.supportsTools === false
-                ? t('chat.toolsUnsupported')
-                : undefined}
-            onclick={() => {
-              toolsOpen = false
-              generateImage = !generateImage
-            }}
-            >{@render toolIcon(id)}<span>{t('chat.generateImage')}</span>{#if !paintingModel}<small
-                >{t('chat.paintingUnconfigured')}</small
-              >{:else if generateImage}<CheckIcon />{/if}</button
-          >{/if}
-      {/each}
-      <button
-        type="button"
-        class="tools-item tools-footer"
-        aria-label={t('chat.toolbarCustomize')}
-        onclick={() => (customizing = true)}
-        ><span>{t('chat.quickPanel')}</span><Settings2Icon /></button
-      >
-    {/if}
-  </Popover.Content>
+        <button
+          type="button"
+          class="tools-item tools-footer"
+          aria-label={t('chat.toolbarCustomize')}
+          onclick={() => (customizing = true)}
+          ><span>{t('chat.quickPanel')}</span><Settings2Icon /></button
+        >
+      {/if}
+    </Popover.Content>
+  </Popover.Portal>
 </Popover.Root>
 {#if generateImage && paintingModel && purpose === 'chat' && !pinned.includes('generate-image')}<Button
     type="button"

@@ -73,7 +73,10 @@
     onReasoningEffortChange?.(effort)
   }
   const MODES: PermissionMode[] = ['default', 'plan', 'accept_edits', 'auto', 'full_access']
-  const allowedModes = $derived(MODES.filter((mode) => permissionModes.includes(mode)))
+  const isAgent = $derived(purpose === 'agent')
+  const allowedModes: PermissionMode[] = $derived(
+    isAgent ? MODES.filter((mode) => permissionModes.includes(mode)) : ['default'],
+  )
   let fullAccess = $state(false)
   const mode: PermissionMode = $derived(
     fullAccess && allowedModes.includes('full_access')
@@ -161,7 +164,7 @@
     scope: scope ?? null,
     language: i18n.locale,
     model: picked,
-    skills: selected,
+    skills: isAgent ? selected : [],
     reasoningEffort,
     permissionMode: mode,
     generateImage: purpose === 'chat' && generateImage && paintingModel,
@@ -258,7 +261,6 @@
   )
   const reading = $derived(attachments.reading)
   const vision = $derived(capability?.canVision === true)
-  let panelWidth = $state(0)
   const canSend = $derived(
     session !== null &&
       !session.running &&
@@ -335,12 +337,7 @@
 
 {#if session}
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Esc bubbles from controls) -->
-  <section
-    class="chat-panel"
-    bind:clientWidth={panelWidth}
-    aria-label={t('chat.title')}
-    {onkeydown}
-  >
+  <section class="chat-panel" aria-label={t('chat.title')} {onkeydown}>
     <ChatSurface
       label={t('chat.title')}
       messagesLabel={t('chat.messages')}
@@ -412,7 +409,6 @@
           {recovery}
           bind:webSearch
           bind:generateImage
-          {panelWidth}
           toolbar={toolbarProp}
           {onToolbarChange}
           {paintingModel}
@@ -430,7 +426,7 @@
           hasSearch={!!ports.search}
           {selected}
           {skillsBudget}
-          skillsPort={ports.skills}
+          skillsPort={isAgent ? ports.skills : undefined}
           onSkillsChange={setSkills}
           onSkillResolved={() => (session.skillChanged = null)}
           {mode}

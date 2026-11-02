@@ -94,7 +94,7 @@
   })
 </script>
 
-<div class="flex items-center gap-2 text-kit-sm">
+<div class="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-kit-sm">
   <Select.Root
     type="multiple"
     value={ids}
@@ -103,7 +103,7 @@
       if (open) void refresh()
     }}
   >
-    <Select.Trigger size="sm" class="w-64" aria-label={t('skills.picker')}>
+    <Select.Trigger size="sm" class="max-w-full shrink-0" aria-label={t('skills.picker')}>
       {value.length === 0
         ? t('skills.picker_none')
         : t('skills.picker_count', { count: value.length })}
@@ -118,7 +118,9 @@
       </Select.Group>
     </Select.Content>
   </Select.Root>
-  <span class={cn('text-muted-foreground', chars > budget && 'text-destructive')}>
+  <span
+    class={cn('max-w-full shrink-0 text-muted-foreground', chars > budget && 'text-destructive')}
+  >
     {t('skills.budget', { chars, budget })}
   </span>
 </div>
