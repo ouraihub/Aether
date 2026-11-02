@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createFakePorts, isKitClientError } from './index'
-import type { Conversation, RunEvent } from './index'
+import type { Conversation, RunEvent, RunRequest } from './index'
 import { code, model, request, required, stored, turn } from './test-support/fake-fixture'
 
 describe('fake chat port', () => {
@@ -270,7 +270,7 @@ describe('fake chat port', () => {
   it('rejects conflicting actions, missing languages, writing graph fields and removed source models', async () => {
     const ports = createFakePorts({ initialConversations: [stored([turn('source')])] })
     const chat = required(ports.chat)
-    const invalid: Partial<import('./index').RunRequest>[] = [
+    const invalid: Partial<RunRequest>[] = [
       { retryTurnId: 'source', translateTurnId: 'source', targetLanguage: 'French' },
       { retryTurnId: 'source', regenerate: true },
       { translateTurnId: 'source', regenerate: true },
