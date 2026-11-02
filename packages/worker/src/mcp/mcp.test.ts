@@ -369,3 +369,85 @@ test('consent host rejection cannot mint code, and hostile Origin never dispatch
   assert.equal(response?.status, 403)
   assert.equal(calls(), 0)
 })
+
+test('MCP discovery advertises minimal access and lets clients recover from insufficient scope', async () => {
+  const { service, calls } = fixture()
+  await enable(service)
+  const unauthenticated = await service.handlePublic(request('/mcp', 'POST', {}))
+  assert.equal(unauthenticated?.status, 401)
+  const challenge = unauthenticated?.headers.get('WWW-Authenticate') ?? ''
+  assert.ok(challenge.includes('scope="mcp:access"'))
+  const metadataUrl = /resource_metadata="([^"]+)"/u.exec(challenge)?.[1]
+  assert.equal(metadataUrl, `${origin}/.well-known/oauth-protected-resource/mcp`)
+  const metadata = await value(await service.handlePublic(new Request(metadataUrl)))
+  assert.equal(metadata.resource, `${origin}/mcp`)
+  assert.deepEqual(metadata.authorization_servers, [origin])
+  const issuer = await value(
+    await service.handlePublic(request('/.well-known/oauth-authorization-server')),
+  )
+  assert.equal(issuer.issuer, origin)
+  assert.deepEqual(issuer.code_challenge_methods_supported, ['S256'])
+
+  const insufficient = await key(service, ['files:read'])
+  const denied = await service.handlePublic(request('/mcp', 'POST', {}, insufficient.token))
+  assert.equal(denied?.status, 403)
+  const required = denied?.headers.get('WWW-Authenticate') ?? ''
+  assert.ok(required.includes('error="insufficient_scope"'))
+  assert.ok(required.includes('scope="mcp:access"'))
+  assert.ok(required.includes(`resource_metadata="${metadataUrl}"`))
+  assert.equal(calls(), 0)
+
+  const renewed = await key(service)
+  const result = await rpc(service, renewed.token, 'tools/call', {
+    name: 'read_file',
+    arguments: { path: 'allowed' },
+  })
+  assert.ok(object(result.result))
+  assert.deepEqual(result.result.structuredContent, { value: 'read' })
+  assert.equal(calls(), 1)
+})
+
+test('servers without a registered base scope do not invent one in discovery', async () => {
+  const { service } = fixture({
+    scopes: [
+      { id: 'files:read', label: 'Read', destructive: false },
+      { id: 'files:write', label: 'Write', destructive: true },
+    ],
+  })
+  const response = await service.handlePublic(request('/mcp', 'POST', {}))
+  assert.equal(response?.status, 401)
+  assert.ok(!(response?.headers.get('WWW-Authenticate') ?? '').includes('scope='))
+})
+
+test('initialize negotiates a supported version without accepting malformed version fields', async () => {
+  const { service } = fixture()
+  await enable(service)
+  const issued = await key(service)
+  for (const version of ['2024-11-05', '2025-03-26', '2025-11-25']) {
+    const initialized = await rpc(service, issued.token, 'initialize', {
+      protocolVersion: version,
+      capabilities: {},
+      clientInfo: { name: 'test', version: '1' },
+    })
+    assert.ok(object(initialized.result))
+    assert.equal(
+      initialized.result.protocolVersion,
+      version === '2025-11-25' ? '2025-03-26' : version,
+    )
+  }
+  for (const protocolVersion of [undefined, null, 20250326, '', [], {}]) {
+    const rejected = await rpc(service, issued.token, 'initialize', { protocolVersion })
+    assert.ok(object(rejected.error))
+    assert.equal(rejected.error.code, -32602)
+  }
+  const unsupported = request(
+    '/mcp',
+    'POST',
+    { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+    issued.token,
+  )
+  unsupported.headers.set('MCP-Protocol-Version', '2025-11-25')
+  const rejected = await value(await service.handlePublic(unsupported))
+  assert.ok(object(rejected.error))
+  assert.equal(rejected.error.code, -32602)
+})

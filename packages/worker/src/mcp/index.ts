@@ -143,17 +143,20 @@ export class McpService {
       return json({ error: 'forbidden' }, 403)
     if (request.method !== 'POST')
       return new Response(null, { status: 405, headers: { Allow: 'POST' } })
+    const requiresAccess = this.options.scopes.some((scope) => scope.id === 'mcp:access')
+    const challenge =
+      `Bearer resource_metadata="${this.options.origin}/.well-known/oauth-protected-resource/mcp"` +
+      (requiresAccess ? ', scope="mcp:access"' : '')
     const bearer = /^Bearer[\t ]+([^\s,]+)$/iu.exec(request.headers.get('Authorization') ?? '')?.[1]
     const authentication = bearer ? await this.auth.authenticate(bearer) : null
     if (!authentication)
       return json({ error: 'unauthorized' }, 401, {
-        'WWW-Authenticate': `Bearer resource_metadata="${this.options.origin}/.well-known/oauth-protected-resource"`,
+        'WWW-Authenticate': challenge,
       })
-    if (
-      this.options.scopes.some((scope) => scope.id === 'mcp:access') &&
-      !authentication.scopes.includes('mcp:access')
-    )
-      return json({ error: 'forbidden' }, 403)
+    if (requiresAccess && !authentication.scopes.includes('mcp:access'))
+      return json({ error: 'insufficient_scope' }, 403, {
+        'WWW-Authenticate': `${challenge}, error="insufficient_scope"`,
+      })
     const maxBytes =
       this.options.tools.reduce(
         (max, tool) => Math.max(max, tool.maxRequestBytes ?? 65536),
@@ -189,11 +192,14 @@ export class McpService {
     if (message.method === 'initialize') {
       if (
         !object(message.params) ||
-        !['2024-11-05', '2025-03-26'].includes(String(message.params.protocolVersion))
+        typeof message.params.protocolVersion !== 'string' ||
+        !message.params.protocolVersion.trim()
       )
-        return rpcError(id, -32602, 'Unsupported protocol version')
+        return rpcError(id, -32602, 'Invalid protocol version')
       return rpc(id, {
-        protocolVersion: message.params.protocolVersion,
+        protocolVersion: ['2024-11-05', '2025-03-26'].includes(message.params.protocolVersion)
+          ? message.params.protocolVersion
+          : '2025-03-26',
         capabilities: { tools: {} },
         serverInfo: { name: 'Aether MCP', version: '1.0.0' },
       })

@@ -194,6 +194,7 @@ Search 请求必须使用 request-scoped outbound client 和明确的 `AbortSign
 
 ```text
 GET  /.well-known/oauth-protected-resource
+GET  /.well-known/oauth-protected-resource/mcp
 GET  /.well-known/oauth-authorization-server
 POST /oauth/register
 GET  /oauth/authorize

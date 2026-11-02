@@ -70,7 +70,11 @@ export class McpOAuth {
     const url = new URL(request.url)
     const origin = this.options.origin
     const resource = `${origin}/mcp`
-    if (url.pathname === '/.well-known/oauth-protected-resource' && request.method === 'GET')
+    if (
+      (url.pathname === '/.well-known/oauth-protected-resource' ||
+        url.pathname === '/.well-known/oauth-protected-resource/mcp') &&
+      request.method === 'GET'
+    )
       return json({
         resource,
         authorization_servers: [origin],
