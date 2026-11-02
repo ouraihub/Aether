@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { KitClientError } from '../ports'
 import type { Conversation } from '../ports'
-import { accepted, base, conversation, deferred, required, setup, stored } from './test-support/run-session-fixture'
+import {
+  accepted,
+  base,
+  conversation,
+  deferred,
+  required,
+  setup,
+  stored,
+} from './test-support/run-session-fixture'
 
 describe('RunSession lifecycle', () => {
   it('waits for acceptance after an early end, then merges stored text and metadata without losing tools/search', async () => {
@@ -52,7 +60,6 @@ describe('RunSession lifecycle', () => {
     expect(required(session.turns[1]).search.status).toBe('idle')
   })
 
-
   it('retains originals and exposes both acceptance rejection and streamed failure', async () => {
     const { session, runs, get } = setup()
     const source = stored()
@@ -93,7 +100,6 @@ describe('RunSession lifecycle', () => {
     expect(session.selectedTurnId).toBe(source.id)
   })
 
-
   it('removes a rejected translation candidate and retains its original', async () => {
     const { session, runs } = setup()
     const source = stored()
@@ -109,7 +115,6 @@ describe('RunSession lifecycle', () => {
     expect(session.selectedTurnId).toBe(source.id)
   })
 
-
   it('keeps the streamed reply and exposes a failed persistence refresh', async () => {
     const { session, runs, get } = setup()
     session.show('conversation', [stored()], 'source')
@@ -124,7 +129,6 @@ describe('RunSession lifecycle', () => {
     expect(session.actionError).toBeNull()
     expect(session.historyRefreshError).toBe('History unavailable')
   })
-
 
   it('retains a rejected normal reply locally but never marks its temporary id persisted', async () => {
     const { session, runs } = setup()
@@ -154,7 +158,6 @@ describe('RunSession lifecycle', () => {
     })
   })
 
-
   it('ignores delayed acceptance and history refresh when another conversation is shown', async () => {
     const { session, runs, get } = setup()
     const pendingHistory = deferred<Conversation>()
@@ -178,7 +181,6 @@ describe('RunSession lifecycle', () => {
     expect(session.turns).toEqual([])
   })
 
-
   it('does not invent a terminal state when cancellation is acknowledged', async () => {
     const { session, runs, cancel } = setup(false)
     const sent = session.send(base, 'Partial')
@@ -196,7 +198,6 @@ describe('RunSession lifecycle', () => {
     expect(session.turns[0]).toMatchObject({ text: 'kept', status: 'cancelled' })
   })
 
-
   it('cancels late acceptance and isolates old events after changing the displayed conversation', async () => {
     const { session, runs, cancel } = setup(false)
     const sent = session.send(base, 'Old')
@@ -211,7 +212,6 @@ describe('RunSession lifecycle', () => {
     expect(session.turns).toHaveLength(1)
     expect(session.turns[0]).toMatchObject({ id: 'new-turn', text: 'New' })
   })
-
 
   it('reports a current approval failure but does not revive a card after switching sessions', async () => {
     const { session, runs, approve } = setup(false)

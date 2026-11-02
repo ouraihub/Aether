@@ -9,15 +9,27 @@ describe('SkillPicker in ChatPanel', () => {
     const run = vi.fn((request: RunRequest) => {
       requests.push(request)
       if (requests.length === 1) {
-        return Promise.reject(new KitClientError({ code: 'conflict', message: 'changed', details: { reason: 'skill_changed', entity: 's1' } }))
+        return Promise.reject(
+          new KitClientError({
+            code: 'conflict',
+            message: 'changed',
+            details: { reason: 'skill_changed', entity: 's1' },
+          }),
+        )
       }
       return Promise.resolve({ runId: 'r2', conversationId: null, turnId: null })
     })
-    const get = vi.fn(() => Promise.resolve({ ...meta(2), body: 'edited body', license: null, extra: {}, files: [] }))
-    mount({ chat: { start: run }, skills: { list: () => Promise.resolve([meta(2)]), get } }, [{ id: 's1', revision: 1 }])
+    const get = vi.fn(() =>
+      Promise.resolve({ ...meta(2), body: 'edited body', license: null, extra: {}, files: [] }),
+    )
+    mount({ chat: { start: run }, skills: { list: () => Promise.resolve([meta(2)]), get } }, [
+      { id: 's1', revision: 1 },
+    ])
 
     const send = async (text: string) => {
-      await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: text } })
+      await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+        target: { value: text },
+      })
       await fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     }
     await send('one')

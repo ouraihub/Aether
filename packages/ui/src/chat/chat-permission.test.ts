@@ -15,7 +15,9 @@ describe('ChatPanel purpose controls', () => {
       skills: { list: () => Promise.resolve([]) },
       props: { purpose: 'agent', permissionModes: ['default', 'plan'], skills: [] },
     })
-    expect(await screen.findByRole('button', { name: 'Permission mode: Ask each time' })).toBeTruthy()
+    expect(
+      await screen.findByRole('button', { name: 'Permission mode: Ask each time' }),
+    ).toBeTruthy()
     expect(await screen.findByLabelText('Skills for this message')).toBeTruthy()
   })
 })
@@ -28,7 +30,9 @@ describe('ChatPanel permission modes', () => {
     await fireEvent.click(await screen.findByRole('menuitem', { name: new RegExp(`^${name}`) }))
   }
   it('offers only host modes, sends Plan and keeps approval cards', async () => {
-    const { runs, approve } = setup(false, null, { props: { purpose: 'agent', permissionModes: ['default', 'plan'] } })
+    const { runs, approve } = setup(false, null, {
+      props: { purpose: 'agent', permissionModes: ['default', 'plan'] },
+    })
     await fireEvent.click(screen.getByRole('button', { name: 'Permission mode: Ask each time' }))
     expect(screen.queryByRole('menuitem', { name: /^Smart approval/ })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: /^Full access/ })).toBeNull()
@@ -46,7 +50,9 @@ describe('ChatPanel permission modes', () => {
   })
 
   it('confirms FullAccess and consumes it for exactly one run, not regeneration', async () => {
-    const { runs, notify } = setup(true, null, { props: { purpose: 'agent', permissionModes: [...modes] } })
+    const { runs, notify } = setup(true, null, {
+      props: { purpose: 'agent', permissionModes: [...modes] },
+    })
     await choose('Full access')
     expect(notify.confirm).toHaveBeenCalledWith(expect.objectContaining({ danger: true }))
     await send('execute')
@@ -77,7 +83,10 @@ describe('ChatPanel permission modes', () => {
     const run = vi.fn<RunClient['start']>(() =>
       Promise.reject(new KitClientError({ code: 'network', message: 'offline' })),
     )
-    setup(false, null, { props: { purpose: 'agent', permissionModes: [...modes] }, chat: { start: run } })
+    setup(false, null, {
+      props: { purpose: 'agent', permissionModes: [...modes] },
+      chat: { start: run },
+    })
     await choose('Full access')
     await send('execute')
     await waitFor(() => expect(run).toHaveBeenCalledTimes(1))

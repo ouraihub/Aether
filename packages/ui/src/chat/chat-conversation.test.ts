@@ -200,5 +200,4 @@ describe('ChatPanel conversations', () => {
     expect(onConversationChange).not.toHaveBeenCalled()
     expect(get).toHaveBeenCalledTimes(2)
   })
-
 })

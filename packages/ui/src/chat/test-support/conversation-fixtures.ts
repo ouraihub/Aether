@@ -19,7 +19,14 @@ export function candidates(): Conversation {
     generated: [],
   })
   return {
-    summary: { id: 'saved', title: 'Candidates', scope: null, selectedTurnId: 'a', createdAt: 0, updatedAt: 0 },
+    summary: {
+      id: 'saved',
+      title: 'Candidates',
+      scope: null,
+      selectedTurnId: 'a',
+      createdAt: 0,
+      updatedAt: 0,
+    },
     turns: [reply('a', 'Original **reply**'), reply('b', 'Alternative reply')],
   }
 }

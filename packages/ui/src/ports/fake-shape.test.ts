@@ -64,9 +64,9 @@ describe('createFakePorts shape', () => {
   })
 
   it('skills.get rejects with not_found and its details', async () => {
-    const error: unknown = await createFakePorts().skills?.get('s1').catch(
-      (caught: unknown) => caught,
-    )
+    const error: unknown = await createFakePorts()
+      .skills?.get('s1')
+      .catch((caught: unknown) => caught)
     expect(isKitClientError(error) && [error.code, error.details.entity]).toEqual([
       'not_found',
       'skill',

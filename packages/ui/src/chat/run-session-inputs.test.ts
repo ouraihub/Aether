@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { KitClientError } from '../ports'
-import { accepted, base, conversation, pickedModel, required, setup, stored } from './test-support/run-session-fixture'
+import {
+  accepted,
+  base,
+  conversation,
+  pickedModel,
+  required,
+  setup,
+  stored,
+} from './test-support/run-session-fixture'
 
 describe('RunSession inputs', () => {
   it('rejects reply actions for writing and omits graph fields from a normal writing run', async () => {
@@ -19,7 +27,6 @@ describe('RunSession inputs', () => {
     await sent
   })
 
-
   it('uses the picked model for an unaccepted local reply without a source model snapshot', async () => {
     const { session, runs } = setup(false)
     const sent = session.send({ ...base, model: null }, 'Question')
@@ -33,7 +40,6 @@ describe('RunSession inputs', () => {
     await retried
   })
 
-
   it('rejects missing source and invalid language without changing original replies', async () => {
     const { session, runs } = setup()
     session.show('conversation', [stored()], 'source')
@@ -45,7 +51,6 @@ describe('RunSession inputs', () => {
     expect(session.turns).toHaveLength(1)
     expect(runs).toHaveLength(0)
   })
-
 
   it('shows sent images at once, omits them when empty and lets history replace them', async () => {
     const { session, runs, get } = setup()
@@ -69,7 +74,6 @@ describe('RunSession inputs', () => {
     )
   })
 
-
   it('retries a stored source by id only and an unstored one by resending its images', async () => {
     const { session, runs } = setup()
     session.show(
@@ -91,7 +95,6 @@ describe('RunSession inputs', () => {
     void local.session.retry(base, required(local.session.turns[0]).id)
     expect(required(local.runs[1]).request.images).toEqual([{ mime: 'image/gif', data: 'R0lG' }])
   })
-
 
   it('takes the streamed cost and sums known costs per currency', async () => {
     const { session, runs } = setup(false)
@@ -124,6 +127,4 @@ describe('RunSession inputs', () => {
       { amount: 1, currency: 'CNY' },
     ])
   })
-
-
 })

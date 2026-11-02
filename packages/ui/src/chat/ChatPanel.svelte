@@ -337,11 +337,7 @@
 
 {#if session}
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Esc bubbles from controls) -->
-  <section
-    class="chat-panel"
-    aria-label={t('chat.title')}
-    {onkeydown}
-  >
+  <section class="chat-panel" aria-label={t('chat.title')} {onkeydown}>
     <ChatSurface
       label={t('chat.title')}
       messagesLabel={t('chat.messages')}

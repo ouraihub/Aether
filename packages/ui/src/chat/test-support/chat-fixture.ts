@@ -40,7 +40,6 @@ export interface Extra {
   chat?: Partial<RunClient>
 }
 
-
 export function setup(
   withHistory: boolean,
   context: { kind: string; id: string; label: string } | null = null,
@@ -48,22 +47,34 @@ export function setup(
 ) {
   const runs: Run[] = []
   const stored: Conversation = {
-    summary: { id: 'c1', title: 'Test', scope: null, selectedTurnId: null, createdAt: 0, updatedAt: 0 },
+    summary: {
+      id: 'c1',
+      title: 'Test',
+      scope: null,
+      selectedTurnId: null,
+      createdAt: 0,
+      updatedAt: 0,
+    },
     turns: [],
   }
-  const approve = vi.fn<(runId: string, callId: string, allow: boolean) => Promise<void>>(() => Promise.resolve())
+  const approve = vi.fn<(runId: string, callId: string, allow: boolean) => Promise<void>>(() =>
+    Promise.resolve(),
+  )
   const ports = createFakePorts({
     providers: {
-      modelOptions: () => Promise.resolve([{
-        ...model,
-        label: 'Local · main · m1',
-        modelType: 'chat',
-        name: null,
-        supportsTools: null,
-        reasoning: null,
-        nativeWebSearch: false,
-        canVision: false,
-      }]),
+      modelOptions: () =>
+        Promise.resolve([
+          {
+            ...model,
+            label: 'Local · main · m1',
+            modelType: 'chat',
+            name: null,
+            supportsTools: null,
+            reasoning: null,
+            nativeWebSearch: false,
+            canVision: false,
+          },
+        ]),
       ...extra.providers,
     },
     ...(extra.search ? { search: extra.search } : {}),
@@ -71,15 +82,24 @@ export function setup(
     chat: {
       start: (request, emit, options) => {
         const id = crypto.randomUUID()
-        const source = stored.turns.find((turn) => turn.id === (request.retryTurnId ?? request.translateTurnId))
+        const source = stored.turns.find(
+          (turn) => turn.id === (request.retryTurnId ?? request.translateTurnId),
+        )
         const turn: Conversation['turns'][number] = {
           id,
-          parentId: request.retryTurnId ? (source?.parentId ?? null) : (request.translateTurnId ?? request.replyToId ?? stored.summary.selectedTurnId),
+          parentId: request.retryTurnId
+            ? (source?.parentId ?? null)
+            : (request.translateTurnId ?? request.replyToId ?? stored.summary.selectedTurnId),
           questionId: request.retryTurnId ? (source?.questionId ?? id) : id,
           supersedesId: request.retryTurnId ?? null,
           kind: request.translateTurnId ? 'translation' : 'reply',
           input: source?.input ?? request.input,
-          images: source ? source.images : (request.images ?? []).map((image) => ({ mime: image.mime, url: `data:${image.mime};base64,${image.data}` })),
+          images: source
+            ? source.images
+            : (request.images ?? []).map((image) => ({
+                mime: image.mime,
+                url: `data:${image.mime};base64,${image.data}`,
+              })),
           generated: [],
           text: '',
           status: 'running',
@@ -92,7 +112,8 @@ export function setup(
         stored.turns.push(turn)
         const wrapped = (event: RunEvent) => {
           if (event.kind === 'text_delta') turn.text += event.text
-          if (event.kind === 'reasoning_delta') turn.reasoningText = (turn.reasoningText ?? '') + event.text
+          if (event.kind === 'reasoning_delta')
+            turn.reasoningText = (turn.reasoningText ?? '') + event.text
           if (event.kind === 'usage') {
             turn.usage = {
               inputTokens: event.inputTokens,
@@ -107,23 +128,38 @@ export function setup(
           if (event.kind === 'end') {
             turn.status = event.status
             turn.errorCode = event.error?.code ?? null
-            if (event.status === 'completed' && !request.retryTurnId) stored.summary.selectedTurnId = id
+            if (event.status === 'completed' && !request.retryTurnId)
+              stored.summary.selectedTurnId = id
           }
           emit(event)
         }
         runs.push({ request, turnId: id, emit: wrapped, signal: options?.signal })
-        options?.signal?.addEventListener('abort', () => wrapped({ kind: 'end', status: 'cancelled' }))
-        return Promise.resolve({ runId: `r${runs.length}`, conversationId: withHistory ? (request.conversationId ?? 'c1') : null, turnId: withHistory ? id : null })
+        options?.signal?.addEventListener('abort', () =>
+          wrapped({ kind: 'end', status: 'cancelled' }),
+        )
+        return Promise.resolve({
+          runId: `r${runs.length}`,
+          conversationId: withHistory ? (request.conversationId ?? 'c1') : null,
+          turnId: withHistory ? id : null,
+        })
       },
       approve,
       ...extra.chat,
     },
   })
-  if (ports.conversations) Object.assign(ports.conversations, {
-    get: (id: string) => id === stored.summary.id
-      ? Promise.resolve(structuredClone(stored))
-      : Promise.reject(new KitClientError({ code: 'not_found', message: 'conversation not found' })),
-  }, extra.history)
+  if (ports.conversations)
+    Object.assign(
+      ports.conversations,
+      {
+        get: (id: string) =>
+          id === stored.summary.id
+            ? Promise.resolve(structuredClone(stored))
+            : Promise.reject(
+                new KitClientError({ code: 'not_found', message: 'conversation not found' }),
+              ),
+      },
+      extra.history,
+    )
   if (!withHistory) delete ports.conversations
   const notify = { toast: vi.fn(), confirm: vi.fn(() => Promise.resolve(true)) }
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -133,7 +169,9 @@ export function setup(
 }
 
 export async function send(text: string) {
-  await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: text } })
+  await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+    target: { value: text },
+  })
   const button = screen.getByRole('button', { name: 'Send' })
   await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false))
   await fireEvent.click(button)

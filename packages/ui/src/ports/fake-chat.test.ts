@@ -311,7 +311,9 @@ describe('fake chat port', () => {
       ),
     ).toBe('not_found')
     expect(
-      await code(chat.start({ ...request, conversationId: 'stored', replyToId: 'missing' }, () => undefined)),
+      await code(
+        chat.start({ ...request, conversationId: 'stored', replyToId: 'missing' }, () => undefined),
+      ),
     ).toBe('not_found')
     expect(await code(chat.start({ ...request, conversationId: 'missing' }, () => undefined))).toBe(
       'not_found',

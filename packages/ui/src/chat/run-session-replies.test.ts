@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import { accepted, base, conversation, pickedModel, required, setup, sourceModel, stored } from './test-support/run-session-fixture'
+import {
+  accepted,
+  base,
+  conversation,
+  pickedModel,
+  required,
+  setup,
+  sourceModel,
+  stored,
+} from './test-support/run-session-fixture'
 
 describe('RunSession replies', () => {
   it('restores graph metadata and sends against the selected parent, not the last candidate', async () => {
@@ -28,7 +37,6 @@ describe('RunSession replies', () => {
       persisted: true,
     })
   })
-
 
   it('keeps the source and its question when retrying with its original model snapshot', async () => {
     const { session, runs, get } = setup()
@@ -70,7 +78,6 @@ describe('RunSession replies', () => {
     expect(session.selectedTurnId).toBe(source.id)
   })
 
-
   it('honors an explicit switch model while keeping the question and source reasoning effort', async () => {
     const { session, runs } = setup()
     session.show('conversation', [stored({ reasoningEffort: 'high' })], 'source')
@@ -88,7 +95,6 @@ describe('RunSession replies', () => {
       ...pickedModel,
     })
   })
-
 
   it('translates the original reply with the real instruction and original model', async () => {
     const { session, runs } = setup()
@@ -114,7 +120,6 @@ describe('RunSession replies', () => {
     expect(required(session.turns[1]).questionId).toBe('candidate')
   })
 
-
   it('honors the translation dialog model selection', async () => {
     const { session, runs } = setup()
     session.show('conversation', [stored()], 'source')
@@ -124,7 +129,6 @@ describe('RunSession replies', () => {
     await translated
     expect(session.turns[1]).toMatchObject(pickedModel)
   })
-
 
   it('preserves translation kind when retrying a translated reply', async () => {
     const { session, runs } = setup()
@@ -138,7 +142,6 @@ describe('RunSession replies', () => {
     required(runs[0]).accepted.resolve(accepted)
     await retried
   })
-
 
   it('without history appends fresh retry/translation candidates without backend graph fields', async () => {
     const { session, runs } = setup(false)
@@ -167,6 +170,4 @@ describe('RunSession replies', () => {
     await translation
     expect(session.turns).toHaveLength(3)
   })
-
-
 })

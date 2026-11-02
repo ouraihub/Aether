@@ -16,7 +16,10 @@ describe('Skill import sources', () => {
     const prepareSystem = vi.fn(async () => ({ source, origin: candidate.path }))
     const previewFn = vi.fn(async () => preview('system skill body'))
     const install = vi.fn()
-    mount({ skillSources: { discover, pickSearchDirectory, prepareSystem }, skills: { preview: previewFn, install } })
+    mount({
+      skillSources: { discover, pickSearchDirectory, prepareSystem },
+      skills: { preview: previewFn, install },
+    })
     await addFrom('Search this computer')
     await waitFor(() => expect(discover).toHaveBeenCalledTimes(1))
     await fireEvent.click(await screen.findByRole('button', { name: 'Choose skill folder' }))
@@ -52,7 +55,10 @@ describe('Skill import sources', () => {
     await addFrom('Import local file or folder')
     await fireEvent.click(screen.getByRole('button', { name: 'Choose folder' }))
     await fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }))
-    pending.resolve({ source: { bytes: { fileName: 'late.zip', bytes: [9] } }, origin: 'late folder' })
+    pending.resolve({
+      source: { bytes: { fileName: 'late.zip', bytes: [9] } },
+      origin: 'late folder',
+    })
     await pending.promise
     await addFrom('Import local file or folder')
     expect(previewFn).not.toHaveBeenCalled()

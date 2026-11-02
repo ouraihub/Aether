@@ -91,6 +91,4 @@ describe('ChatPanel markdown', () => {
     expect(messages.querySelectorAll('table tbody tr')).toHaveLength(1)
     expect(messages.querySelector('script, [onerror], a[href^="javascript:"]')).toBeNull()
   })
-
-
 })

@@ -230,8 +230,6 @@ describe('ChatPanel conversation actions', () => {
     await waitFor(() => expect(onConversationChange).toHaveBeenCalledWith('forked'))
   })
 
-
-
   it('keeps deletion of a reply ancestor enabled with a reparent warning but disables editing it', async () => {
     const conversation = candidates()
     conversation.summary.selectedTurnId = 'b'
