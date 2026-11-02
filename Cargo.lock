@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "aether-chat"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-images",
  "aether-support",
@@ -66,7 +66,7 @@ dependencies = [
 
 [[package]]
 name = "aether-images"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-support",
  "aether-testkit",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "aether-mcp-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-support",
  "aether-testkit",
@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "aether-mcp-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-support",
  "base64 0.22.1",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "aether-observability"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-support",
  "serde",
@@ -142,7 +142,7 @@ dependencies = [
 
 [[package]]
 name = "aether-providers"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-support",
  "aether-testkit",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "aether-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-chat",
  "aether-images",
@@ -184,7 +184,7 @@ dependencies = [
 
 [[package]]
 name = "aether-search"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-support",
  "aether-testkit",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "aether-skills"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-support",
  "reqwest 0.12.28",
@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "aether-support"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "aether-testkit",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "aether-testkit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tokio",
 ]
@@ -1293,7 +1293,7 @@ dependencies = [
 
 [[package]]
 name = "example-assistant"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-mcp-client",
  "aether-observability",
@@ -1310,7 +1310,7 @@ dependencies = [
 
 [[package]]
 name = "example-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-observability",
  "aether-providers",
@@ -1322,7 +1322,7 @@ dependencies = [
 
 [[package]]
 name = "example-mcp-server-only"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-mcp-server",
  "aether-observability",
@@ -1334,7 +1334,7 @@ dependencies = [
 
 [[package]]
 name = "example-providers-only"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-observability",
  "aether-providers",
@@ -4636,7 +4636,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-aether"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aether-mcp-client",
  "aether-mcp-server",
