@@ -342,3 +342,74 @@ test('missing event file or Git repository cannot select light checks', (t) => {
   writeFileSync(event, JSON.stringify({ before: 'a'.repeat(40), after: 'b'.repeat(40) }))
   assert.equal(invoke(), 'scope=full\n')
 })
+
+const cargoToml = (version, extra = '') =>
+  `[workspace]\nmembers = ["crates/a"]\n\n[workspace.package]\nversion = "${version}"\nedition = "2024"\n\n[workspace.dependencies]\nserde = "1"\n${extra}`
+const lockEntry = (name, version, source) =>
+  `\n[[package]]\nname = "${name}"\nversion = "${version}"\n${source ? `source = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${'0'.repeat(64)}"\n` : 'dependencies = [\n "serde",\n]\n'}`
+const cargoLock = (local, serde = '1.0.0') =>
+  `version = 4\n${lockEntry('aether-a', local)}${lockEntry('example-cli', local)}${lockEntry('serde', serde, true)}`
+const packageJson = (version, ui = version, extra = '') =>
+  `{\n  "name": "@ouraihub/aether-presets",\n  "version": "${version}",\n  "peerDependencies": {\n    "@ouraihub/aether-ui": "^${ui}"\n  },\n  "devDependencies": {\n    "typescript": "5.9.3"${extra}\n  }\n}\n`
+const tauriConf = (version, identifier = 'dev.aether.assistant') =>
+  `{\n  "productName": "Aether Assistant",\n  "version": "${version}",\n  "identifier": "${identifier}"\n}\n`
+const release = (version) => ({
+  'Cargo.toml': cargoToml(version),
+  'Cargo.lock': cargoLock(version),
+  'packages/presets/package.json': packageJson(version),
+  'examples/assistant/src-tauri/tauri.conf.json': tauriConf(version),
+})
+
+test('release version bumps use light checks; publish still runs every platform', (t) => {
+  const repo = repository(t)
+  const before = repo.commit(release('0.1.1'))
+  const after = repo.commit({ ...release('0.1.2'), 'docs/release.md': 'v0.1.2\n' })
+  const result = repo.run('push', { before, after })
+  assert.equal(result.scope, 'docs')
+  assert.match(result.summary, /docs=1, frontend=0, full=0, automation=0, version=4/)
+  const ui = repo.commit({ 'packages/ui/src/main.ts': 'export {}\n' })
+  assert.equal(repo.run('push', { before: after, after: ui }).scope, 'frontend')
+})
+
+test('anything beyond a coherent version bump in a manifest runs full checks', (t) => {
+  const cases = {
+    'dependency upgrade in the lockfile': { 'Cargo.lock': cargoLock('0.1.1', '1.0.1') },
+    'workspace version without the lockfile': { 'Cargo.toml': cargoToml('0.1.2') },
+    'lockfile member bump without Cargo.toml': { 'Cargo.lock': cargoLock('0.1.2') },
+    'third-party package.json dependency': {
+      'packages/presets/package.json': packageJson('0.1.1', '0.1.1').replace('5.9.3', '5.9.4'),
+    },
+    'added package.json field': {
+      'packages/presets/package.json': packageJson('0.1.1', '0.1.1', ',\n    "vite": "8.3.4"'),
+    },
+    'Cargo.toml dependency version': {
+      'Cargo.toml': cargoToml('0.1.1', 'version = "1.2.3"\n'),
+    },
+    'Tauri identifier': {
+      'examples/assistant/src-tauri/tauri.conf.json': tauriConf('0.1.1', 'dev.aether.other'),
+    },
+    'Tauri dependency-style line': {
+      'examples/assistant/src-tauri/tauri.conf.json': tauriConf('0.1.1').replace(
+        '"version": "0.1.1",',
+        '"version": "latest",',
+      ),
+    },
+    'manifest outside the release set': { 'crates/a/Cargo.toml': '[package]\nversion = "0.1.2"\n' },
+  }
+  for (const [name, files] of Object.entries(cases)) {
+    const repo = repository(t)
+    const before = repo.commit({
+      ...release('0.1.1'),
+      'crates/a/Cargo.toml': '[package]\nversion = "0.1.1"\n',
+    })
+    const after = repo.commit(files)
+    assert.equal(repo.run('push', { before, after }).scope, 'full', name)
+  }
+})
+
+test('a version bump next to code still runs full checks', (t) => {
+  const repo = repository(t)
+  const before = repo.commit({ ...release('0.1.1'), 'src/lib.rs': 'base\n' })
+  const after = repo.commit({ ...release('0.1.2'), 'src/lib.rs': 'changed\n' })
+  assert.equal(repo.run('push', { before, after }).scope, 'full')
+})
