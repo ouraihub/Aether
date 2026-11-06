@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { KitClientError, type Conversation, type ModelOption, type RunClient } from '../ports'
-import { model, required, setup, send, type Extra } from './test-support/chat-fixture'
+import { model, pickModel, required, setup, send, type Extra } from './test-support/chat-fixture'
 
 describe('ChatPanel images', () => {
   const visionModel = { endpointId: 'e2', modelId: 'v1' }
@@ -126,8 +126,7 @@ describe('ChatPanel images', () => {
       ),
     )
     expect(screen.queryByRole('button', { name: 'Remove image 1' })).toBeNull()
-    await fireEvent.click(screen.getByLabelText('Select a model'))
-    await fireEvent.click(await screen.findByRole('option', { name: /v1/ }))
+    await pickModel('v1', /^Select v1/)
     await pick([png()])
     await screen.findByRole('button', { name: 'Remove image 1' })
     await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
@@ -136,8 +135,7 @@ describe('ChatPanel images', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false),
     )
-    await fireEvent.click(screen.getByLabelText('Select a model'))
-    await fireEvent.click(await screen.findByRole('option', { name: /m1/ }))
+    await pickModel('m1', /^Select m1/)
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true),
     )

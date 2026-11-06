@@ -22,11 +22,15 @@ export class ChatAttachments {
   images = $state<AttachedImage[]>([])
   reading = $state(0)
 
-  constructor(
-    private readonly canVision: () => boolean,
-    private readonly notify: KitNotify,
-    private readonly i18n: KitI18n,
-  ) {}
+  private readonly canVision: () => boolean
+  private readonly notify: KitNotify
+  private readonly i18n: KitI18n
+
+  constructor(canVision: () => boolean, notify: KitNotify, i18n: KitI18n) {
+    this.canVision = canVision
+    this.notify = notify
+    this.i18n = i18n
+  }
 
   remove = (index: number): void => {
     const [image] = this.images.splice(index, 1)

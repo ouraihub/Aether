@@ -119,6 +119,7 @@
     </Select.Content>
   </Select.Root>
   <span
+    data-composer-capacity
     class={cn('max-w-full shrink-0 text-muted-foreground', chars > budget && 'text-destructive')}
   >
     {t('skills.budget', { chars, budget })}
