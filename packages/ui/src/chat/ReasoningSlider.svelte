@@ -1,6 +1,6 @@
 <script lang="ts">
-  // The one discrete effort rail, drawn like LumaKit ThinkRail: a tone gradient fill and a pill
-  // thumb carrying the level's mark and name over a native range input (docs/16, 31).
+  // The one discrete effort rail: a tone gradient fill and a pill thumb carrying the level's
+  // mark and name over a native range input (docs/16, 31).
   import type { ReasoningEffort } from '../ports'
   import { effortTone } from './model-effort'
   import PathIcon from './icons/PathIcon.svelte'

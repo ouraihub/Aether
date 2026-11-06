@@ -1,4 +1,4 @@
-// Effort marks as 24×24 path data, colored by `currentColor`; same shapes as LumaKit ThinkRail.
+// Effort marks as 24×24 path data, colored by `currentColor`; one mark per reasoning level.
 // Remix Icon 4.9.0 (LICENSE-REMIX): RiZzz, RiLeaf, RiFlashlight, RiContrastDrop2, RiSparkling2,
 // RiSparkling and RiFire, Line variants. Path data unmodified.
 import type { ReasoningEffort } from '../../ports'
@@ -59,7 +59,7 @@ const paths: Partial<Record<ReasoningEffort, string>> = {
   ].join(''),
 }
 
-/** The mark for `effort`; `auto` and `default` share the medium drop, as in LumaKit. */
+/** The mark for `effort`; `auto` and `default` share the medium drop. */
 export function effortPath(effort: ReasoningEffort): string {
   return paths[effort] ?? (paths.medium as string)
 }
