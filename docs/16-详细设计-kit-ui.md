@@ -339,7 +339,7 @@ interface ChatPanelProps {
 - 上下文标签移除仅代表本轮context=null；scope仍为会话归属。宿主必须继续校验会话和关联资源访问权限，不能以无payload免鉴权；若非空context仍需匹配scope。写作必填由宿主继续执行。
 - 用户复核后批准完整回复操作（对齐 Cherry）：展开按钮固定输入卡片右上角；回复操作栏依次为复制、重新生成、@、翻译、👍（仅多候选，设置为上下文）、保存到笔记、删除、更多；更多=编辑／分支／复制为新对话／保存›／导出›。候选共享 questionId 只显示一次问题，来源模型和选中态可读；`conversations.selectTurn` 持久选择同会话路径，“分支”也选择同会话路径并清空草稿，`conversations.fork` 仅“复制为新对话”。编辑调用 `conversations.editTurn` 保留 CAS，Markdown 下载有真实宿主／浏览器行为；编辑／语言 Dialog 错误保草稿。删除调用 `conversations.removeTurn`，生成中禁用结构变更；图结构和继任选择的服务端规则归会话存储合同。所有动作使用稳定 turnId；`end` 后读回通过独立客户端，异步有效性归 30 §2。并发比较不在本轮新增范围。
 - 思考强度：Gauge／当前档位入口向上右对齐弹层，强度／恢复默认、更快—更智能、原生离散range；只遍历模型声明档位。default独立于显式档位，弹层打开和视觉中位不写medium；拖动／方向键／Home/End后才写合法值；none为显式关闭。选中模型时始终保留入口，无能力时明确说明并提供宿主设置入口，不显示伪造滑块；单显式档位用默认＋选项，切模型恢复default，运行中禁用，Esc先关弹层回焦点。复用RunRequest.reasoningEffort，不引入serviceTier/FastMode、模型目录或偏好存储。
-- 思考滑块按合法档位绘制等距刻度点，每个点对应一个effort；当前点由圆形thumb替代，其余点保留在轨道中心。原生range仍step=1，刻度不接管鼠标／触摸／键盘事件；主题色进度和背景色刻度沿用现有token。
+- 思考滑块对齐 LumaKit ThinkRail：轨道按相邻档位色调渐变填充到当前位置（none/minimal/low=info，xhigh/max=warning，其余 primary），当前值由胶囊 thumb 显示该档位图标与名称（Remix Icon，`chat/icons/effort-icons.ts`），档位按钮在轨道下方等分。原生 range 仍 step=1，透明叠在轨道上并以胶囊宽度为 thumb，鼠标／触摸／键盘都由它处理；颜色只用主题 token。
 - `ReasoningControl` 从 `@ouraihub/aether-ui/chat` 独立导出；ChatPanel 与自建运行宿主共用同一控件，不复制滑块/刻度/焦点逻辑。输入为 `value`（default 或显式档位）、`efforts`、`disabled`、`i18n`、`onchange`、可选 `onOpenSettings` 与可绑定 `open`；不读取模型目录、偏好或运行客户端。ChatPanel 保留已有 nearestEffort 与宿主偏好策略，自建宿主负责将 default 映射到自己的 null、校验请求与固定运行快照。控件只排序已声明的档位，无能力时不伪造值。
 - `UsageControl` 从 `@ouraihub/aether-ui/chat` 独立导出，提供 Settings2 入口、Portal 向上右对齐浮层和 Cherry 式上下文摘要（标题、原生 meter、已用/窗口/比例、模型名及实测/估算来源）。输入 `context:{tokens,contextWindow,modelName,source}|null`、`i18n` 与可选 `settings/details` snippets；无模型计量时显示未知，不用累计计费 token 冒充上下文。比例限于 0–100%，原始计数不截断。宿主自管参数验证、持久化和运行冻结，组件不构造运行请求。ChatPanel 的 UsageDetails 组合此控件，保留本轮/会话累计 token 与费用明细；Actora 注入输出上限、工具预算、上下文裁剪和独立 Cloudflare 预算，不把平台预算做成 Aether DTO。
 - 回复“换模型”（@）对标 Cherry：@ 按钮本身就是 `ModelSelect` 的自定义 `trigger`，弹层与顶部选择器完全相同，当前值为该回复来源模型（竖条标记）；点选通过 RunSession 使用带 `retryTurnId` 与所选 `model` 的 `RunRequest` 调 `RunClient.start` 生成新候选，原回复保留，不再经过确认 Dialog。末轮重新生成时来源模型失效只 toast 提示“请点 @ 选择其他模型”。Dialog 只保留编辑与翻译。
@@ -350,6 +350,7 @@ interface ChatPanelProps {
 - 一次性生成（如编辑器润色）不用 ChatPanel：应用直接调用 `ports.chat.start(request, onEvent, options)`；`request` 使用 22 的完整 `RunRequest`，例如宿主把 `purpose` 设为 `polish`，自行处理 `text_delta` 及 `end`，保留接受结果以便显式取消或查询快照。
 - `RunSession` 只组合运行展示、草稿、消息与审批卡，构造时注入 `RunClient` 和独立可选 `ConversationClient`。generation、晚到接受补取消、终态读回、快照确认规则唯一归 30 §2；组件不再直接调用旧 `chat.history`。
 - 权限模式选择保留 origin/main 已有能力：只展示宿主允许模式，运行中禁用，保留模式说明、plan 标识与危险提示。宿主可绑定非危险模式偏好；full_access 使用独立一次性确认，不写回持久偏好。具体选择/消费算法归 30 §2.4，PermissionMode/ToolEffect 枚举归 12，22 引用枚举并定义出站字段，后端裁决归 12/25；UI 选择不能提升宿主授权。
+- 普通对话（`purpose === 'chat'`）对标 Cherry 的 AI 对话：不显示权限模式与技能选择，请求固定 `default` 且 `skills: []`；这两项只在 `purpose === 'agent'` 出现。工具仍可能出现，审批卡照常逐次确认；后端权限模式与技能执行能力不变。
 
 ### 4.3 skills
 

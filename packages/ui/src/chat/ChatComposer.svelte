@@ -195,6 +195,8 @@
   /* Hallmark · component: integrated composer · theme: host semantic tokens */
   .composer-shell {
     min-width: 0;
+    container-type: inline-size;
+    container-name: composer;
   }
   .composer {
     box-sizing: border-box;
@@ -218,10 +220,12 @@
     top: 0.25rem;
     right: 0.25rem;
   }
-  .expand-control :global(button),
-  .composer-tools :global(button) {
-    min-width: 44px;
-    min-height: 44px;
+  @media (pointer: coarse) {
+    .expand-control :global(button),
+    .composer-tools :global(button) {
+      min-width: 44px;
+      min-height: 44px;
+    }
   }
   .composer-top {
     padding-right: 2.75rem;
@@ -260,16 +264,54 @@
   .tool-group {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 0.25rem;
     min-width: 0;
   }
   .composer-tools {
     justify-content: space-between;
     gap: 0.5rem;
+    overflow: visible;
+  }
+  /* Tools then the model pill on the left; only the pill shrinks. Usage and send stay whole. */
+  .tool-group:first-child {
+    flex: 1 1 auto;
+  }
+  .tool-group > :global(:not([data-composer-model])) {
+    flex-shrink: 0;
   }
   .send-tools {
+    flex: 0 0 auto;
+    justify-content: flex-end;
     margin-left: auto;
+  }
+  @container composer (max-width: 560px) {
+    .composer-tools :global([data-composer-mode-label]),
+    .composer-tools :global([data-composer-model-detail]),
+    .composer-tools :global([data-composer-capacity]) {
+      display: none;
+    }
+    .composer-tools :global([data-composer-model]) {
+      flex: 0 1 auto;
+      min-width: 4.5rem;
+      max-width: 9rem;
+      padding-inline: 2px;
+    }
+    .composer-tools {
+      gap: 2px;
+    }
+  }
+  @container composer (max-width: 400px) {
+    .composer-tools :global([data-composer-model]) {
+      max-width: 6rem;
+    }
+    .composer-tools :global([data-slot='select-trigger']) {
+      max-width: 5.5rem;
+      overflow: hidden;
+    }
+    .composer-tools :global([data-composer-model] [data-icon='inline-end']) {
+      display: none;
+    }
   }
   .composer-override {
     min-width: 0;

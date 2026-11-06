@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/svelte'
 import { describe, expect, it, vi } from 'vitest'
 import type { ModelOption, ProvidersPort } from '../ports'
-import { model, setup, send } from './test-support/chat-fixture'
+import { model, pickModel, pickerTrigger, setup, send } from './test-support/chat-fixture'
 import { providersRevision, settingsTarget } from '../providers/revision.svelte'
 import { nearestEffort } from '../providers/reasoning'
 
@@ -21,13 +21,19 @@ describe('ChatPanel toolbar and model selection', () => {
       .mockResolvedValueOnce([{ ...option, canVision: false }])
       .mockResolvedValue([{ ...option, canVision: true }])
     setup(false, null, { providers: { modelOptions } })
-    await fireEvent.click(await screen.findByLabelText('Select a model'))
-    expect(screen.queryByRole('button', { name: 'Vision' })).toBeNull()
-    await fireEvent.keyDown(screen.getByPlaceholderText('Search models…'), { key: 'Escape' })
+    const more = await screen.findByRole('button', { name: 'More tools' })
+    await fireEvent.click(more)
+    const upload = await screen.findByRole('button', { name: /^Upload attachment/ })
+    expect(upload.hasAttribute('disabled')).toBe(true)
+    await fireEvent.keyDown(upload, { key: 'Escape' })
     providersRevision.value++
     await waitFor(() => expect(modelOptions).toHaveBeenCalledTimes(2))
-    await fireEvent.click(await screen.findByLabelText('Select a model'))
-    expect(await screen.findByRole('button', { name: 'Vision' })).toBeTruthy()
+    if (!screen.queryByRole('button', { name: /^Upload attachment/ })) await fireEvent.click(more)
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /^Upload attachment/ }).hasAttribute('disabled'),
+      ).toBe(false),
+    )
   })
 
   it('keeps the chosen effort across a provider save and drops generate image once tools are unsupported', async () => {
@@ -50,7 +56,7 @@ describe('ChatPanel toolbar and model selection', () => {
       props: { paintingModel: true, toolbar: ['generate-image'] },
     })
     expect(await screen.findByText('Mine')).toBeTruthy()
-    await fireEvent.click(await screen.findByRole('button', { name: 'Reasoning effort: Default' }))
+    await fireEvent.click(await pickerTrigger())
     await fireEvent.input(await screen.findByRole('slider', { name: 'Reasoning effort' }), {
       target: { value: '1' },
     })
@@ -62,7 +68,7 @@ describe('ChatPanel toolbar and model selection', () => {
     await waitFor(() => expect(modelOptions).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(generate.hasAttribute('disabled')).toBe(true))
     expect(generate.getAttribute('aria-pressed')).toBe('false')
-    expect(screen.getByRole('button', { name: 'Reasoning effort: High' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Model and reasoning: Mine · High' })).toBeTruthy()
     await send('after save')
     expect(runs[0]?.request).toMatchObject({ reasoningEffort: 'high' })
     expect(runs[0]?.request.generateImage).toBeUndefined()
@@ -120,9 +126,13 @@ describe('ChatPanel toolbar and model selection', () => {
     const onToolbarChange = vi.fn()
     setup(false, null, { search: {}, props: { onToolbarChange } })
     const toolbarLabels = () =>
-      [...document.querySelectorAll('.composer-tools .tool-group:first-child > button')].map((b) =>
-        b.getAttribute('aria-label'),
-      )
+      screen.getAllByRole('button').flatMap((button) => {
+        const label = button.getAttribute('aria-label')
+        return label &&
+          ['New conversation', 'Web search', 'More tools', 'Upload attachment'].includes(label)
+          ? [label]
+          : []
+      })
     expect(toolbarLabels()).toEqual(['New conversation', 'Web search', 'More tools'])
     await fireEvent.click(screen.getByRole('button', { name: 'More tools' }))
     expect(await screen.findByRole('button', { name: /^Upload attachment/ })).toBeTruthy()
@@ -173,28 +183,25 @@ describe('ChatPanel toolbar and model selection', () => {
           ]),
       },
     })
-    const effort = await screen.findByRole('button', { name: 'Reasoning effort: Default' })
-    await fireEvent.click(effort)
-    expect(await screen.findByLabelText('High')).toBeTruthy()
-    expect(screen.queryByLabelText('Medium')).toBeNull()
+    const trigger = await screen.findByRole('button', { name: 'Model and reasoning: m1 · Default' })
+    await fireEvent.click(trigger)
+    const high = await screen.findByRole('radio', { name: 'Reasoning effort High' })
+    expect(screen.queryByRole('radio', { name: 'Reasoning effort Medium' })).toBeNull()
     expect(screen.queryByRole('slider')).toBeNull()
-    expect((screen.getByLabelText('Default') as HTMLInputElement).checked).toBe(true)
+    expect(high.getAttribute('aria-checked')).toBe('false')
     await send('default request')
     expect(runs[0]?.request.reasoningEffort).toBe('default')
-    await waitFor(() => expect(effort.hasAttribute('disabled')).toBe(true))
-    expect((screen.getByLabelText('High') as HTMLInputElement).matches(':disabled')).toBe(true)
+    await waitFor(() => expect(trigger.hasAttribute('disabled')).toBe(true))
+    expect(high.matches(':disabled')).toBe(true)
     runs[0]?.emit({ kind: 'end', status: 'completed' })
-    await waitFor(() => expect(effort.hasAttribute('disabled')).toBe(false))
-    await fireEvent.click(screen.getByLabelText('High'))
+    await waitFor(() => expect(trigger.hasAttribute('disabled')).toBe(false))
+    await fireEvent.click(screen.getByRole('radio', { name: 'Reasoning effort High' }))
     await send('explicit request')
     expect(runs[1]?.request.reasoningEffort).toBe('high')
     runs[1]?.emit({ kind: 'end', status: 'completed' })
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Reset to default' }).hasAttribute('disabled'),
-      ).toBe(false),
-    )
-    await fireEvent.click(screen.getByRole('button', { name: 'Reset to default' }))
+    const reset = await screen.findByRole('button', { name: 'Reset to default' })
+    await waitFor(() => expect(reset.hasAttribute('disabled')).toBe(false))
+    await fireEvent.click(reset)
     await send('reset request')
     expect(runs[2]?.request.reasoningEffort).toBe('default')
   })
@@ -242,7 +249,7 @@ describe('ChatPanel toolbar and model selection', () => {
           ]),
       },
     })
-    const trigger = await screen.findByRole('button', { name: 'Reasoning effort: Default' })
+    const trigger = await screen.findByRole('button', { name: 'Model and reasoning: m1 · Default' })
     await fireEvent.click(trigger)
     let slider = (await screen.findByRole('slider', {
       name: 'Reasoning effort',
@@ -271,27 +278,29 @@ describe('ChatPanel toolbar and model selection', () => {
     await fireEvent.keyDown(slider, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('slider')).toBeNull())
     expect(onReasoningEffortChange).toHaveBeenLastCalledWith('high')
-    const models = screen.getByLabelText('Select a model')
-    const pick = async (name: RegExp) => {
-      await fireEvent.click(models)
-      await fireEvent.click(await screen.findByRole('option', { name }))
-    }
+    const pick = (id: string) => pickModel(id, new RegExp(`^Select ${id} `))
     // The saved choice follows the model: kept where allowed, dropped where unsupported, restored on return.
-    await pick(/m2/)
-    expect(await screen.findByRole('button', { name: 'Reasoning effort: High' })).toBeTruthy()
+    await pick('m2')
+    expect(
+      await screen.findByRole('button', { name: 'Model and reasoning: m2 · High' }),
+    ).toBeTruthy()
     await send('changed model')
     expect(runs[4]?.request).toMatchObject({
       model: { endpointId: model.endpointId, modelId: 'm2' },
       reasoningEffort: 'high',
     })
     runs[4]?.emit({ kind: 'end', status: 'completed' })
-    await pick(/m3/)
-    expect(await screen.findByRole('button', { name: 'Reasoning effort: Default' })).toBeTruthy()
+    await pick('m3')
+    expect(
+      await screen.findByRole('button', { name: 'Model and reasoning: m3 · Default' }),
+    ).toBeTruthy()
     await send('no reasoning')
     expect(runs[5]?.request.reasoningEffort).toBe('default')
     runs[5]?.emit({ kind: 'end', status: 'completed' })
-    await pick(/m1/)
-    expect(await screen.findByRole('button', { name: 'Reasoning effort: High' })).toBeTruthy()
+    await pick('m1')
+    expect(
+      await screen.findByRole('button', { name: 'Model and reasoning: m1 · High' }),
+    ).toBeTruthy()
   })
 
   it('falls back to the nearest allowed effort, preferring the higher one on a tie', () => {
@@ -321,12 +330,14 @@ describe('ChatPanel toolbar and model selection', () => {
           ]),
       },
     })
-    expect(await screen.findByRole('button', { name: 'Reasoning effort: Low' })).toBeTruthy()
+    expect(
+      await screen.findByRole('button', { name: 'Model and reasoning: m1 · Low' }),
+    ).toBeTruthy()
     await send('restored')
     expect(runs[0]?.request.reasoningEffort).toBe('low')
   })
 
-  it('groups models by provider, searches, filters by capability and links to settings', async () => {
+  it('groups models by provider, folds groups, and searches with an effort suffix', async () => {
     const onOpenSettings = vi.fn()
     const onClose = vi.fn()
     const base = {
@@ -354,45 +365,36 @@ describe('ChatPanel toolbar and model selection', () => {
           ]),
       },
     })
-    await fireEvent.click(await screen.findByLabelText('Select a model'))
-    expect(await screen.findByText('Local · main')).toBeTruthy()
-    expect(screen.getByText('Cloud · x')).toBeTruthy()
-    expect(screen.getAllByRole('option')).toHaveLength(2)
-    await fireEvent.input(screen.getByPlaceholderText('Search models…'), {
-      target: { value: 'cloud' },
-    })
+    await fireEvent.click(await pickerTrigger())
+    const cloud = await screen.findByRole('button', { name: 'Model group Cloud, collapsed' })
+    expect(screen.getByRole('button', { name: 'Model group Local, expanded' })).toBeTruthy()
+    expect(screen.getAllByRole('option').map((o) => o.getAttribute('aria-label'))).toEqual([
+      'Select m1 · Local',
+    ])
+    await fireEvent.click(cloud)
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2))
+    const search = screen.getByLabelText('Search models, optionally with a level')
+    await fireEvent.input(search, { target: { value: 'cloud' } })
     await waitFor(() =>
-      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
-        expect.stringContaining('m2'),
+      expect(screen.getAllByRole('option').map((o) => o.getAttribute('aria-label'))).toEqual([
+        'Select m2 · Cloud',
       ]),
     )
-    await fireEvent.keyDown(screen.getByPlaceholderText('Search models…'), { key: 'Escape' })
+    // A trailing level only keeps models that declare it.
+    await fireEvent.input(search, { target: { value: 'm high' } })
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(1))
+    await fireEvent.input(search, { target: { value: 'm1 high' } })
+    expect(await screen.findByText('No matching models')).toBeTruthy()
+    await fireEvent.keyDown(search, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('option')).toBeNull())
     expect(onClose).not.toHaveBeenCalled()
-    await fireEvent.click(screen.getByLabelText('Select a model'))
-    await screen.findAllByRole('option')
-    await fireEvent.click(screen.getByRole('button', { name: 'Vision' }))
-    await waitFor(() =>
-      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
-        expect.stringContaining('m2'),
-      ]),
-    )
-    await fireEvent.click(screen.getByRole('button', { name: 'Vision' }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Tools' }))
-    await waitFor(() =>
-      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
-        expect.stringContaining('m1'),
-      ]),
-    )
-    await fireEvent.click(screen.getByRole('button', { name: 'Configure models' }))
-    expect(onOpenSettings).toHaveBeenCalledOnce()
-    await waitFor(() => expect(screen.queryByRole('option')).toBeNull())
+    expect(onOpenSettings).not.toHaveBeenCalled()
   })
 
   it('keeps reasoning discoverable without sending unsupported efforts', async () => {
     const onOpenSettings = vi.fn()
     const { runs } = setup(false, null, { props: { onOpenSettings } })
-    await fireEvent.click(await screen.findByRole('button', { name: 'Reasoning effort: Default' }))
+    await fireEvent.click(await pickerTrigger())
     expect(await screen.findByText(/No reasoning capabilities are configured/)).toBeTruthy()
     expect(screen.queryByRole('slider')).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))

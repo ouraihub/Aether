@@ -9,17 +9,17 @@
     ModelOption,
     ModelRef,
     PermissionMode,
-    ReasoningEffort,
     SkillRef,
     SkillsPort,
   } from '../ports'
-  import { settingsTarget } from '../providers/revision.svelte'
   import ChatComposer from './ChatComposer.svelte'
   import ChatPanelMode from './ChatPanelMode.svelte'
   import ChatPanelToolbar from './ChatPanelToolbar.svelte'
-  import ReasoningControl from './ReasoningControl.svelte'
+  import ModelEffortPicker from './ModelEffortPicker.svelte'
   import SkillPicker from './SkillPicker.svelte'
   import UsageDetails from './UsageDetails.svelte'
+  import type { PickerModel, PickerValue } from './model-effort'
+  import { settingsTarget } from '../providers/revision.svelte'
   import type { RunSession } from './run-session.svelte'
 
   type Attached = ImagePart & { preview: string }
@@ -62,10 +62,16 @@
     mode,
     allowedModes,
     chooseMode,
-    reasoningEffort,
-    allowedEfforts,
     reasoningOpen = $bindable(false),
-    chooseEffort,
+    pickerModels,
+    pickerValue,
+    pickerDefault,
+    pickerRefreshing,
+    pickerNotice,
+    pickerDisabled,
+    onPick,
+    onSetDefault,
+    onRefresh,
     currentContext,
     picked,
     onOpenSettings,
@@ -105,10 +111,16 @@
     mode: PermissionMode
     allowedModes: PermissionMode[]
     chooseMode: (mode: PermissionMode) => Promise<void>
-    reasoningEffort: ReasoningEffort
-    allowedEfforts: ReasoningEffort[]
     reasoningOpen?: boolean
-    chooseEffort: (effort: ReasoningEffort) => void
+    pickerModels: PickerModel[]
+    pickerValue: PickerValue | null
+    pickerDefault: PickerValue | null
+    pickerRefreshing: boolean
+    pickerNotice: string
+    pickerDisabled: boolean
+    onPick: (value: PickerValue) => void
+    onSetDefault?: ((value: PickerValue) => void) | undefined
+    onRefresh: (force: boolean) => void
     currentContext: ContextUsage | null
     picked: ModelRef | null
     onOpenSettings?: (() => void) | undefined
@@ -217,28 +229,35 @@
           onresolved={onSkillResolved}
         />
       </div>{/if}
+    <ModelEffortPicker
+      models={pickerModels}
+      value={pickerValue}
+      defaultValue={pickerDefault}
+      disabled={session.running || pickerDisabled}
+      refreshing={pickerRefreshing}
+      notice={pickerNotice}
+      {i18n}
+      bind:open={reasoningOpen}
+      onselect={onPick}
+      onsetdefault={onSetDefault}
+      onrefresh={onRefresh}
+      onopensettings={onOpenSettings && picked
+        ? () => {
+            settingsTarget.value = { endpointId: picked.endpointId, modelId: picked.modelId }
+            onOpenSettings()
+          }
+        : undefined}
+    />
   {/snippet}
   {#snippet actions()}
-    <ChatPanelMode {i18n} {mode} {allowedModes} running={session.running} {chooseMode} />
-    {#if picked}
-      <ReasoningControl
-        value={reasoningEffort}
-        efforts={allowedEfforts}
-        disabled={session.running}
-        bind:open={reasoningOpen}
-        {i18n}
-        onchange={chooseEffort}
-        onOpenSettings={onOpenSettings
-          ? () => {
-              settingsTarget.value = { endpointId: picked.endpointId, modelId: picked.modelId }
-              onOpenSettings()
-            }
-          : undefined}
-      />
+    {#if purpose !== 'chat'}
+      <ChatPanelMode {i18n} {mode} {allowedModes} running={session.running} {chooseMode} />
     {/if}
     <UsageDetails
       context={currentContext}
+      contextWindow={pickerModels.find((model) => model.key === pickerValue?.key)?.contextWindow}
       modelName={capability?.name ?? capability?.modelId ?? ''}
+      turns={session.turns}
       usage={session.turns.at(-1)?.usage ?? null}
       total={session.cumulativeUsage}
       cost={session.turns.at(-1)?.cost ?? null}

@@ -83,7 +83,9 @@ describe('ChatPanel runs', () => {
       usage: { tokens: 150, contextWindow: 1000, source: 'reported', ...model },
     })
     runs[0]?.emit({ kind: 'end', status: 'completed' })
-    await fireEvent.click(screen.getByRole('button', { name: 'Usage and settings' }))
+    await fireEvent.click(
+      screen.getByRole('button', { name: /context usage: .*View usage details/ }),
+    )
     await waitFor(() => expect(screen.getByRole('meter').getAttribute('value')).toBe('15'))
     await fireEvent.click(screen.getByText('Token usage', { selector: 'summary' }))
     await send('second')

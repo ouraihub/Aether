@@ -1,22 +1,31 @@
 <script lang="ts">
   import type { ContextUsage, Cost, TokenUsage } from '../ports'
   import { getKitContext } from '../context'
-  import UsageControl from './UsageControl.svelte'
+  import ContextUsageStatus from './ContextUsageStatus.svelte'
+  import type { SpendingTurn } from './context-status'
   interface Props {
     context: ContextUsage | null
+    /** Selected model's window when the usage report has none. */
+    contextWindow?: number | null | undefined
+    /** Every turn's usage and cost; the inline summary prices only fully priced sessions. */
+    turns: readonly SpendingTurn[]
     usage: TokenUsage | null
     total: TokenUsage
     /** Last turn's cost; null when its model has no pricing or a round lacked token counts. */
     cost: Cost | null
     /** Session total per currency. */
     totalCost: Cost[]
+    open?: boolean
   }
   let {
     context,
+    contextWindow = null,
+    turns,
     usage,
     total,
     cost,
     totalCost,
+    open = $bindable(false),
     modelName = '',
   }: Props & { modelName?: string } = $props()
   const { i18n } = getKitContext()
@@ -32,7 +41,14 @@
     `${currency === 'CNY' ? '¥' : '$'}${amount.toFixed(4)}`
 </script>
 
-<UsageControl context={context ? { ...context, modelName } : null} {i18n}>
+<ContextUsageStatus
+  bind:open
+  {context}
+  contextWindow={contextWindow ?? null}
+  {turns}
+  {modelName}
+  {i18n}
+>
   {#snippet details()}
     <table>
       <thead
@@ -56,7 +72,7 @@
     </table>
     <p>{t('chat.usageHint')}</p>
   {/snippet}
-</UsageControl>
+</ContextUsageStatus>
 
 <style>
   p {
