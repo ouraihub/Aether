@@ -10,6 +10,8 @@
     i18n,
     settings,
     details,
+    summary,
+    summaryLabel,
     open = $bindable(false),
   }: {
     context?: {
@@ -21,6 +23,9 @@
     i18n: KitI18n
     settings?: Snippet | undefined
     details?: Snippet | undefined
+    /** Replaces the icon with inline content; the popover, focus return and meter stay shared. */
+    summary?: Snippet | undefined
+    summaryLabel?: string | undefined
     open?: boolean
   } = $props()
   const t = (key: string) => i18n.t(key)
@@ -41,11 +46,12 @@
         {...props}
         bind:ref={trigger}
         variant="ghost"
-        size="icon-sm"
-        aria-label={t('chat.usageSettings')}
-        title={t('chat.usageSettings')}
+        size={summary ? 'sm' : 'icon-sm'}
+        class={summary ? 'min-w-0 max-w-full shrink px-1' : undefined}
+        aria-label={summary ? (summaryLabel ?? t('chat.contextUsage')) : t('chat.usageSettings')}
+        title={summary ? undefined : t('chat.usageSettings')}
       >
-        <Settings2Icon aria-hidden="true" />
+        {#if summary}{@render summary()}{:else}<Settings2Icon aria-hidden="true" />{/if}
       </Button>
     {/snippet}
   </Popover.Trigger>
@@ -106,7 +112,8 @@
 
 <style>
   /* Hallmark · component: usage-settings · theme: inherited Aether
-   * Pre-emit critique: Philosophy 5 · Hierarchy 5 · Execution 4 · Specificity 5 · Restraint 5 · Variety 4 */
+   * Pre-emit critique: Philosophy 5 · Hierarchy 5 · Execution 4 · Specificity 5
+   * · Restraint 5 · Variety 4 */
   :global(.usage-popover) {
     box-sizing: border-box;
     z-index: 210;

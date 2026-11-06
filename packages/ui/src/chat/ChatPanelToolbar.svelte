@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { Popover } from 'bits-ui'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import GlobeIcon from '@lucide/svelte/icons/globe'
@@ -55,7 +55,17 @@
   const DEFAULT_TOOLBAR = ['new-conversation', 'web-search']
   // svelte-ignore state_referenced_locally
   let pinned = $state<string[]>(toolbar ?? DEFAULT_TOOLBAR)
-  const visiblePinned = $derived(pinned.filter((id) => tools.includes(id)))
+  let compact = $state(false)
+  const visiblePinned = $derived(compact ? [] : pinned.filter((id) => tools.includes(id)))
+  onMount(() => {
+    const shell = fileInput?.closest('.composer-shell')
+    if (!shell) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry && entry.contentRect.width > 0) compact = entry.contentRect.width < 400
+    })
+    observer.observe(shell)
+    return () => observer.disconnect()
+  })
   /** Tools usable here; unavailable pinned ids stay stored but hidden (docs/38 §3.2). */
   const tools = $derived(
     ['new-conversation', 'web-search', 'attachment', 'generate-image'].filter(
@@ -286,7 +296,8 @@
     </Popover.Content>
   </Popover.Portal>
 </Popover.Root>
-{#if generateImage && paintingModel && purpose === 'chat' && !pinned.includes('generate-image')}<Button
+{#if generateImage && paintingModel && purpose === 'chat' && !pinned.includes('generate-image')}
+  <Button
     type="button"
     variant="secondary"
     size="sm"

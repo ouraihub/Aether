@@ -5,7 +5,6 @@
     isKitClientError,
     type ModelRef,
     type SkillRef,
-    type ModelOption,
     type ReasoningEffort,
     type PermissionMode,
   } from '../ports'
@@ -21,6 +20,8 @@
   import ChatPanelComposer from './ChatPanelComposer.svelte'
   import ChatPanelDialogs from './ChatPanelDialogs.svelte'
   import type { ChatPanelProps } from './chat-panel-props'
+  import { ChatPanelModels } from './chat-panel-models.svelte'
+  import { modelKey, type PickerValue } from './model-effort'
 
   let {
     purpose = 'chat',
@@ -42,6 +43,9 @@
     onToolbarChange,
     reasoningEffort: reasoningEffortProp,
     onReasoningEffortChange,
+    defaultModel = null,
+    defaultReasoningEffort = 'default',
+    onDefaultModelChange,
     permissionModes = ['default', 'plan', 'accept_edits'],
     permissionMode = $bindable('default'),
   }: ChatPanelProps = $props()
@@ -52,15 +56,18 @@
   const session = ports.chat ? new RunSession(ports.chat, history) : null
   // svelte-ignore state_referenced_locally
   let picked = $state<ModelRef | null>(model)
-  let modelOptions = $state<ModelOption[] | null>(null)
-  let modelError = $state<string | null>(null)
-  let modelReload = $state(0)
+  const errorText = (error: unknown) =>
+    t(`errors.${isKitClientError(error) ? error.code : 'internal'}`)
+  const models = new ChatPanelModels(ports.providers, i18n, errorText)
+  const modelOptions = $derived(models.options)
+  const modelError = $derived(models.error)
   const capability = $derived(
     modelOptions?.find(
       (item) => item.endpointId === picked?.endpointId && item.modelId === picked?.modelId,
     ) ?? null,
   )
-  // The saved choice survives model switches; each model sends its nearest allowed effort (docs/28 RT3).
+  // The saved choice survives model switches; each model sends its nearest allowed effort
+  // (docs/28 RT3).
   // svelte-ignore state_referenced_locally
   let chosenEffort = $state<ReasoningEffort>(reasoningEffortProp ?? 'default')
   const allowedEfforts = $derived(
@@ -111,29 +118,10 @@
   }
   let reasoningOpen = $state(false)
   const noModels = $derived(modelOptions !== null && modelOptions.length === 0)
-  const errorText = (error: unknown) =>
-    t(`errors.${isKitClientError(error) ? error.code : 'internal'}`)
   $effect(() => {
-    void modelReload
+    // A provider save swaps options in place: nulling them would reset the chosen effort.
     void providersRevision.value
-    let alive = true
-    // A provider save swaps options in place: nulling them would reset the chosen effort (docs/41 §3.5).
-    modelError = null
-    if (!ports.providers) {
-      modelOptions = []
-      return
-    }
-    void ports.providers.modelOptions({ modelType: 'chat' }).then(
-      (list) => {
-        if (alive) modelOptions = list
-      },
-      (error: unknown) => {
-        if (alive) modelError = errorText(error)
-      },
-    )
-    return () => {
-      alive = false
-    }
+    untrack(() => void models.load())
   })
   $effect(() => {
     // A model that turns out not to take tools cannot keep a pending generate_image request.
@@ -142,6 +130,20 @@
   function pickModel(next: ModelRef) {
     picked = next
     session?.resetContext()
+  }
+  const pickerValue = $derived(
+    picked ? { key: modelKey(picked.endpointId, picked.modelId), effort: reasoningEffort } : null,
+  )
+  const pickerDefault = $derived(
+    defaultModel
+      ? {
+          key: modelKey(defaultModel.endpointId, defaultModel.modelId),
+          effort: defaultReasoningEffort,
+        }
+      : null,
+  )
+  function pickValue(value: PickerValue) {
+    if (!session?.running) models.select(value, picked, chosenEffort, pickModel, chooseEffort)
   }
 
   let draft = $state('')
@@ -170,7 +172,8 @@
     generateImage: purpose === 'chat' && generateImage && paintingModel,
     context: activeContext ? { kind: activeContext.kind, id: activeContext.id } : null,
   })
-  // Consume before awaiting run acceptance, including retries and translations. Never persist full access.
+  // Consume before awaiting run acceptance, including retries and translations.
+  // Never persist full access.
   function consumeBase() {
     const request = { ...base }
     fullAccess = false
@@ -337,7 +340,11 @@
 
 {#if session}
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions (Esc bubbles from controls) -->
-  <section class="chat-panel" aria-label={t('chat.title')} {onkeydown}>
+  <section
+    class="flex min-h-0 min-w-0 flex-1 flex-col gap-3 h-full [container-type:size]"
+    aria-label={t('chat.title')}
+    {onkeydown}
+  >
     <ChatSurface
       label={t('chat.title')}
       messagesLabel={t('chat.messages')}
@@ -354,17 +361,12 @@
           historyBusy={historyState.historyBusy}
           historyOpen={historyState.historyOpen}
           historyError={historyState.historyError}
-          {modelOptions}
-          {modelError}
           onHistory={() => {
             historyState.historyOpen = true
             void historyState.refresh()
           }}
           {onClose}
           onRetryHistory={() => void historyState.retryHistory()}
-          {picked}
-          onPickModel={pickModel}
-          {onOpenSettings}
         />
       {/snippet}
       <ChatPanelMessages
@@ -379,7 +381,7 @@
         {modelError}
         {capability}
         {noModels}
-        onRetryModels={() => modelReload++}
+        onRetryModels={() => void models.load()}
         {onOpenSettings}
         {onInsert}
         {onSaveNote}
@@ -432,10 +434,18 @@
           {mode}
           {allowedModes}
           {chooseMode}
-          {reasoningEffort}
-          {allowedEfforts}
           bind:reasoningOpen
-          {chooseEffort}
+          pickerModels={models.picker}
+          {pickerValue}
+          {pickerDefault}
+          pickerRefreshing={models.refreshing}
+          pickerNotice={models.notice}
+          pickerDisabled={modelError !== null}
+          onPick={pickValue}
+          onSetDefault={onDefaultModelChange
+            ? (value) => void models.saveDefault(value, onDefaultModelChange)
+            : undefined}
+          onRefresh={(force) => void models.load(force)}
           {currentContext}
           {picked}
           {onOpenSettings}
@@ -469,7 +479,7 @@
       {noModels}
       validReplyModel={historyState.validReplyModel}
       submitReply={historyState.submitReply}
-      reloadModels={() => modelReload++}
+      reloadModels={() => void models.load()}
       bind:historyOpen={historyState.historyOpen}
       bind:renaming={historyState.renaming}
       bind:renameTitle={historyState.renameTitle}
@@ -481,16 +491,3 @@
     />
   </section>
 {/if}
-
-<style>
-  .chat-panel {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: 0.75rem;
-    min-width: 0;
-    min-height: 0;
-    height: 100%;
-    container-type: size;
-  }
-</style>

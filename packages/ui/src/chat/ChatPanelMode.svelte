@@ -38,9 +38,9 @@
           size="sm"
           class={mode === 'full_access' ? 'mode-danger' : undefined}
           aria-label={`${t('chat.mode.label')}: ${t(`chat.mode.${mode}`)}`}
-          ><ShieldIcon data-icon="inline-start" />{t(`chat.mode.${mode}`)}<ChevronDownIcon
-            data-icon="inline-end"
-          /></Button
+          ><ShieldIcon data-icon="inline-start" /><span data-composer-mode-label>
+            {t(`chat.mode.${mode}`)}</span
+          ><ChevronDownIcon data-composer-mode-label data-icon="inline-end" /></Button
         >{/snippet}
     </DropdownMenu.Trigger>
     <DropdownMenu.Content side="top" align="end" class="mode-menu">

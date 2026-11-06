@@ -176,3 +176,19 @@ export async function send(text: string) {
   await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false))
   await fireEvent.click(button)
 }
+
+const SEARCH = 'Search models, optionally with a level'
+
+/** The composer model/effort pill; its name carries the current model and effort. */
+export const pickerTrigger = () => screen.findByRole('button', { name: /^Model and reasoning:/ })
+
+/** Opens the picker, searches so every group unfolds, picks a row, then closes it like a user. */
+export async function pickModel(search: string, name: RegExp) {
+  const trigger = await pickerTrigger()
+  if (trigger.getAttribute('aria-expanded') !== 'true') await fireEvent.click(trigger)
+  const input = await screen.findByLabelText(SEARCH)
+  await fireEvent.input(input, { target: { value: search } })
+  await fireEvent.click(await screen.findByRole('option', { name }))
+  await fireEvent.keyDown(input, { key: 'Escape' })
+  await waitFor(() => expect(screen.queryByLabelText(SEARCH)).toBeNull())
+}

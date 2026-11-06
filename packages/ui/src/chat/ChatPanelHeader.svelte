@@ -4,8 +4,7 @@
   import { Button } from '#lib/components/ui/button/index.js'
   import * as Alert from '#lib/components/ui/alert/index.js'
   import type { KitI18n } from '../i18n'
-  import type { ConversationClient, ModelOption, ModelRef } from '../ports'
-  import ModelSelect from '../providers/ModelSelect.svelte'
+  import type { ConversationClient } from '../ports'
   import type { RunSession } from './run-session.svelte'
 
   let {
@@ -16,14 +15,9 @@
     historyBusy,
     historyOpen,
     historyError,
-    modelOptions,
-    modelError,
     onHistory,
     onClose,
     onRetryHistory,
-    picked,
-    onPickModel,
-    onOpenSettings,
   }: {
     i18n: KitI18n
     title: string
@@ -32,14 +26,9 @@
     historyBusy: boolean
     historyOpen: boolean
     historyError: string | null
-    modelOptions: ModelOption[] | null
-    modelError: string | null
     onHistory: () => void
     onClose?: (() => void) | undefined
     onRetryHistory: () => void
-    picked: ModelRef | null
-    onPickModel: (model: ModelRef) => void
-    onOpenSettings?: (() => void) | undefined
   } = $props()
   const t = $derived(i18n.t)
 </script>
@@ -62,16 +51,6 @@
         title={t('chat.close')}
         onclick={onClose}><XIcon /></Button
       >{/if}
-  </div>
-  <div class="model-row">
-    <ModelSelect
-      value={picked}
-      options={modelOptions}
-      filter={{ modelType: 'chat' }}
-      disabled={session.running || modelError !== null}
-      onchange={onPickModel}
-      {...onOpenSettings ? { onOpenSettings } : {}}
-    />
   </div>
 </header>
 {#if historyError && !historyOpen}
@@ -125,8 +104,5 @@
   }
   .title-row :global(button) {
     flex-shrink: 0;
-  }
-  .model-row {
-    min-width: 0;
   }
 </style>

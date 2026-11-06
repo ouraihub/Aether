@@ -26,6 +26,12 @@ export interface ChatPanelProps {
   /** Saved preference mapped to the selected model's nearest supported effort. */
   reasoningEffort?: ReasoningEffort
   onReasoningEffortChange?: (effort: ReasoningEffort) => void
+  /** Host default for new conversations; enables「设为默认」when `onDefaultModelChange` is set. */
+  defaultModel?: ModelRef | null
+  /** Saved default effort, independent of the current session choice. */
+  defaultReasoningEffort?: ReasoningEffort
+  /** The host persists the default model and effort; the picker never writes storage itself. */
+  onDefaultModelChange?: (model: ModelRef, effort: ReasoningEffort) => Promise<void> | void
   permissionModes?: PermissionMode[]
   /** Full access stays private and is consumed once, never saved as a preference. */
   permissionMode?: PermissionMode
