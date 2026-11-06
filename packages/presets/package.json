@@ -1,6 +1,6 @@
 {
   "name": "@ouraihub/aether-presets",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "LGPL-3.0-only",
   "repository": {
     "type": "git",
@@ -14,7 +14,7 @@
     "./international": "./src/international.ts"
   },
   "peerDependencies": {
-    "@ouraihub/aether-ui": "^0.1.1"
+    "@ouraihub/aether-ui": "^0.1.2"
   },
   "devDependencies": {
     "@ouraihub/aether-ui": "workspace:*"
