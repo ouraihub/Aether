@@ -145,87 +145,89 @@
           {/if}
         {/snippet}
       </Popover.Trigger>
-      <Popover.Content
-        class="model-popover"
-        side="bottom"
-        align="start"
-        sideOffset={4}
-        collisionPadding={8}
-        onEscapeKeydown={(event) => {
-          if (event.isComposing) event.preventDefault()
-        }}
-      >
-        <Command.Root
-          bind:value={highlighted}
-          filter={match}
-          label={t('providers.model_placeholder')}
+      <Popover.Portal>
+        <Popover.Content
+          class="model-popover"
+          side="bottom"
+          align="start"
+          sideOffset={4}
+          collisionPadding={8}
+          onEscapeKeydown={(event) => {
+            if (event.isComposing) event.preventDefault()
+          }}
         >
-          <div class="model-search">
-            <SearchIcon class="model-search-icon" />
-            <Command.Input class="model-search-input" placeholder={t('providers.model_search')} />
-          </div>
-          {#if caps.length > 0}
-            <div class="model-caps">
-              {#each caps as c (c.cap)}
-                <button
-                  type="button"
-                  class="cap-chip cap-{c.cap}"
-                  aria-pressed={active.includes(c.cap)}
-                  onclick={() =>
-                    (active = active.includes(c.cap)
-                      ? active.filter((x) => x !== c.cap)
-                      : [...active, c.cap])}><c.icon />{t(`providers.cap_${c.cap}`)}</button
-                >
-              {/each}
+          <Command.Root
+            bind:value={highlighted}
+            filter={match}
+            label={t('providers.model_placeholder')}
+          >
+            <div class="model-search">
+              <SearchIcon class="model-search-icon" />
+              <Command.Input class="model-search-input" placeholder={t('providers.model_search')} />
             </div>
-          {/if}
-          <Command.List class="model-list" aria-label={t('providers.model_placeholder')}>
-            <Command.Empty class="model-empty">{t('providers.model_no_match')}</Command.Empty>
-            {#each groups as [name, items] (name)}
-              <Command.Group value={`group\n${name}`}>
-                <Command.GroupHeading class="model-heading">{name}</Command.GroupHeading>
-                <Command.GroupItems>
-                  {#each items as option (key(option))}
-                    <Command.Item
-                      class="model-item"
-                      value={key(option)}
-                      keywords={[option.modelId, option.name ?? '', name]}
-                      aria-current={value !== null && key(option) === key(value)
-                        ? 'true'
-                        : undefined}
-                      onSelect={() => pick(option)}
-                    >
-                      <span class="model-avatar" aria-hidden="true"
-                        >{(option.name ?? option.modelId).charAt(0).toUpperCase()}</span
+            {#if caps.length > 0}
+              <div class="model-caps">
+                {#each caps as c (c.cap)}
+                  <button
+                    type="button"
+                    class="cap-chip cap-{c.cap}"
+                    aria-pressed={active.includes(c.cap)}
+                    onclick={() =>
+                      (active = active.includes(c.cap)
+                        ? active.filter((x) => x !== c.cap)
+                        : [...active, c.cap])}><c.icon />{t(`providers.cap_${c.cap}`)}</button
+                  >
+                {/each}
+              </div>
+            {/if}
+            <Command.List class="model-list" aria-label={t('providers.model_placeholder')}>
+              <Command.Empty class="model-empty">{t('providers.model_no_match')}</Command.Empty>
+              {#each groups as [name, items] (name)}
+                <Command.Group value={`group\n${name}`}>
+                  <Command.GroupHeading class="model-heading">{name}</Command.GroupHeading>
+                  <Command.GroupItems>
+                    {#each items as option (key(option))}
+                      <Command.Item
+                        class="model-item"
+                        value={key(option)}
+                        keywords={[option.modelId, option.name ?? '', name]}
+                        aria-current={value !== null && key(option) === key(value)
+                          ? 'true'
+                          : undefined}
+                        onSelect={() => pick(option)}
                       >
-                      <span class="model-name" title={option.label}
-                        >{option.name ?? option.modelId}</span
-                      >
-                      <span class="model-tags">
-                        {#each CAPS.filter((c) => c.has(option)) as c (c.cap)}
-                          <span class="cap-tag cap-{c.cap}" title={t(`providers.cap_${c.cap}`)}
-                            ><c.icon aria-label={t(`providers.cap_${c.cap}`)} /></span
-                          >
-                        {/each}
-                      </span>
-                    </Command.Item>
-                  {/each}
-                </Command.GroupItems>
-              </Command.Group>
-            {/each}
-          </Command.List>
-          {#if onOpenSettings}
-            <button
-              type="button"
-              class="model-footer"
-              onclick={() => {
-                open = false
-                onOpenSettings()
-              }}><Settings2Icon />{t('providers.model_configure')}</button
-            >
-          {/if}
-        </Command.Root>
-      </Popover.Content>
+                        <span class="model-avatar" aria-hidden="true"
+                          >{(option.name ?? option.modelId).charAt(0).toUpperCase()}</span
+                        >
+                        <span class="model-name" title={option.label}
+                          >{option.name ?? option.modelId}</span
+                        >
+                        <span class="model-tags">
+                          {#each CAPS.filter((c) => c.has(option)) as c (c.cap)}
+                            <span class="cap-tag cap-{c.cap}" title={t(`providers.cap_${c.cap}`)}
+                              ><c.icon aria-label={t(`providers.cap_${c.cap}`)} /></span
+                            >
+                          {/each}
+                        </span>
+                      </Command.Item>
+                    {/each}
+                  </Command.GroupItems>
+                </Command.Group>
+              {/each}
+            </Command.List>
+            {#if onOpenSettings}
+              <button
+                type="button"
+                class="model-footer"
+                onclick={() => {
+                  open = false
+                  onOpenSettings()
+                }}><Settings2Icon />{t('providers.model_configure')}</button
+              >
+            {/if}
+          </Command.Root>
+        </Popover.Content>
+      </Popover.Portal>
     </Popover.Root>
   {/if}
 {/if}
@@ -270,7 +272,7 @@
     opacity: 0.6;
   }
   :global(.model-popover) {
-    z-index: 50;
+    z-index: 310;
     box-sizing: border-box;
     width: min(25rem, calc(100vw - 1rem));
     display: flex;
